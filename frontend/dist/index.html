@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <title>SituLab</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Splash d'ouverture (motif terminal) -->
+  <section id="boot" class="boot" aria-hidden="true">
+    <div class="boot-inner">
+      <img src="logo.svg" class="boot-logo" alt="" />
+      <pre class="boot-term"><span class="bp">$</span> situlab <span class="barg">--connect</span>
+<span class="brl"></span> SituLab<span class="bcur"></span></pre>
+    </div>
+  </section>
+
+  <!-- Écran de connexion / onboarding -->
+  <section id="onboarding" class="onboarding hidden">
+    <div class="connect-card" id="welcome-card" hidden>
+      <img src="logo.svg" class="connect-logo" alt="" />
+      <h1>Bienvenue dans SituLab</h1>
+      <p class="sub">En trois petites étapes, vous êtes prêt :</p>
+      <ol class="welcome-steps">
+        <li><span class="ws-n">1</span><div><b>Choisir un PIN</b><br><span class="muted">6 chiffres qui protègent vos accès. Il reste sur ce poste.</span></div></li>
+        <li><span class="ws-n">2</span><div><b>Connecter votre serveur Forgejo</b><br><span class="muted">Une seule fois. Ensuite, votre PIN suffit.</span></div></li>
+        <li><span class="ws-n">3</span><div><b>Visite guidée</b><br><span class="muted">Un tour rapide pour prendre vos marques.</span></div></li>
+      </ol>
+      <button type="button" class="btn btn-primary" id="welcome-start">Commencer</button>
+    </div>
+    <div class="connect-card" id="connect-card">
+      <img src="logo.svg" class="connect-logo" alt="" />
+      <h1>SituLab</h1>
+      <div class="stepper" id="stepper" hidden>
+        <span class="step" id="step-1"><span class="step-n">1</span> PIN</span>
+        <span class="step-sep" aria-hidden="true"></span>
+        <span class="step" id="step-2"><span class="step-n">2</span> Connexion</span>
+      </div>
+
+      <!-- Étape 1 : PIN seul -->
+      <div id="panel-pin" class="ob-panel" hidden>
+        <p class="sub">Choisissez un PIN (6 chiffres).</p>
+        <label>Votre PIN</label>
+        <div id="f-pin"></div>
+        <label>Confirmez le PIN</label>
+        <div id="f-pin2"></div>
+        <small>Un PIN que vous retiendrez : il chiffre vos accès sur ce poste et <b>ne peut pas être récupéré</b>. Oublié, il faudra tout reconfigurer. Ensuite, lui seul vous sera redemandé.</small>
+        <div id="pin-err" class="inline-error hidden" role="alert"></div>
+        <button type="button" class="btn btn-primary" id="pin-next">Continuer</button>
+      </div>
+
+      <!-- Étape 2 : choix du fournisseur -->
+      <div id="panel-provider" class="ob-panel" hidden>
+        <p class="sub">Quel service git voulez-vous connecter ?</p>
+        <div class="provider-grid">
+          <button type="button" class="provider-card" data-provider="forgejo">
+            <span class="prov-ico fj">⎇</span>
+            <span class="prov-name">Forgejo / Gitea</span>
+            <span class="prov-sub">Votre serveur git (ex. git.apcom.app). Connexion par identifiant + mot de passe.</span>
+          </button>
+          <button type="button" class="provider-card" data-provider="github">
+            <span class="prov-ico gh"><svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span>
+            <span class="prov-name">GitHub</span>
+            <span class="prov-sub">github.com. Connexion par jeton d'accès personnel (PAT) que vous collez.</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Étape 2 : Connexion Forgejo -->
+      <form id="connect-form" class="ob-panel" autocomplete="off" hidden>
+        <label class="ob-hero-field">Nom de la connexion
+          <input id="f-name" type="text" class="hero-input" placeholder="ex. Travail" />
+          <small>Une étiquette à votre choix, pour reconnaître ce serveur.</small>
+        </label>
+        <div class="forgejo-block">
+          <div class="fj-head"><span class="fj-badge"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 11a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm10-11a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM7 8.5v7m0-4h5a4 4 0 0 0 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Forgejo</span> Connexion à votre serveur git</div>
+          <div class="fj-sub">Vos identifiants de compte <b>Forgejo</b> — pas votre PIN SituLab. Une question&nbsp;? Votre administrateur Forgejo.</div>
+          <label>Adresse du serveur
+            <input id="f-url" type="url" placeholder="ex. https://git.apcom.app (à saisir)" />
+          </label>
+          <label>Identifiant
+            <input id="f-user" type="text" placeholder="votre identifiant Forgejo" />
+          </label>
+          <label>Mot de passe
+            <input id="f-pass" type="password" placeholder="votre mot de passe" />
+            <small>Sert à créer votre accès SituLab.</small>
+          </label>
+          <label style="flex-direction:row;align-items:center"><input id="f-remember" type="checkbox" checked style="width:auto;margin-right:8px" />Mémoriser mon mot de passe (chiffré par mon PIN) pour ne plus le resaisir</label>
+        </div>
+        <button type="submit" class="btn btn-primary" id="connect-btn">Se connecter</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="connect-back">‹ Changer de fournisseur</button>
+        <div id="connect-error" class="inline-error hidden" role="alert"></div>
+      </form>
+
+      <!-- Étape 2b : code 2FA (uniquement si le compte en a un) -->
+      <div id="panel-2fa" class="ob-panel" hidden>
+        <div class="forgejo-block">
+          <div class="fj-head"><span class="fj-badge"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 11a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm10-11a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM7 8.5v7m0-4h5a4 4 0 0 0 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Forgejo</span> Double authentification</div>
+          <div class="fj-sub">Code de <b>votre compte Forgejo</b> (application d'authentification) — ce n'est <b>pas</b> votre PIN SituLab.</div>
+          <label>Code à deux facteurs (2FA)</label>
+          <div id="f-otp" class="git-code"></div>
+        </div>
+        <div id="otp-err" class="inline-error hidden" role="alert"></div>
+        <button type="button" class="btn btn-primary" id="otp-btn">Valider</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="otp-back">‹ Modifier mes identifiants</button>
+      </div>
+
+      <!-- Étape 2 : Connexion GitHub (jeton collé) -->
+      <form id="github-form" class="ob-panel" autocomplete="off" hidden>
+        <label>Nom de la connexion
+          <input id="g-name" type="text" placeholder="GitHub" />
+          <small>Une étiquette à votre choix.</small>
+        </label>
+        <div class="forgejo-block github-block">
+          <div class="fj-head"><span class="fj-badge gh"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span> GitHub</div>
+          <div class="fj-sub">Collez un <b>jeton d'accès personnel</b> (Personal Access Token). GitHub ne permet pas à SituLab de le créer pour vous — créez-le sur <a class="lnk" data-ext="https://github.com/settings/tokens">github.com/settings/tokens</a> avec l'accès <b>repo</b>.</div>
+          <label>Jeton d'accès personnel (PAT)
+            <input id="g-token" type="password" placeholder="ghp_… ou github_pat_…" />
+            <small>Chiffré sur ce poste par votre PIN. Révocable à tout moment depuis GitHub.</small>
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary" id="github-btn">Se connecter</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="github-back">‹ Changer de fournisseur</button>
+        <div id="github-error" class="inline-error hidden" role="alert"></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Application -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand">
+        <img src="logo.svg" class="brand-logo" alt="" />
+        <span class="brand-name">SituLab</span>
+      </div>
+      <div class="topbar-right">
+        <button id="disc-alert" class="disc-alert hidden" title="Des instances sont déconnectées — cliquez pour les reconnecter">⚠ <span id="disc-count"></span> déconnectée(s)</button>
+        <span class="live" id="live" title="Mise à jour en continu"><span class="live-dot"></span>en direct</span>
+        <label class="sr-only" for="instance-select">Instance active</label>
+        <select id="instance-select" class="select" title="Instance active"></select>
+        <span id="role-badge" class="role-badge hidden" title="Rôle de la connexion"></span>
+        <div class="whoami" id="whoami" aria-live="polite"></div>
+      </div>
+    </header>
+
+    <div class="body">
+      <nav class="sidebar" aria-label="Navigation principale">
+        <button class="nav-item active" data-view="projects" aria-label="Projets"><span class="nav-ico" aria-hidden="true">⇄</span>Projets</button>
+        <button class="nav-item" data-view="repos" aria-label="Dépôts"><span class="nav-ico" aria-hidden="true">▦</span>Dépôts</button>
+        <div class="sidebar-foot">
+          <button class="nav-item" data-view="tokens" aria-label="Tokens"><span class="nav-ico" aria-hidden="true">⚿</span>Tokens</button>
+          <button class="nav-item hidden" data-view="admin" id="nav-admin" aria-label="Gestion des utilisateurs"><span class="nav-ico" aria-hidden="true">⌘</span>Gestion des utilisateurs</button>
+          <button class="nav-item" data-view="help" aria-label="Aide"><span class="nav-ico" aria-hidden="true">?</span>Aide</button>
+          <button class="nav-item" data-view="settings" aria-label="Réglages"><span class="nav-ico" aria-hidden="true">⚙</span>Réglages</button>
+          <div class="version" id="version"></div>
+        </div>
+      </nav>
+
+      <main class="content" id="content" tabindex="-1">
+        <div id="view" class="view"></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Modale générique -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-card">
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="modal-cancel">Annuler</button>
+        <button class="btn btn-primary" id="modal-ok">Valider</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <!-- Chart.js (vendorisé, hors-ligne) pour l'analyse d'équipe — voir vendor/README.txt -->
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

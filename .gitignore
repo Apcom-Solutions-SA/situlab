@@ -1,0 +1,18 @@
+# Binaires de build
+/build/bin/
+
+# Aperçus / captures GUI (artefacts de test)
+/build/gui-*.png
+/build/v1-*.png
+/build/icon256.png
+
+# Installeur compilé (le script installer.nsi est versionné, pas le binaire)
+/build/SituLab-Setup.exe
+
+# Divers
+*.log
+.DS_Store
+node_modules/
+
+# Artefacts de distribution (portable, zips)
+/build/dist/
