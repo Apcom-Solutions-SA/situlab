@@ -621,6 +621,18 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .repo-branches.hidden { display: none; }
 .repo-foot { margin-top: 10px; display: flex; justify-content: flex-end; }
 
+/* --- Carte groupée : un dépôt distant, plusieurs clones locaux --- */
+.repo-head-static { cursor: default; }
+.clone-count { background: var(--accent-soft); color: var(--accent); border-color: transparent; margin-left: 2px; }
+.clone-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.clone-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  flex-wrap: wrap; padding: 6px 8px; border-radius: var(--r-sm); background: var(--bg-soft, rgba(127,127,127,.06));
+  cursor: pointer; border: 1px solid transparent; }
+.clone-row:hover { border-color: var(--accent); }
+.clone-row:active { transform: translateY(.5px); }
+.clone-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.clone-bits { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-sm); margin-left: auto; }
+
 
 /* --- Onboarding : écran d'accueil + stepper --- */
 .welcome-steps { list-style: none; margin: 18px 0 20px; padding: 0; text-align: left; display: flex; flex-direction: column; gap: 14px; }

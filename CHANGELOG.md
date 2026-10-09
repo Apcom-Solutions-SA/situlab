@@ -2,6 +2,23 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.9.1] — 2026-10-09
+
+### Ajouté
+- **PATH à l'installation (Windows)** : l'installeur ajoute `C:\Program Files\SituLab` au **PATH
+  utilisateur** (retiré proprement à la désinstallation) → `situlab` est appelable depuis n'importe
+  quel terminal, sans chemin complet. Essentiel pour les agents (CLI/MCP). PATH utilisateur et non
+  système, pour éviter toute troncature du PATH par NSIS.
+
+### Modifié
+- **Tableau de bord — une seule carte par dépôt distant** : les clones locaux multiples d'un même
+  dépôt sont regroupés dans une carte unique, listés en sous-lignes (dossier, **type worktree/clone**
+  détecté via `.git`, branche, écart, état) ; chaque sous-ligne ouvre le détail de son clone. Fini
+  les N cartes pour un même dépôt. Nouveau champ `RepoView.LocalKind`.
+- **Page Projets rafraîchie en temps réel** : branchée sur la boucle « en direct » (signature
+  anti-flicker), comme le tableau de bord — les changements distants apparaissent sans devoir quitter
+  puis revenir sur la page.
+
 ## [1.9.0] — 2026-10-09 — « SituLab approved »
 
 ### Ajouté

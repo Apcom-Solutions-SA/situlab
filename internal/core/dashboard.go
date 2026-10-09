@@ -6,6 +6,7 @@ package core
 import (
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -78,6 +79,7 @@ type RepoView struct {
 	ChangedCount int    `json:"changed_count"`
 	LastDate     string `json:"last_date"`   // date ISO du dernier commit local
 	LocalError   string `json:"local_error"` // non vide = clone local illisible
+	LocalKind    string `json:"local_kind"`  // "clone" | "worktree" | "" (indéterminé)
 	// État synthétique pour l'UI (source unique de vérité)
 	State string `json:"state"` // uptodate|ahead|behind|diverged|dirty|detached|unreadable|nolocal
 }
@@ -237,6 +239,7 @@ func (s *Service) Dashboard(instance string) (*DashboardData, error) {
 
 func fillLocal(v *RepoView, sc *localScan) {
 	v.LocalPath = sc.path
+	v.LocalKind = detectLocalKind(sc.path)
 	if sc.err != nil {
 		v.LocalError = sc.err.Error()
 		return
@@ -251,6 +254,20 @@ func fillLocal(v *RepoView, sc *localScan) {
 	v.Dirty = !sum.Clean
 	v.ChangedCount = len(sum.Changed)
 	v.LastDate = sum.LastDate
+}
+
+// detectLocalKind distingue un worktree git (`.git` est un FICHIER pointeur vers le dépôt
+// principal) d'un clone autonome (`.git` est un DOSSIER). Renvoie "" si indéterminable
+// (dossier absent, droits) — l'UI n'affiche alors aucun badge de type.
+func detectLocalKind(path string) string {
+	fi, err := os.Stat(filepath.Join(path, ".git"))
+	if err != nil {
+		return ""
+	}
+	if fi.IsDir() {
+		return "clone"
+	}
+	return "worktree"
 }
 
 // computeState réduit l'état d'un dépôt à un code unique, consommé par l'UI pour

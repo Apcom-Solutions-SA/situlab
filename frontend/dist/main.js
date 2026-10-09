@@ -1408,6 +1408,7 @@ async function liveTickOnce() {
   try {
     if (liveTick % 3 === 0) await refreshWhoami();
     if (state.view === "repos") await renderRepos(true);
+    else if (state.view === "projects") await renderProjects(true);
     else if (state.view === "detail") {
       await refreshDetailLocal();
       if (liveTick % 3 === 0) await refreshDetailRemote();
@@ -1552,6 +1553,26 @@ function paintRepos() {
     return;
   }
 
+  // Regroupement par DÉPÔT DISTANT : un dépôt = UNE carte, ses clones locaux listés dedans (plus de
+  // carte par clone). Les dépôts purement locaux (hors instance) restent individuels.
+  const byRepo = new Map(), order = [];
+  shown.forEach((r) => {
+    const key = r.has_remote ? "R:" + r.full_name : "L:" + r.name + "@" + (r.local_path || "");
+    let g = byRepo.get(key);
+    if (!g) { g = []; byRepo.set(key, g); order.push(key); }
+    g.push(r);
+  });
+  const aggregated = order.map((key) => {
+    const views = byRepo.get(key);
+    const locals = views.filter((v) => v.local_path);
+    let rep = views[0];
+    for (const v of views) if (stateRank(v.state) < stateRank(rep.state)) rep = v; // représentant = le plus actionnable
+    rep = Object.assign({}, rep); // copie : ne pas altérer l'objet d'origine
+    rep._clones = locals;
+    if (locals.length > 1) rep.state = locals.reduce((a, v) => stateRank(v.state) < stateRank(a) ? v.state : a, locals[0].state);
+    return rep;
+  });
+
   // Regroupement logique : l'actionnable d'abord, « à jour » ensuite, « pas sur ce poste » en fin.
   const GROUPS = [
     ["dirty", "Modifications en cours", ["dirty"]],
@@ -1567,7 +1588,7 @@ function paintRepos() {
   const scroll = content ? content.scrollTop : 0;
   let html = state.truncated ? `<div class="offline-banner">Beaucoup de dépôts : la liste affichée est partielle.</div>` : "";
   GROUPS.forEach(([k, title, states]) => {
-    const items = shown.map((r, i) => [r, i]).filter(([r]) => states.includes(r.state || "nolocal"));
+    const items = aggregated.map((r, i) => [r, i]).filter(([r]) => states.includes(r.state || "nolocal"));
     if (!items.length) return;
     html += `<div class="repo-group"><div class="repo-group-h">${esc(title)} <span class="rg-count">${items.length}</span></div>` +
       `<div class="${gridClass}">` + items.map(([r, i]) => repoCard(r, i)).join("") + `</div></div>`;
@@ -1575,8 +1596,11 @@ function paintRepos() {
   list.innerHTML = html;
   // Délégation sur le conteneur STABLE #repo-list (survit aux repaints « en direct »), lecture via
   // state._shown (jamais de closure périmée) : « Ouvrir le détail » et le dépliage restent fiables.
-  state._shown = shown;
+  state._shown = aggregated;
+  const openClone = (val) => { const [gi, ci] = String(val).split(":").map(Number); const g = state._shown[gi]; const c = g && g._clones && g._clones[ci]; if (c) openDetail(c); };
   list.onclick = (ev) => {
+    const oc = ev.target.closest("[data-openc]");
+    if (oc) { openClone(oc.dataset.openc); return; }
     const o = ev.target.closest("[data-open]");
     if (o) { const r = state._shown[+o.dataset.i]; if (r) openDetail(r); return; }
     const h = ev.target.closest(".repo-head[data-head]");
@@ -1584,12 +1608,14 @@ function paintRepos() {
   };
   list.onkeydown = (ev) => {
     if (ev.key !== "Enter" && ev.key !== " ") return;
+    const oc = ev.target.closest("[data-openc]");
+    if (oc) { ev.preventDefault(); openClone(oc.dataset.openc); return; }
     const h = ev.target.closest(".repo-head[data-head]");
     if (h) { ev.preventDefault(); const i = +h.dataset.i, r = state._shown[i]; if (r) toggleRepoCard(r, i); }
   };
-  // Cartes restées dépliées : rafraîchissement SILENCIEUX (le contenu caché reste affiché, pas de
-  // skeleton) — la carte ne « se referme » plus au tick « en direct ».
-  shown.forEach((r, i) => { if (state.expanded[repoKey(r)]) loadBranches(r, i, true); });
+  // Cartes mono-clone restées dépliées : rafraîchissement SILENCIEUX (le contenu caché reste affiché,
+  // pas de skeleton) — la carte ne « se referme » plus au tick « en direct ».
+  aggregated.forEach((r, i) => { if (!(r._clones && r._clones.length > 1) && state.expanded[repoKey(r)]) loadBranches(r, i, true); });
   if (content) content.scrollTop = scroll;
 }
 
@@ -1706,10 +1732,47 @@ function stateBadge(code) {
 function repoKey(r) { return (r.has_remote ? r.full_name : r.name) + "@" + (r.local_path || ""); }
 // folderOf : dernier segment du chemin local (pour distinguer deux clones du même dépôt).
 function folderOf(p) { return p ? p.split(/[\\/]/).filter(Boolean).pop() : ""; }
+// stateRank : ordre d'actionnabilité (plus petit = plus urgent). Sert à choisir l'état
+// représentatif d'un dépôt qui a plusieurs clones.
+const STATE_ORDER = ["dirty", "diverged", "ahead", "behind", "detached", "unreadable", "uptodate", "nolocal"];
+function stateRank(s) { const i = STATE_ORDER.indexOf(s || "nolocal"); return i < 0 ? 99 : i; }
+
+// repoCardGrouped : carte d'un dépôt distant ayant PLUSIEURS clones locaux. En-tête = identité
+// distante ; dessous, une ligne par clone (dossier, type worktree/clone, branche, écart, état).
+// Chaque ligne ouvre le détail de SON clone. Pas de dépliage de branches ici (via le détail).
+function repoCardGrouped(r, i) {
+  const vis = `<span class="pill">${r.private ? "privé" : "public"}</span>`;
+  const n = r._clones.length;
+  const rows = r._clones.map((c, ci) => {
+    const kind = c.local_kind === "worktree" ? `<span class="pill sm" title="rattaché au dépôt principal (git worktree)">worktree</span>`
+      : c.local_kind === "clone" ? `<span class="pill sm" title="clone autonome">clone</span>` : "";
+    const bits = [];
+    if (c.local_error) { bits.push(`<span class="muted">${esc(c.local_error)}</span>`); }
+    else {
+      bits.push(`<span class="pill" title="version de travail (branche git)">⎇ ${esc(c.local_branch || "?")}</span>`);
+      if (c.ahead) bits.push(`<span class="s-ahead" title="à envoyer">↑${c.ahead}</span>`);
+      if (c.behind) bits.push(`<span class="s-behind" title="à récupérer">↓${c.behind}</span>`);
+      if (c.changed_count) bits.push(`<span class="hint">${c.changed_count} modif.</span>`);
+      if (c.last_date) bits.push(`<span class="repo-when">maj ${esc(fmtWhen(c.last_date))}</span>`);
+    }
+    return `<div class="clone-row" data-openc="${i}:${ci}" role="button" tabindex="0" title="Ouvrir : ${esc(c.local_path)}">
+      <div class="clone-main"><span class="pill pill-folder">📁 ${esc(folderOf(c.local_path))}</span>${kind ? " " + kind : ""}</div>
+      <div class="clone-bits">${bits.join(" ")} ${stateBadge(c.state)}</div>
+    </div>`;
+  }).join("");
+  return `<div class="repo-card grouped ${(STATES[r.state] || STATES.nolocal).cls}" data-key="${esc("R:" + r.full_name)}" data-i="${i}">
+    <div class="repo-head repo-head-static">
+      <div class="repo-title"><span class="nm">${esc(r.full_name)}</span> ${vis} <span class="pill sm clone-count" title="${n} copies locales de ce dépôt sur ce poste">● ${n} copies</span></div>
+      ${stateBadge(r.state)}
+    </div>
+    <div class="clone-list">${rows}</div>
+  </div>`;
+}
 
 // repoCard : carte épurée. En-tête = nom + état d'un coup d'œil. Clic sur l'en-tête =
 // déplie l'état par branche (chargé à la demande). « Ouvrir » = vue détaillée complète.
 function repoCard(r, i) {
+  if (r._clones && r._clones.length > 1) return repoCardGrouped(r, i);
   const title = r.has_remote ? r.full_name : r.name;
   const key = repoKey(r);
   const open = !!state.expanded[key];
@@ -2743,27 +2806,40 @@ async function promoteWizard(b, idx, label) {
   el("modal-ok").disabled = false;
 }
 
-async function renderProjects() {
-  el("view").innerHTML = `<div class="view-head view-head-row">
+// renderProjects(live) : live=false repeint tout (en-tête + squelette) ; live=true (appelé par la
+// boucle « en direct ») recharge silencieusement les boards et ne repeint #proj-board QUE si l'état
+// a changé (signature) — pas de skeleton, pas de flicker. Corrige la page qui ne se mettait pas à
+// jour seule (il fallait sortir/revenir).
+async function renderProjects(live) {
+  if (!live) {
+    el("view").innerHTML = `<div class="view-head view-head-row">
       <div><div class="view-title">Projets</div>
         <div class="view-sub">Votre tableau de bord transverse : pour chaque projet, l'état <b>Local · Atelier · Vitrine</b> en une vue. La vitrine (production) ne se déploie qu'ici (<b>Promouvoir</b>), sous votre PIN.</div></div>
       <button class="btn btn-primary btn-sm" id="proj-add">＋ Nouveau projet</button></div>
     <div id="proj-board"><div class="skeleton"></div><div class="skeleton" style="margin-top:10px"></div></div>`;
-  el("proj-add").onclick = addProjectModal;
+    el("proj-add").onclick = addProjectModal;
+    state.projSig = "";
+  }
+  const liveEl = el("live"); if (live && liveEl) liveEl.classList.add("syncing");
   let boards = [];
   try { boards = (await App().ProjectBoards()) || []; }
-  catch (e) { if (isLocked(e)) return handleLock(); el("proj-board").innerHTML = surfaceError("Lecture impossible", cleanErr(e), null); return; }
+  catch (e) { if (isLocked(e)) return handleLock(); if (!live) { const b = el("proj-board"); if (b) b.innerHTML = surfaceError("Lecture impossible", cleanErr(e), null); } return; }
+  finally { const l = el("live"); if (live && l) l.classList.remove("syncing"); }
+  const sig = JSON.stringify(boards);
+  if (live && sig === state.projSig) return; // rien de neuf : on ne touche pas au DOM
+  state.projSig = sig;
+  const board = el("proj-board"); if (!board) return;
   if (!boards.length) {
-    el("proj-board").innerHTML = `<div class="proj-empty">
+    board.innerHTML = `<div class="proj-empty">
       <div class="pe-ico">⇄</div>
       <div class="pe-title">Reliez votre premier projet</div>
       <p class="pe-txt">Un projet relie un dépôt <b>atelier</b> (votre terrain de dev) à sa <b>vitrine de production</b>. SituLab vous montre alors, en une vue, ce qui est à jour entre votre <b>poste</b>, l'<b>atelier</b> et la <b>prod</b> — et vous laisse <b>promouvoir</b> une version en production, sous votre PIN, sans jamais confier de jeton à une IA.</p>
       <button class="btn btn-primary" id="proj-add2">＋ Créer mon premier projet</button>
     </div>`;
-    el("proj-add2").onclick = addProjectModal;
+    if (el("proj-add2")) el("proj-add2").onclick = addProjectModal;
     return;
   }
-  el("proj-board").innerHTML = boards.map((b, i) => projectGraphCard(b, i)).join("");
+  board.innerHTML = boards.map((b, i) => projectGraphCard(b, i)).join("");
   bindProjectBoard(boards);
   boards.forEach((b, i) => fillProjectGraph(b, i)); // dessine chaque graphe (branches) en parallèle
 }
