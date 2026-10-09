@@ -58,6 +58,10 @@ type Instance struct {
 
 	Role      string     `json:"role,omitempty"`       // "atelier" (défaut) | "production" (v1.7)
 	PINPolicy *PINPolicy `json:"pin_policy,omitempty"` // politique PIN par action ; nil = défauts du rôle (v1.7)
+
+	// SignCert : certificat d'appareil (JSON d'attest.Cert) liant la clé d'appareil à l'identité
+	// vérifiée, émis par la racine APCOM. Non secret. Vide = signature de garantie non activée.
+	SignCert string `json:"sign_cert,omitempty"`
 }
 
 // IsGitHub indique si l'instance cible GitHub (plutôt que Forgejo/Gitea).
@@ -148,6 +152,7 @@ type Config struct {
 	AgentNotes     string     `json:"agent_notes,omitempty"`      // fiche de collaboration avec l'IA (v1.5.1)
 	Projects       []Project  `json:"projects,omitempty"`         // liens atelier↔production (v1.7.1)
 	LocalRepos     []string   `json:"local_repos"`
+	RevokedSerials []string   `json:"revoked_serials,omitempty"` // serials de certs d'appareil révoqués (signature de garantie)
 }
 
 // PruneDanglingPromotions retire les marqueurs de promotion dont la vitrine n'existe plus dans le

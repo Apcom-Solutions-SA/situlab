@@ -2,7 +2,7 @@
 
 > Un seul document, deux lectures. Les humains trouveront en tête un démarrage rapide ; les agents
 > trouveront ensuite la référence complète de la ligne de commande. Il est aussi lisible **dans
-> l'application** (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.8.0**.
+> l'application** (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.9.0**.
 
 ## Pour ton assistant IA — commence ici
 
@@ -229,6 +229,13 @@ transite jamais par la CLI ni par l'agent.
 ### Réglages de dépôt (écritures — PIN)
 - `situlab repo rename <owner>/<repo> <nouveau-nom>` · `repo visibility <owner>/<repo> --private=true|false`
 - `situlab repo archive <owner>/<repo> --archived=true|false` · `repo default-branch <owner>/<repo> <branche>`
+- `situlab repo delete-branch <owner>/<repo> <branche>` — supprime une branche distante (PIN ; refuse la branche par défaut).
+
+### Signature de garantie « SituLab approved »
+- `situlab attest status <dossier>` — état d'attestation des derniers commits d'un dépôt local (✅ par Untel / ⬜). Lecture.
+- `situlab attest genkey --instance <nom>` — génère la clé d'appareil et affiche sa clé publique à faire certifier par la gouvernance.
+- `situlab attest install-cert <cert.json> --instance <nom>` — installe le certificat d'appareil émis par la gouvernance.
+- La signature est **non bloquante** et apposée automatiquement sur les commits créés par SituLab. Limite T2 : voir `SECURITY.md`.
 
 ## Accès MCP (agents sans terminal)
 

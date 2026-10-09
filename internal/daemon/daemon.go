@@ -77,6 +77,7 @@ const (
 	OpRepoVis       = "repo.visibility"
 	OpRepoArchive   = "repo.archive"
 	OpRepoDefBranch = "repo.default-branch"
+	OpRepoDelBranch = "repo.delete-branch"
 	OpLabelList     = "label.list"
 	OpMilestoneList = "milestone.list"
 	OpIssueLabels   = "issue.labels"
@@ -120,6 +121,10 @@ const (
 	OpProjectList    = "project.list"
 	OpProjectStatus  = "project.status"
 	OpProjectPromote = "project.promote" // publication atelier→prod (PIN)
+	// Signature de garantie « SituLab approved » (lecture libre ; génération/installation sous session).
+	OpAttestStatus = "attest.status"
+	OpAttestGenKey = "attest.genkey"
+	OpAttestCert   = "attest.install-cert"
 )
 
 // Args porte les paramètres de toutes les opérations (seuls les champs utiles sont remplis).
@@ -235,7 +240,7 @@ func (d *Daemon) handle(req ipc.Request) ipc.Response {
 func isWriteOp(op string) bool {
 	switch op {
 	case OpPush, OpSync, OpRepoCreate, OpRepoDelete, OpRepoSetDesc,
-		OpRepoRename, OpRepoVis, OpRepoArchive, OpRepoDefBranch,
+		OpRepoRename, OpRepoVis, OpRepoArchive, OpRepoDefBranch, OpRepoDelBranch,
 		OpIssueCreate, OpIssueComment, OpIssueState, OpIssueEdit,
 		OpIssueLabels, OpIssueAssign, OpIssueMilestn,
 		OpPullCreate, OpPullMerge, OpPullReview, OpPullState, OpPullEdit,
@@ -318,7 +323,7 @@ func actionOf(op string) config.PINAction {
 		OpPullCreate, OpPullMerge, OpPullReview, OpPullState, OpPullEdit:
 		return config.ActionIssues
 	case OpRepoCreate, OpRepoDelete, OpRepoSetDesc,
-		OpRepoRename, OpRepoVis, OpRepoArchive, OpRepoDefBranch,
+		OpRepoRename, OpRepoVis, OpRepoArchive, OpRepoDefBranch, OpRepoDelBranch,
 		OpReleaseNew, OpReleaseDel, OpTagNew, OpTagDel:
 		return config.ActionRepoAdmin
 	case OpAdminUserNew, OpTokenMgrNew, OpTokenMgrDel:
@@ -364,6 +369,15 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 		return d.svc.LocalRepos()
 	case OpLocalStatus:
 		return d.svc.LocalStatus(a.Path)
+	case OpAttestStatus:
+		return d.svc.AttestHistory(a.Path, a.Limit) // lecture locale (pas de session requise)
+	case OpAttestGenKey:
+		return d.withSession(func() (any, error) {
+			pub, err := d.svc.GenerateSignKey(a.Instance)
+			return map[string]string{"public_key": pub}, err
+		})
+	case OpAttestCert:
+		return d.withSession(func() (any, error) { return nil, d.svc.InstallSignCert(a.Instance, a.Body) })
 	case OpLocalRemove:
 		return nil, d.svc.RemoveLocalRepo(a.Path)
 	case OpGitBranchNew:
@@ -679,6 +693,12 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 			return nil, err
 		}
 		return d.svc.EditRepoSettings(a.Instance, a.Owner, a.Repo, map[string]any{"default_branch": a.Branch}, pin)
+	case OpRepoDelBranch:
+		pin, err := d.gate(op, a, fmt.Sprintf("Supprimer la branche distante « %s » de %s/%s", a.Branch, a.Owner, a.Repo))
+		if err != nil {
+			return nil, err
+		}
+		return nil, d.svc.DeleteRemoteBranch(a.Instance, a.Owner, a.Repo, a.Branch, pin)
 	case OpIssueLabels:
 		pin, err := d.gate(op, a, fmt.Sprintf("Modifier les étiquettes de %s/%s #%d", a.Owner, a.Repo, a.Index))
 		if err != nil {

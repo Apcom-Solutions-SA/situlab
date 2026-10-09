@@ -91,7 +91,8 @@ type Entry struct {
 	InstanceURL string    `json:"instance_url"`
 	Scopes      []string  `json:"scopes,omitempty"`
 	Enc         blob      `json:"enc"`
-	Pwd         *blob     `json:"pwd,omitempty"` // mot de passe mémorisé (comptes SANS 2FA), chiffré sous la DEK
+	Pwd         *blob     `json:"pwd,omitempty"`  // mot de passe mémorisé (comptes SANS 2FA), chiffré sous la DEK
+	Sign        *blob     `json:"sign,omitempty"` // clé privée d'appareil (signature de garantie), chiffrée sous la DEK
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -299,6 +300,44 @@ func (f *File) GetPassword(dek []byte, id string) (string, error) {
 	return "", ErrNoEntry
 }
 
+// SetSignKey mémorise (ou efface si priv vide) la clé privée d'appareil d'une instance, chiffrée sous
+// la DEK. Le privé ne doit jamais sortir du démon.
+func (f *File) SetSignKey(dek []byte, id string, priv []byte) error {
+	for i := range f.Entries {
+		if f.Entries[i].ID == id {
+			if len(priv) == 0 {
+				f.Entries[i].Sign = nil
+			} else {
+				b, err := seal(dek, priv, signAAD(id))
+				if err != nil {
+					return err
+				}
+				f.Entries[i].Sign = &b
+			}
+			return f.save()
+		}
+	}
+	return ErrNoEntry
+}
+
+// GetSignKey renvoie la clé privée d'appareil d'une instance ("" si aucune). L'appelant efface la
+// valeur après usage.
+func (f *File) GetSignKey(dek []byte, id string) ([]byte, error) {
+	for i := range f.Entries {
+		if f.Entries[i].ID == id {
+			if f.Entries[i].Sign == nil {
+				return nil, nil
+			}
+			pt, err := open(dek, *f.Entries[i].Sign, signAAD(id))
+			if err != nil {
+				return nil, ErrFormat
+			}
+			return pt, nil
+		}
+	}
+	return nil, ErrNoEntry
+}
+
 // Has indique si une instance a un token rangé.
 func (f *File) Has(id string) bool {
 	for i := range f.Entries {
@@ -367,6 +406,10 @@ func pwdAAD(id string) []byte   { return []byte("situlab\x00pwd\x00" + id) }
 // AAD historiques (avant v1.8) — en LECTURE SEULE, pour ne pas invalider un trousseau existant.
 func tokenAADLegacy(id string) []byte { return []byte(id) }
 func pwdAADLegacy(id string) []byte   { return []byte(id + ":pwd") }
+
+// signAAD : domaine de la clé privée d'appareil (signature de garantie). Nouveau depuis le départ,
+// donc versionné et sans repli historique.
+func signAAD(id string) []byte { return []byte("situlab\x00signkey\x00" + id) }
 
 // openDomain déchiffre avec l'AAD courant, puis retombe sur l'AAD historique (blob écrit par une
 // version antérieure). La prochaine écriture rescelle avec l'AAD courant.

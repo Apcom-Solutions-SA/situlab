@@ -140,6 +140,24 @@ func (s *Service) DeleteTag(instance, owner, repo, tag, pin string) error {
 	return cl.DeleteTag(ctx, owner, repo, tag)
 }
 
+// DeleteRemoteBranch supprime une branche distante (admin dépôt, sous PIN). Garde-fou : on refuse la
+// branche par défaut. Sert notamment à nettoyer les branches de travail fusionnées côté atelier.
+func (s *Service) DeleteRemoteBranch(instance, owner, repo, branch, pin string) error {
+	if err := s.authorize(instance, config.ActionRepoAdmin, pin); err != nil {
+		return err
+	}
+	if r, e := s.ViewRepo(instance, owner, repo); e == nil && r.DefaultBranch == branch {
+		return fmt.Errorf("refus : « %s » est la branche par défaut de %s/%s", branch, owner, repo)
+	}
+	cl, _, err := s.clientFor(instance)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := opCtx()
+	defer cancel()
+	return cl.DeleteBranch(ctx, owner, repo, branch)
+}
+
 // --- Réglages de dépôt (écritures — PIN requis) ---
 
 // EditRepoSettings applique un sous-ensemble de réglages : name (renommer), private,
@@ -505,6 +523,9 @@ func (s *Service) GitAmend(path, message string) (string, error) {
 		return "", err
 	}
 	out, err := gitx.Amend(path, message)
+	if err == nil {
+		s.attestCommit(path, gitx.HeadSHA(path))
+	}
 	return out, asConflict(err)
 }
 
@@ -517,6 +538,9 @@ func (s *Service) GitCommitPaths(path, message string, paths []string) (string, 
 		return "", err
 	}
 	out, err := gitx.CommitPaths(path, message, paths)
+	if err == nil {
+		s.attestCommit(path, gitx.HeadSHA(path))
+	}
 	return out, asConflict(err)
 }
 

@@ -1,9 +1,9 @@
-; Installeur SituLab (Windows) — NSIS
+﻿; Installeur SituLab (Windows) — NSIS
 ; Compilation : makensis build\installer.nsi  (depuis la racine du dépôt, après `go build`)
 ; Produit : build\SituLab-Setup.exe
 
 !define APP "SituLab"
-!define VERSION "1.8.2"
+!define VERSION "1.9.0"
 !define PUBLISHER "APCOM Solutions SA"
 !define EXE "situlab.exe"
 

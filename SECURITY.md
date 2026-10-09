@@ -56,6 +56,19 @@ Nous accusons réception sous quelques jours ouvrés et tenons informé jusqu'au
   tournant sous le **même compte OS** peut modifier `config.json` et le désactiver. La vraie
   parade reste l'isolation de compte / bac à sable (voir ci-dessus).
 
+## Signature de garantie « SituLab approved » — limite assumée (T2)
+
+Chaque commit créé dans SituLab porte une attestation d'origine (clé d'appareil ed25519 chiffrée par
+le PIN, certifiée par une racine APCOM épinglée), vérifiée localement. C'est une garantie **non
+bloquante** : elle rend visible qui respecte la discipline, elle ne rejette rien.
+
+**Ce n'est pas infalsifiable en local.** Un attaquant **déterminé sous le même compte OS** peut lire
+la clé d'appareil dans la mémoire du démon déverrouillé et forger un faux « approved ». C'est le même
+plafond que partout ailleurs dans SituLab ; on le **borne** par des certificats à **courte durée** et
+une **révocation** (serials). Seul un modèle **T3** (signature produite côté serveur, clé jamais sur le
+poste) fermerait ce vecteur — hors périmètre de cette phase. On ne peut pas *forger* un faux ✅ sans le
+certificat ; on peut seulement *se priver* du ✅ (commettre hors SituLab) — ce qui est le signal voulu.
+
 ## Distribution
 
 Les binaires **ne sont pas signés** à ce stade (SmartScreen sous Windows, Gatekeeper sous macOS

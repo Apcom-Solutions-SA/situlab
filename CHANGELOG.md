@@ -2,6 +2,27 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.9.0] — 2026-10-09 — « SituLab approved »
+
+### Ajouté
+- **Signature de garantie « SituLab approved »** (attestation d'origine, non bloquante) : chaque commit
+  CRÉÉ dans SituLab est signé (clé d'appareil ed25519, chiffrée par le PIN dans le trousseau, certifiée
+  par une racine APCOM épinglée) et vérifiable localement — on *voit* qui respecte la discipline « passer
+  par SituLab », sans rien bloquer. Nouveau paquet `internal/attest` (racine embarquée, certificat
+  d'appareil, attestation anti-rejeu portée par une note git `refs/notes/situlab`). CLI `attest
+  status/genkey/install-cert`, outil MCP `attest_status`, bindings GUI. Émission du certificat par la
+  gouvernance (racine actuelle = racine de **test** ; la vraie racine la remplacera). Limite T2 assumée :
+  voir `SECURITY.md`.
+- **Suppression de branche distante** : `repo delete-branch` (CLI), `repo_delete_branch` (MCP), binding
+  GUI — refuse la branche par défaut. Pratique pour nettoyer les branches de travail fusionnées.
+
+### Modifié
+- **Dates en format suisse `jj.mm.aaaa`** dans toute l'interface et sur le site situememoring.com.
+
+### Corrigé
+- **Désinstalleur** : les accents de la question « supprimer vos données ? » étaient illisibles
+  (`.nsi` UTF-8 sans BOM lu en ANSI par NSIS) — BOM ajouté et la CI le préserve (`-Encoding utf8BOM`).
+
 ## [1.8.2] — 2026-10-09 — « Pipeline de publication »
 
 ### Corrigé

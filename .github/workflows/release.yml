@@ -66,8 +66,10 @@ jobs:
       - name: Empaqueter (NSIS → SituLab-Setup.exe)
         shell: pwsh
         run: |
-          # Aligne la version de l'installateur sur le tag, puis compile depuis build/
-          (Get-Content build/installer.nsi) -replace '!define VERSION ".*"', '!define VERSION "${{ steps.ver.outputs.v }}"' | Set-Content build/installer.nsi
+          # Aligne la version de l'installateur sur le tag. IMPORTANT : réécrire en UTF-8 AVEC BOM —
+          # NSIS (Unicode) lit l'UTF-8 seulement s'il y a un BOM, sinon il garble les accents français
+          # (ex. la question de désinstallation). Set-Content par défaut en pwsh = UTF-8 SANS BOM.
+          (Get-Content build/installer.nsi) -replace '!define VERSION ".*"', '!define VERSION "${{ steps.ver.outputs.v }}"' | Set-Content build/installer.nsi -Encoding utf8BOM
           # makensis : via le shim PATH de Chocolatey si présent, sinon le chemin d'install (NSIS est
           # 32 bits → Program Files (x86)). Robuste quel que soit le runner.
           $makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source

@@ -171,6 +171,18 @@ func (c *Client) DeleteTag(ctx context.Context, owner, repo, tag string) error {
 	return c.reqJSON(ctx, http.MethodDelete, p, nil, nil)
 }
 
+// DeleteBranch supprime une branche distante. Endpoints distincts : Forgejo/Gitea
+// `/branches/{branche}` ; GitHub `/git/refs/heads/{branche}`.
+func (c *Client) DeleteBranch(ctx context.Context, owner, repo, branch string) error {
+	var p string
+	if c.kind == KindGitHub {
+		p = fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", esc(owner), esc(repo), esc(branch))
+	} else {
+		p = fmt.Sprintf("/repos/%s/%s/branches/%s", esc(owner), esc(repo), esc(branch))
+	}
+	return c.reqJSON(ctx, http.MethodDelete, p, nil, nil)
+}
+
 // --- Réglages de dépôt ---
 
 // EditRepo applique une modification générique (PATCH /repos/{o}/{r}) : name (renommer),

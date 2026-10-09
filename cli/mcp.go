@@ -282,6 +282,8 @@ func mcpTools() []mcpTool {
 			}},
 		{"local_status", "État git d'un dépôt local (chemin).", obj(map[string]any{"path": strProp("chemin du dossier local")}, "path"),
 			func(a map[string]any) (any, error) { return svc.LocalStatus(argStr(a, "path")) }},
+		{"attest_status", "Signature de garantie « SituLab approved » : état d'attestation des derniers commits d'un dépôt local (par commit : vérifié ou non, et par qui). Lecture.", obj(map[string]any{"path": strProp("chemin du dossier local"), "limit": intProp("nombre de commits (défaut 20)")}, "path"),
+			func(a map[string]any) (any, error) { return svc.AttestHistory(argStr(a, "path"), argInt(a, "limit")) }},
 		{"project_list", "Liste les projets : liens atelier↔production (v1.7). Un projet relie un dépôt atelier (dev) à des dépôts production (vitrines, jamais poussées depuis le local).", obj(nil),
 			func(a map[string]any) (any, error) { return svc.Projects() }},
 		{"project_status", "Équilibre d'un projet : version de l'atelier vs chaque production (équilibré / en retard de N versions). Utile pour savoir ce qui est en prod.", obj(map[string]any{"name": strProp("nom du projet")}, "name"),
@@ -470,6 +472,10 @@ func mcpTools() []mcpTool {
 		{"repo_default_branch", "Change la branche par défaut. PIN requis.", obj(map[string]any{"instance": instProp, "owner": strProp(""), "repo": strProp(""), "branch": strProp("branche")}, "owner", "repo", "branch"),
 			func(a map[string]any) (any, error) {
 				return svc.SetDefaultBranch(argStr(a, "instance"), argStr(a, "owner"), argStr(a, "repo"), argStr(a, "branch"))
+			}},
+		{"repo_delete_branch", "Supprime une branche distante (refuse la branche par défaut). PIN requis.", obj(map[string]any{"instance": instProp, "owner": strProp(""), "repo": strProp(""), "branch": strProp("branche à supprimer")}, "owner", "repo", "branch"),
+			func(a map[string]any) (any, error) {
+				return ok(), svc.DeleteRemoteBranch(argStr(a, "instance"), argStr(a, "owner"), argStr(a, "repo"), argStr(a, "branch"))
 			}},
 
 		// --- Labels / assignés / milestones ---

@@ -16,6 +16,7 @@ const (
 
 // LocalCommit est un commit local lisible.
 type LocalCommit struct {
+	SHA     string `json:"sha"` // SHA complet (nécessaire pour lire l'attestation du commit)
 	Short   string `json:"short"`
 	Message string `json:"message"`
 	Date    string `json:"date"`
@@ -76,7 +77,7 @@ func DetailOf(dir string) (*Detail, error) {
 // parseLog lit un journal git sous forme structurée. Le `--` final protège contre une
 // révision commençant par `-`. Best-effort : renvoie nil en cas d'échec.
 func parseLog(dir, rng string, limit int) []LocalCommit {
-	args := []string{"log", "--pretty=format:%h\x1f%s\x1f%cI\x1f%an"}
+	args := []string{"log", "--pretty=format:%H\x1f%h\x1f%s\x1f%cI\x1f%an"}
 	if limit > 0 {
 		args = append(args, "-n", strconv.Itoa(limit))
 	}
@@ -95,10 +96,10 @@ func parseLog(dir, rng string, limit int) []LocalCommit {
 			continue
 		}
 		f := strings.Split(line, "\x1f")
-		if len(f) < 4 {
+		if len(f) < 5 {
 			continue
 		}
-		res = append(res, LocalCommit{Short: f[0], Message: f[1], Date: f[2], Author: f[3]})
+		res = append(res, LocalCommit{SHA: f[0], Short: f[1], Message: f[2], Date: f[3], Author: f[4]})
 	}
 	return res
 }

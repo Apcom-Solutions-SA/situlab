@@ -272,6 +272,32 @@ func (a *App) BranchMatrix(path string) (*gitx.BranchMatrix, error) {
 	return a.svc.BranchMatrix(path)
 }
 
+// --- Signature de garantie « SituLab approved » ---
+
+// AttestHistory : derniers commits locaux + état d'attestation (lecture).
+func (a *App) AttestHistory(path string, limit int) ([]core.AttestedCommit, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.AttestHistory(path, limit)
+}
+
+// GenerateSignKey : génère la clé d'appareil d'une instance, renvoie sa clé publique à faire certifier.
+func (a *App) GenerateSignKey(instance string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GenerateSignKey(instance)
+}
+
+// InstallSignCert : installe le certificat d'appareil émis par la gouvernance.
+func (a *App) InstallSignCert(instance, certJSON string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.InstallSignCert(instance, certJSON)
+}
+
 // AddLocalRepo enregistre un dépôt local.
 func (a *App) AddLocalRepo(path string) error {
 	if err := a.ready(); err != nil {
@@ -896,6 +922,14 @@ func (a *App) EditRepoSettings(instance, owner, repo string, fields map[string]a
 		return nil, err
 	}
 	return a.svc.EditRepoSettings(instance, owner, repo, fields, pin)
+}
+
+// DeleteRemoteBranch supprime une branche distante (PIN ; refuse la branche par défaut).
+func (a *App) DeleteRemoteBranch(instance, owner, repo, branch, pin string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.DeleteRemoteBranch(instance, owner, repo, branch, pin)
 }
 func (a *App) RepoLabels(instance, owner, repo string) ([]forgejo.Label, error) {
 	if err := a.ready(); err != nil {

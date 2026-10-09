@@ -99,7 +99,7 @@ func root() *cobra.Command {
 	root.PersistentFlags().StringVar(&flagInstance, "instance", "", "instance ciblée (défaut : instance par défaut)")
 
 	root.AddCommand(cmdVersion(), cmdDoctor(), cmdInstance(), cmdWhoami(), cmdDashboard(),
-		cmdRepo(), cmdIssue(), cmdPull(), cmdRelease(), cmdOrg(), cmdToken(), cmdLocal(), cmdProject(), cmdAdmin(), cmdPIN(), cmdMCP(),
+		cmdRepo(), cmdIssue(), cmdPull(), cmdRelease(), cmdOrg(), cmdToken(), cmdLocal(), cmdProject(), cmdAttest(), cmdAdmin(), cmdPIN(), cmdMCP(),
 		cmdUnlock(), cmdLock(), cmdStatus(), cmdPurge())
 	return root
 }
@@ -169,6 +169,9 @@ func cmdDoctor() *cobra.Command {
 				fmt.Fprintf(out, "session    : %s\n", map[bool]string{true: "déverrouillée", false: "verrouillée"}[d.Unlocked])
 				if d.VaultResidual > 0 {
 					fmt.Fprintf(out, "⚠ coffre OS: %d token(s) résiduel(s) à migrer\n", d.VaultResidual)
+				}
+				if d.SignTestRoot {
+					fmt.Fprintln(out, "⚠ signature de garantie : racine de TEST embarquée (à remplacer par la vraie racine de gouvernance avant mise en prod)")
 				}
 			})
 		},
@@ -726,8 +729,19 @@ func cmdRepo() *cobra.Command {
 			}
 			return emit(cmd, nr, func() { fmt.Fprintf(cmd.OutOrStdout(), "Branche par défaut de %s : %s\n", nr.FullName, args[1]) })
 		}}
+	delBranch := &cobra.Command{Use: "delete-branch <owner>/<repo> <branche>", Short: "Supprime une branche distante (PIN demandé ; refuse la branche par défaut)", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			o, rp, err := splitRepo(args[0])
+			if err != nil {
+				return err
+			}
+			if err := svc.DeleteRemoteBranch(flagInstance, o, rp, args[1]); err != nil {
+				return err
+			}
+			return emit(cmd, map[string]string{"status": "ok"}, func() { fmt.Fprintf(cmd.OutOrStdout(), "Branche distante %s supprimée\n", args[1]) })
+		}}
 
-	c.AddCommand(list, view, branches, tags, commits, tree, file, clone, push, sync, fetch, pull, diff, commit, create, setdesc, del, rename, visibility, archive, defbranch)
+	c.AddCommand(list, view, branches, tags, commits, tree, file, clone, push, sync, fetch, pull, diff, commit, create, setdesc, del, rename, visibility, archive, defbranch, delBranch)
 	return c
 }
 
@@ -1594,6 +1608,53 @@ func cmdProject() *cobra.Command {
 	promote.Flags().StringVar(&promVer, "version", "", "version/tag exact à publier (défaut : dernier tag de la branche)")
 	promote.Flags().StringVar(&promDst, "to", "", "branche de la production cible (défaut : branche par défaut)")
 	c.AddCommand(list, status, promote)
+	return c
+}
+
+// cmdAttest : signature de garantie « SituLab approved ». status (lecture) ; genkey/install-cert (setup).
+func cmdAttest() *cobra.Command {
+	c := &cobra.Command{Use: "attest", Short: "Signature de garantie « SituLab approved » des commits"}
+	var limit int
+	status := &cobra.Command{Use: "status <dossier>", Short: "État d'attestation des derniers commits d'un dépôt local", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rows, err := svc.AttestHistory(args[0], limit)
+			if err != nil {
+				return err
+			}
+			return emit(cmd, rows, func() {
+				for _, r := range rows {
+					mark := "⬜"
+					who := ""
+					if r.Attestation.Verified {
+						mark, who = "✅", " — par "+r.Attestation.Subject
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s%s\n", mark, r.Short, r.Message, who)
+				}
+			})
+		}}
+	status.Flags().IntVar(&limit, "limit", 20, "nombre de commits")
+	genkey := &cobra.Command{Use: "genkey", Short: "Génère la clé d'appareil et affiche sa clé publique à faire certifier (--instance)", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pub, err := svc.GenerateSignKey(flagInstance)
+			if err != nil {
+				return err
+			}
+			return emit(cmd, map[string]string{"public_key": pub}, func() {
+				fmt.Fprintf(cmd.OutOrStdout(), "Clé publique d'appareil (à faire certifier par la gouvernance) :\n%s\n", pub)
+			})
+		}}
+	installCert := &cobra.Command{Use: "install-cert <fichier-cert.json>", Short: "Installe le certificat d'appareil émis par la gouvernance (--instance)", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			b, err := os.ReadFile(args[0])
+			if err != nil {
+				return err
+			}
+			if err := svc.InstallSignCert(flagInstance, string(b)); err != nil {
+				return err
+			}
+			return emit(cmd, map[string]string{"status": "ok"}, func() { fmt.Fprintln(cmd.OutOrStdout(), "Certificat d'appareil installé.") })
+		}}
+	c.AddCommand(status, genkey, installCert)
 	return c
 }
 

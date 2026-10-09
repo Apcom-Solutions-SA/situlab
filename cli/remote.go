@@ -429,6 +429,10 @@ func (r *remote) DeleteTag(instance, owner, repo, tag string) error {
 	return r.call(daemon.OpTagDel, daemon.Args{Instance: instance, Owner: owner, Repo: repo, Tag: tag}, nil)
 }
 
+func (r *remote) DeleteRemoteBranch(instance, owner, repo, branch string) error {
+	return r.call(daemon.OpRepoDelBranch, daemon.Args{Instance: instance, Owner: owner, Repo: repo, Branch: branch}, nil)
+}
+
 func (r *remote) RenameRepo(instance, owner, repo, newName string) (*forgejo.Repo, error) {
 	var x forgejo.Repo
 	if err := r.call(daemon.OpRepoRename, daemon.Args{Instance: instance, Owner: owner, Repo: repo, Name: newName}, &x); err != nil {
@@ -497,6 +501,16 @@ func (r *remote) GitDiscard(path, file string) (string, error) {
 func (r *remote) GitLog(path string, limit int) ([]gitx.LocalCommit, error) {
 	var v []gitx.LocalCommit
 	return v, r.call(daemon.OpGitLog, daemon.Args{Path: path, Limit: limit}, &v)
+}
+func (r *remote) AttestHistory(path string, limit int) ([]core.AttestedCommit, error) {
+	var v []core.AttestedCommit
+	return v, r.call(daemon.OpAttestStatus, daemon.Args{Path: path, Limit: limit}, &v)
+}
+func (r *remote) GenerateSignKey(instance string) (string, error) {
+	return r.callStr(daemon.OpAttestGenKey, "public_key", daemon.Args{Instance: instance})
+}
+func (r *remote) InstallSignCert(instance, certJSON string) error {
+	return r.call(daemon.OpAttestCert, daemon.Args{Instance: instance, Body: certJSON}, nil)
 }
 func (r *remote) GitStashSave(path, message string) (string, error) {
 	return r.callStr(daemon.OpGitStashSave, "output", daemon.Args{Path: path, Message: message})

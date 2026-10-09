@@ -1203,7 +1203,7 @@ async function renderStats() {
     document.querySelectorAll("#stats-presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === p));
     el("stats-custom").classList.toggle("hidden", p !== "custom");
     const r = p === "custom" ? null : statsPresetRange(p);
-    el("stats-range-lbl").textContent = r ? `du ${r.since.slice(0, 10)} au ${r.until.slice(0, 10)}` : "choisissez deux dates";
+    el("stats-range-lbl").textContent = r ? `du ${fmtDay(r.since)} au ${fmtDay(r.until)}` : "choisissez deux dates";
   };
   document.querySelectorAll("#stats-presets button").forEach((b) => b.onclick = () => setPreset(b.dataset.p));
   setPreset("month");
@@ -1217,7 +1217,7 @@ async function renderStatsHistory() {
   try {
     const list = await App().ListTeamReports();
     box.innerHTML = (list && list.length)
-      ? list.map((r) => `<div class="srow"><div><b>État au ${esc(fmtDate(r.created_at))}</b> <span class="muted">· ${esc((r.since || "").slice(0, 10))} → ${esc((r.until || "").slice(0, 10))} · ${r.commits} commits · ${r.authors} personnes</span></div>
+      ? list.map((r) => `<div class="srow"><div><b>État au ${esc(fmtDate(r.created_at))}</b> <span class="muted">· ${esc(fmtDay(r.since))} → ${esc(fmtDay(r.until))} · ${r.commits} commits · ${r.authors} personnes</span></div>
           <button class="btn btn-ghost btn-sm" data-rep="${esc(r.id)}">Ouvrir</button></div>`).join("")
       : `<div class="muted">Aucune analyse pour l'instant — lancez-en une ci-dessus.</div>`;
     box.querySelectorAll("[data-rep]").forEach((b) => b.onclick = async () => {
@@ -1282,7 +1282,7 @@ function statsRenderReport(rep) {
     <div class="kpi"><div class="kpi-n">${t.repos || 0}</div><div class="kpi-l">dépôts actifs</div></div>
   </div>`;
   out.innerHTML = `
-    <div class="report-head"><div><b>État au ${esc(fmtDate(rep.created_at))}</b> <span class="muted">· ${esc((rep.since || "").slice(0, 10))} → ${esc((rep.until || "").slice(0, 10))} · ${rep.repos_scanned} dépôts analysés</span></div>
+    <div class="report-head"><div><b>État au ${esc(fmtDate(rep.created_at))}</b> <span class="muted">· ${esc(fmtDay(rep.since))} → ${esc(fmtDay(rep.until))} · ${rep.repos_scanned} dépôts analysés</span></div>
       <button class="btn btn-ghost btn-sm" id="stats-print">Exporter / imprimer</button></div>
     ${kpis}
     <div class="chart-grid">
@@ -3766,6 +3766,11 @@ function parentOf(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.slice(0, 
 function fmtSize(n) { if (n == null) return ""; if (n < 1024) return n + " o"; if (n < 1048576) return (n / 1024).toFixed(0) + " Ko"; return (n / 1048576).toFixed(1) + " Mo"; }
 // Repli SÛR : si la date distante n'est pas parsable, on ne réinjecte JAMAIS la
 // chaîne brute (elle pourrait contenir du HTML) — on renvoie une chaîne vide.
-function fmtDate(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? "" : d.toLocaleString("fr-CH", { dateStyle: "medium", timeStyle: "short" }); }
-// fmtWhen : date courte « 08.10 14:12 » pour les cartes.
-function fmtWhen(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? "" : d.toLocaleString("fr-CH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+// Format de date suisse jj.mm.aaaa (séparateur point), construit à la main pour un rendu stable.
+const pad2 = (n) => String(n).padStart(2, "0");
+// fmtDay : date seule « 09.10.2026 ».
+function fmtDay(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? "" : `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`; }
+// fmtDate : date + heure « 09.10.2026 14:24 ».
+function fmtDate(s) { if (!s) return ""; const d = new Date(s); return isNaN(d) ? "" : `${fmtDay(s)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+// fmtWhen : identique (jj.mm.aaaa hh:mm), pour les horodatages « maj » des cartes.
+const fmtWhen = fmtDate;

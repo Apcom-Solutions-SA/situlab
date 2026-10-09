@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"situlab/internal/attest"
 	"situlab/internal/config"
 	"situlab/internal/forgejo"
 	"situlab/internal/gitx"
@@ -583,6 +584,7 @@ type Doctor struct {
 	Unlocked      bool     `json:"unlocked"`
 	VaultResidual int      `json:"vault_residual"`  // tokens restant dans l'ancien coffre OS (doit être 0)
 	OtherGitCreds []string `json:"other_git_creds"` // autres identifiants git détectés (clé SSH, credential helper) : la confirmation PIN ne protège qu'en leur absence
+	SignTestRoot  bool     `json:"sign_test_root"`  // la signature de garantie utilise encore la racine de TEST (à remplacer par la vraie racine de gouvernance)
 }
 
 // Doctor diagnostique la machine.
@@ -603,6 +605,7 @@ func (s *Service) Doctor() Doctor {
 	}
 	d.VaultResidual = s.vaultResidual()
 	d.OtherGitCreds = detectGitCredSources()
+	d.SignTestRoot = attest.UsingTestRoot()
 	return d
 }
 
@@ -783,6 +786,9 @@ func (s *Service) Commit(path, message string) (string, error) {
 		return "", err
 	}
 	out, err := gitx.Commit(path, message)
+	if err == nil {
+		s.attestCommit(path, gitx.HeadSHA(path)) // signature de garantie (best-effort, non bloquant)
+	}
 	return out, asConflict(err)
 }
 
@@ -1219,6 +1225,7 @@ func (s *Service) Synchronize(instance, path, message, pinCode string) (*SyncRes
 		if _, err := gitx.Commit(path, msg); err != nil {
 			return nil, asConflict(err)
 		}
+		s.attestCommit(path, gitx.HeadSHA(path)) // signature de garantie (best-effort)
 		res.Committed = true
 	}
 
