@@ -2,6 +2,14 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.8.2] — 2026-10-09 — « Pipeline de publication »
+
+### Corrigé
+- **CI de release (Windows)** : l'empaquetage NSIS échouait car `makensis.exe` était cherché dans
+  `Program Files` alors que Chocolatey l'installe (32 bits) dans `Program Files (x86)`. L'appel est
+  désormais robuste (shim PATH, puis chemins connus) et vérifie le code de sortie. macOS et Linux
+  se construisaient déjà. Première Release publique des trois installeurs.
+
 ## [1.8.1] — 2026-10-09 — « Promotion stricte »
 
 ### Corrigé

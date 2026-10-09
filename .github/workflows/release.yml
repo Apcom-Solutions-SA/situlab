@@ -68,8 +68,15 @@ jobs:
         run: |
           # Aligne la version de l'installateur sur le tag, puis compile depuis build/
           (Get-Content build/installer.nsi) -replace '!define VERSION ".*"', '!define VERSION "${{ steps.ver.outputs.v }}"' | Set-Content build/installer.nsi
+          # makensis : via le shim PATH de Chocolatey si présent, sinon le chemin d'install (NSIS est
+          # 32 bits → Program Files (x86)). Robuste quel que soit le runner.
+          $makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
+          if (-not $makensis) { $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          if (-not (Test-Path $makensis)) { $makensis = "$env:ProgramFiles\NSIS\makensis.exe" }
+          Write-Host "makensis = $makensis"
           cd build
-          & "$env:ProgramFiles\NSIS\makensis.exe" installer.nsi
+          & $makensis installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis a échoué (code $LASTEXITCODE)" }
           Rename-Item SituLab-Setup.exe "SituLab-${{ steps.ver.outputs.v }}-windows-amd64-setup.exe"
 
       - uses: actions/upload-artifact@v4
