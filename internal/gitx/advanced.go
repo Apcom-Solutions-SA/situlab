@@ -266,6 +266,19 @@ func PushCommitTo(dir, url, sha, branch, token string, github bool, baseURL stri
 	return runC(dir, NetTimeout, authCfg(token, github, baseURL), args...)
 }
 
+// PushTagTo publie un tag léger (pointant sur le SHA d'un commit) vers un dépôt distant arbitraire :
+// `git push <url> <sha>:refs/tags/<tag>`. Étiquette la version promue sur la vitrine, pour tout hôte
+// (GitHub comme Forgejo) via HTTPS + jeton. Auth injectée (jamais en argv).
+func PushTagTo(dir, url, tag, sha, token string, github bool, baseURL string) (string, error) {
+	if err := safeRevision(sha); err != nil {
+		return "", err
+	}
+	if err := safeRef(tag); err != nil {
+		return "", err
+	}
+	return runC(dir, NetTimeout, authCfg(token, github, baseURL), "push", "--", url, sha+":refs/tags/"+tag)
+}
+
 // --- Pousser après réécriture (distant : token + PIN côté appelant) ---
 
 // PushForceWithLease force la mise à jour de la branche distante APRÈS un rebase/amend, mais

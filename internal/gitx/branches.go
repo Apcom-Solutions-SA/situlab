@@ -146,6 +146,14 @@ func MatrixOf(dir string) (*BranchMatrix, error) {
 // NearestTagOf expose nearestTag : le tag le plus proche joignable depuis une réf (ex. "origin/dev").
 func NearestTagOf(dir, ref string) string { return nearestTag(dir, ref) }
 
+// TagPublished indique si le commit d'un tag est déjà présent sur l'atelier (ancêtre de — ou égal à —
+// remoteRef, p.ex. "origin/main"). Sert à n'autoriser la promotion que de contenu publié sur la
+// source de vérité, jamais de travail encore local.
+func TagPublished(dir, tag, remoteRef string) bool {
+	_, err := run(dir, LocalTimeout, "merge-base", "--is-ancestor", tag+"^{commit}", remoteRef)
+	return err == nil
+}
+
 // TagsFor renvoie les tags joignables depuis une réf (ex. "origin/dev"), du plus récent au plus
 // ancien (tri de version). Sert à proposer les versions promouvables d'une branche d'atelier.
 func TagsFor(dir, ref string) []string {

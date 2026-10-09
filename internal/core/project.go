@@ -349,9 +349,15 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 	if !st.Clean {
 		return nil, fmt.Errorf("l'atelier a des modifications non enregistrées — enregistrez (ou mettez de côté) avant de promouvoir")
 	}
+	// Invariant de flux : on ne promeut JAMAIS depuis le local directement. La vitrine se nourrit de
+	// l'ATELIER, pas du poste. Si le clone a des commits non encore publiés sur l'atelier, on refuse :
+	// publiez d'abord l'atelier (local → atelier), puis promouvez (atelier → vitrine).
+	if st.Ahead > 0 {
+		return nil, fmt.Errorf("votre clone local a %d commit(s) non publiés sur l'atelier — publiez d'abord l'atelier (local → atelier), puis promouvez (atelier → vitrine)", st.Ahead)
+	}
 
-	// 2) Source & version. L'utilisateur décide : branche d'atelier et version précise. À défaut, on
-	//    retombe sur la branche par défaut de l'atelier et son dernier tag (appels non interactifs).
+	// 2) Source & version. On publie une version TAGUÉE de l'atelier (le tag est obligatoire : il
+	//    accompagnera la vitrine). La version demandée, ou le dernier tag de la branche d'atelier.
 	srcBranch := strings.TrimSpace(opts.SourceBranch)
 	if srcBranch == "" {
 		if ar, e := s.ViewRepo(proj.Atelier.Instance, proj.Atelier.Owner, proj.Atelier.Repo); e == nil {
@@ -364,24 +370,19 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 	case version != "":
 		srcRef = version // on publie exactement la version (tag) demandée
 	case srcBranch != "":
-		// dernier tag joignable depuis cette branche ; à défaut, la pointe de la branche.
-		if t := gitx.NearestTagOf(path, "origin/"+srcBranch); t != "" {
-			version, srcRef = t, t
-		} else {
-			srcRef = "origin/" + srcBranch
-			version = "promo-" + time.Now().Format("20060102-1504")
-		}
+		version = gitx.NearestTagOf(path, "origin/"+srcBranch) // dernier tag joignable sur l'atelier
+		srcRef = version
 	default:
-		// Compat : dernier tag global de l'atelier, sinon clone en retard refusé.
-		if st.Behind > 0 {
-			return nil, fmt.Errorf("votre clone de l'atelier est en retard de %d version(s) sur le serveur — récupérez-les d'abord, puis promouvez", st.Behind)
-		}
-		_, version, _ = s.latestTags(proj.Atelier)
-		if version != "" {
-			srcRef = version
-		} else {
-			srcRef, version = "HEAD", "promo-"+time.Now().Format("20060102-1504")
-		}
+		_, version, _ = s.latestTags(proj.Atelier) // dernier tag de l'atelier
+		srcRef = version
+	}
+	if version == "" || srcRef == "" {
+		return nil, fmt.Errorf("aucune version TAGUÉE à promouvoir sur « %s » — créez d'abord un tag de version (ex. v1.8.0) sur l'atelier, puis promouvez", srcBranch)
+	}
+	// La version doit être PUBLIÉE sur l'ATELIER (son commit est déjà sur la branche distante), pas
+	// seulement en local — sinon la vitrine recevrait du contenu absent de la source de vérité.
+	if srcBranch != "" && !gitx.TagPublished(path, version, "origin/"+srcBranch) {
+		return nil, fmt.Errorf("la version « %s » n'est pas publiée sur l'atelier — publiez-la d'abord (local → atelier) avant de promouvoir", version)
 	}
 
 	// 3) Infos prod : URL de clone + branche par défaut + jeton de la connexion prod.
@@ -419,12 +420,18 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 		return nil, fmt.Errorf("publication vers la production échouée : %w", err)
 	}
 
-	// 6) Marqueur d'équilibre : version promue + date.
+	// 6) Étiqueter la version sur la vitrine (OBLIGATOIRE) : une version promue porte toujours son tag,
+	//    pour que la vitrine soit identifiable et que l'équilibre se lise par version.
+	if _, err := gitx.PushTagTo(path, pr.CloneURL, version, sha, token, github, base); err != nil {
+		return nil, fmt.Errorf("commit publié mais étiquetage « %s » de la vitrine échoué : %w", version, err)
+	}
+
+	// 7) Marqueur d'équilibre : version promue + date.
 	s.recordPromotion(projectName, prod.Key(), version)
 
 	res := &PromoteResult{
 		Project: projectName, Production: prod.Owner + "/" + prod.Repo, Version: version, Branch: branch,
-		Summary: fmt.Sprintf("Version %s (%s) publiée sur la production %s/%s → %s.", version, srcLabel, prod.Owner, prod.Repo, branch),
+		Summary: fmt.Sprintf("Version %s (%s) publiée et étiquetée sur la production %s/%s → %s.", version, srcLabel, prod.Owner, prod.Repo, branch),
 	}
 	return res, nil
 }

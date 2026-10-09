@@ -2,6 +2,17 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.8.1] — 2026-10-09 — « Promotion stricte »
+
+### Corrigé
+- **Promotion** : le **tag de version est désormais obligatoire** sur la vitrine — une version promue y
+  est toujours étiquetée (`PushTagTo`), pour que l'équilibre se lise par version.
+- **Flux imposé** : la promotion **refuse** de publier si le clone local a des commits non publiés sur
+  l'atelier, et vérifie que la version est **présente sur l'atelier** (`TagPublished`). On ne promeut
+  jamais du local vers la vitrine : toujours **local → atelier**, puis **atelier → vitrine**.
+- **Contraste** : la pastille de version « atelier en retard » (ambre) devenait illisible (texte ambre
+  sur fond ambre) — fond corrigé, version lisible.
+
 ## [1.8.0] — 2026-10-09 — « Projets = tableau de bord »
 
 ### Ajouté

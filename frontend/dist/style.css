@@ -287,7 +287,7 @@ label small { font-weight: 500; color: var(--text-faint); }
 /* bulle portant un tag de version : pastille opaque (fond surface) cerclée par l'état */
 .pg-tagged { width: auto; height: auto; border-radius: var(--r-full); padding: 2px 9px; font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; background: var(--bg-surface); border: 1.5px solid var(--border-strong); box-shadow: none; }
 .pg-local.pg-tagged, .pg-atelier.pg-tagged { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
-.pg-atelier.pg-tagged.pg-late { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
+.pg-atelier.pg-tagged.pg-late { background: var(--bg-surface); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); box-shadow: none; }
 .pg-prod { width: auto; height: auto; border-radius: var(--r-full); padding: 2px 9px; font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; background: var(--bg-surface); color: var(--ok); border: 1.5px solid color-mix(in srgb, var(--ok) 55%, var(--border)); }
 .pg-prod.pg-late { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
 .pg-empty { width: 10px; height: 10px; border-radius: 50%; border: 2px dashed var(--border-strong); background: var(--bg-surface); box-sizing: border-box; }

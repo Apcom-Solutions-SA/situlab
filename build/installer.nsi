@@ -3,7 +3,7 @@
 ; Produit : build\SituLab-Setup.exe
 
 !define APP "SituLab"
-!define VERSION "1.8.0"
+!define VERSION "1.8.1"
 !define PUBLISHER "APCOM Solutions SA"
 !define EXE "situlab.exe"
 
