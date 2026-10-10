@@ -18,7 +18,12 @@ type stubPrompter struct {
 	ok  bool
 }
 
-func (s stubPrompter) PromptPIN(string, any) (string, bool) { return s.pin, s.ok }
+func (s stubPrompter) PromptPIN(string, any) (string, daemon.PINOutcome) {
+	if s.ok {
+		return s.pin, daemon.PINConfirmed
+	}
+	return "", daemon.PINRefused
+}
 
 // TestRemoteRoundtrip valide la chaîne complète client CLI -> IPC -> démon -> noyau,
 // y compris le mapping d'erreur typée (sans GUI ni auto-démarrage).

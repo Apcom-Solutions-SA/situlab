@@ -288,9 +288,9 @@ func mcpTools() []mcpTool {
 			func(a map[string]any) (any, error) { return svc.Projects() }},
 		{"project_status", "Équilibre d'un projet : version de l'atelier vs chaque production (équilibré / en retard de N versions). Utile pour savoir ce qui est en prod.", obj(map[string]any{"name": strProp("nom du projet")}, "name"),
 			func(a map[string]any) (any, error) { return svc.ProjectStatus(argStr(a, "name")) }},
-		{"project_promote", "Publie une version CHOISIE de l'atelier vers une production du projet (un commit propre, pas les détails). Vers la PRODUCTION → PIN confirmé dans la fenêtre : tu prépares, l'humain valide. prod = index de la production (0 = la première) ; from = branche atelier ; version = tag exact ; to = branche prod cible.", obj(map[string]any{"name": strProp("nom du projet"), "prod": intProp("index de la production (0 = première)"), "from": strProp("branche de l'atelier (défaut : par défaut)"), "version": strProp("version/tag exact (défaut : dernier tag)"), "to": strProp("branche de la production cible (défaut : par défaut)")}, "name"),
+		{"project_promote", "Publie une version CHOISIE de l'atelier vers une production du projet (un commit propre, pas les détails). Vers la PRODUCTION → PIN confirmé dans la fenêtre : tu prépares, l'humain valide. prod = index de la production (0 = la première) ; from = branche atelier ; version = tag exact ; to = branche prod cible ; mode = code|tag|release (défaut tag ; attention : pousser un tag ne crée PAS seul une Release GitHub — la CI la produit).", obj(map[string]any{"name": strProp("nom du projet"), "prod": intProp("index de la production (0 = première)"), "from": strProp("branche de l'atelier (défaut : par défaut)"), "version": strProp("version/tag exact (défaut : dernier tag)"), "to": strProp("branche de la production cible (défaut : par défaut)"), "mode": strProp("méthode : code | tag (défaut) | release"), "notes": strProp("notes de version (mode release)")}, "name"),
 			func(a map[string]any) (any, error) {
-				return svc.ProjectPromote(argStr(a, "name"), argInt(a, "prod"), argStr(a, "from"), argStr(a, "version"), argStr(a, "to"))
+				return svc.ProjectPromote(argStr(a, "name"), argInt(a, "prod"), argStr(a, "from"), argStr(a, "version"), argStr(a, "to"), argStr(a, "mode"), argStr(a, "notes"))
 			}},
 
 		// --- Mutations locales (sans PIN) ---

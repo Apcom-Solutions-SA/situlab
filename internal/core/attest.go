@@ -63,6 +63,22 @@ func (s *Service) attestCommit(path, sha string) {
 		return
 	}
 	inst := s.instanceForPath(path)
+	// Mode SERVEUR (1.9.6) : si la connexion du dépôt est en « signature serveur », le démon demande
+	// l'empreinte au service (clé jamais sur le poste). Prioritaire sur toute signature locale ; on ne
+	// retombe pas sur une clé locale (ce serait contraire au sens du mode serveur). Best-effort non bloquant.
+	if inst != "" && s.signModeServer(inst) {
+		s.attestCommitViaServer(inst, path, sha)
+		return
+	}
+	// Préférence (1.9.5) : signature LOGICIELLE unique « SituLab » si elle est embarquée — le logiciel
+	// signe, pas l'utilisateur. Pas de cert nominatif requis. (Repli sur le cert d'instance sinon.)
+	if priv, cert, ok := attest.SoftwareSigner(); ok {
+		defer zero(priv)
+		if b, err := attest.Sign(priv, cert, sha).Encode(); err == nil {
+			_ = gitx.WriteNote(path, attestNotesRef, sha, string(b))
+		}
+		return
+	}
 	if inst == "" {
 		return
 	}
@@ -80,6 +96,116 @@ func (s *Service) attestCommit(path, sha string) {
 		return
 	}
 	_ = gitx.WriteNote(path, attestNotesRef, sha, string(b))
+}
+
+// signModeServer indique si la connexion est configurée en mode « signature serveur » (1.9.6).
+func (s *Service) signModeServer(inst string) bool {
+	cfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+	in := cfg.Resolve(inst)
+	return in != nil && in.SignMode == "server"
+}
+
+// attestCommitViaServer demande l'empreinte du commit au service de signature serveur et l'écrit en note.
+// Le jeton Forgejo (détenu par le démon) autorise la demande ; il n'est JAMAIS remis au client/agent.
+// Best-effort non bloquant : un échec (réseau, 403, 429, 503) laisse simplement le commit sans note.
+func (s *Service) attestCommitViaServer(inst, path, sha string) {
+	cfg, err := config.Load()
+	if err != nil {
+		return
+	}
+	in := cfg.Resolve(inst)
+	if in == nil {
+		return
+	}
+	token := s.instanceToken(inst)
+	if token == "" {
+		return
+	}
+	remote := ""
+	if st, e := gitx.StatusOf(path); e == nil {
+		remote = st.Remote
+	}
+	att, e := requestServerAttestation(in.SignServerURL, token, sha, remote)
+	if e != nil {
+		return
+	}
+	_ = gitx.WriteNote(path, attestNotesRef, sha, string(att))
+}
+
+// RefreshRevokedServers récupère les listes de révocation des services de signature des connexions en
+// mode serveur et les fusionne dans RevokedSerials (best-effort, non bloquant). À appeler périodiquement.
+func (s *Service) RefreshRevokedServers() {
+	cfg, err := config.Load()
+	if err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	var urls []string
+	for _, in := range cfg.Instances {
+		if in.SignMode != "server" {
+			continue
+		}
+		u := in.SignServerURL
+		if u == "" {
+			u = defaultSignServerURL
+		}
+		if !seen[u] {
+			seen[u] = true
+			urls = append(urls, u)
+		}
+	}
+	if len(urls) == 0 {
+		return
+	}
+	add := map[string]bool{}
+	for _, u := range urls {
+		if ser, e := fetchRevokedSerials(u); e == nil {
+			for _, x := range ser {
+				add[x] = true
+			}
+		}
+	}
+	if len(add) == 0 {
+		return
+	}
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
+	cfg2, err := config.Load()
+	if err != nil {
+		return
+	}
+	have := map[string]bool{}
+	for _, x := range cfg2.RevokedSerials {
+		have[x] = true
+	}
+	changed := false
+	for x := range add {
+		if !have[x] {
+			cfg2.RevokedSerials = append(cfg2.RevokedSerials, x)
+			changed = true
+		}
+	}
+	if changed {
+		if cfg2.Save() == nil {
+			s.publish(cfg2)
+		}
+	}
+}
+
+// pushAttestNotes publie (best-effort, non bloquant) la ref de notes d'attestation après un envoi de
+// code, pour rendre la signature « SituLab approved » visible en ligne. Un échec est silencieux : la
+// discipline reste non bloquante, et un dépôt sans attestation (pas de cert) n'a simplement rien à pousser.
+func (s *Service) pushAttestNotes(instance, path string) {
+	_, _ = gitx.PushNotes(path, attestNotesRef, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
+}
+
+// fetchAttestNotes récupère (best-effort, non bloquant) la ref de notes d'attestation depuis le distant,
+// pour que l'on VOIE les signatures posées par les autres postes sur les commits récupérés.
+func (s *Service) fetchAttestNotes(instance, path string) {
+	_, _ = gitx.FetchNotes(path, attestNotesRef, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
 }
 
 // CommitAttestation renvoie l'état d'attestation d'un commit (lecture locale, pas de PIN, fail-closed).

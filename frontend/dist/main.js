@@ -618,14 +618,48 @@ function tokenHelp(provider) {
   </details>`;
 }
 
+// serverPageURL : URL de gestion côté serveur selon le fournisseur et le type de page.
+// GitHub n'expose pas les jetons/les comptes par API → on y renvoie l'utilisateur par un bouton.
+function serverPageURL(inst, kind) {
+  const u = (inst && inst.url ? inst.url : "").replace(/\/+$/, "");
+  const gh = inst && (inst.provider === "github" || /github\.com/i.test(u));
+  if (gh) {
+    const base = "https://github.com";
+    if (kind === "tokens") return base + "/settings/tokens";
+    if (kind === "users") return base + "/settings/organizations";
+    return base + "/settings";
+  }
+  if (!u) return "";
+  if (kind === "tokens") return u + "/user/settings/applications";
+  if (kind === "users") return u + "/-/admin/users";
+  return u + "/user/settings";
+}
+
+// serverLinkBtn : bouton « gérer sur le serveur ↗ » ouvrant la page du fournisseur dans le navigateur.
+// Via data-openurl + écouteur délégué (la CSP script-src 'self' interdit les onclick inline).
+function serverLinkBtn(inst, kind, label) {
+  const url = serverPageURL(inst, kind);
+  if (!url) return "";
+  return `<button class="btn btn-ghost btn-sm" data-openurl="${esc(url)}">${esc(label || "Gérer sur le serveur")} ↗</button>`;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest("[data-openurl]");
+  if (b) { try { window.runtime.BrowserOpenURL(b.dataset.openurl); } catch (_) {} }
+});
+
 async function renderTokens() {
   if (curIsGitHub()) {
-    el("view").innerHTML = `<div class="view-head"><div class="view-title">Jetons</div></div>` +
-      blankslate("⚿", "Gestion des jetons indisponible sur GitHub", "GitHub ne permet pas de gérer les jetons depuis une application. Créez ou révoquez vos jetons d'accès personnels directement sur github.com → Settings → Developer settings → Personal access tokens.");
+    el("view").innerHTML = `<div class="view-head"><div class="view-title">Jetons</div>
+        <div class="view-sub">GitHub ne permet pas à une application de lister ou créer vos jetons — ça se gère sur github.com.</div></div>
+      <div class="panel" style="max-width:560px"><div class="panel-h">Jetons d'accès personnels (GitHub)</div>
+        <p class="sub">Vos <b>PAT</b> (Personal Access Tokens) se créent, se listent et se révoquent directement sur GitHub → <i>Settings → Developer settings → Personal access tokens</i>.</p>
+        <div class="set-row-c" style="justify-content:flex-start">${serverLinkBtn(curInst(), "tokens", "Ouvrir les jetons GitHub")}</div>
+      </div>`;
     return;
   }
-  const title = `<div class="view-head"><div class="view-title">Jetons Forgejo</div>
-    <div class="view-sub">Vos jetons sur « ${esc(state.instance)} » pour relier d'autres outils (un script, un autre poste, une intégration). Un jeton hérite de vos droits.</div></div>`;
+  const title = `<div class="view-head view-head-row"><div><div class="view-title">Jetons Forgejo</div>
+    <div class="view-sub">Vos jetons sur « ${esc(state.instance)} ». Un jeton hérite de vos droits.</div></div>
+    ${serverLinkBtn(curInst(), "tokens", "Gérer sur le serveur")}</div>`;
   const twoFA = needs2FA();
   // Compte SANS 2FA : le mot de passe mémorisé (chiffré par le PIN) donne l'accès direct —
   // le PIN suffit, pas de re-saisie. On tente une fois ; échec → panneau.
@@ -931,6 +965,7 @@ async function renderAdmin() {
     <div class="view-sub" style="margin:-6px 0 10px">Gérer les comptes qui peuvent utiliser « ${esc(state.instance)} ».</div>
     <div class="toolbar">
       <button class="btn btn-primary btn-sm" id="new-user">＋ Nouvel utilisateur</button>
+      ${serverLinkBtn(curInst(), "users", "Gérer sur le serveur")}
     </div>
     <div id="users"><div class="skeleton"></div></div>`;
   wireUserMgmtTabs();
@@ -1471,7 +1506,7 @@ async function renderRepos(live) {
     el("view").innerHTML = `
       <div class="view-head">
         <div class="view-title">Dépôts</div>
-        <div class="view-sub">Explorateur des dépôts de la connexion « ${esc(state.instance)} » et de leurs clones locaux. <span id="checked-at" class="checked"></span></div>
+        <div class="view-sub">« ${esc(state.instance)} » <span id="checked-at" class="checked"></span></div>
       </div>
       <div class="toolbar">
         <input id="repo-search" type="text" placeholder="Rechercher un dépôt…" aria-label="Rechercher" value="${esc(state.search)}" />
@@ -1730,6 +1765,14 @@ function stateBadge(code) {
 // Clé UNIQUE par carte : inclut le chemin local, car un même dépôt distant peut avoir PLUSIEURS
 // clones locaux (donc plusieurs cartes). Sans ça, déplier/mettre en cache l'un affectait l'autre.
 function repoKey(r) { return (r.has_remote ? r.full_name : r.name) + "@" + (r.local_path || ""); }
+
+// repoTitleHTML : met le NOM du dépôt en avant et l'organisation en préfixe discret. Pour un
+// non-initié, un dépôt est d'abord un dossier ; « LiG/KERNEL » devient « LiG/ » (gris) + « KERNEL » (fort).
+function repoTitleHTML(fullName) {
+  const i = (fullName || "").indexOf("/");
+  if (i < 0) return `<span class="nm">${esc(fullName || "")}</span>`;
+  return `<span class="nm-org">${esc(fullName.slice(0, i))}/</span><span class="nm">${esc(fullName.slice(i + 1))}</span>`;
+}
 // folderOf : dernier segment du chemin local (pour distinguer deux clones du même dépôt).
 function folderOf(p) { return p ? p.split(/[\\/]/).filter(Boolean).pop() : ""; }
 // stateRank : ordre d'actionnabilité (plus petit = plus urgent). Sert à choisir l'état
@@ -1762,9 +1805,10 @@ function repoCardGrouped(r, i) {
   }).join("");
   return `<div class="repo-card grouped ${(STATES[r.state] || STATES.nolocal).cls}" data-key="${esc("R:" + r.full_name)}" data-i="${i}">
     <div class="repo-head repo-head-static">
-      <div class="repo-title"><span class="nm">${esc(r.full_name)}</span> ${vis} <span class="pill sm clone-count" title="${n} copies locales de ce dépôt sur ce poste">● ${n} copies</span></div>
+      <div class="repo-title">${repoTitleHTML(r.full_name)} ${vis} <span class="pill sm clone-count" title="Ce même dépôt est copié ${n} fois sur ce poste (dossiers ou branches différents)">📁 ${n} copies</span></div>
       ${stateBadge(r.state)}
     </div>
+    <div class="repo-sub muted">Plusieurs copies locales du même dépôt — un dossier par ligne (branche / état propres).</div>
     <div class="clone-list">${rows}</div>
   </div>`;
 }
@@ -1800,7 +1844,7 @@ function repoCard(r, i) {
 
   return `<div class="repo-card ${(STATES[r.state] || STATES.nolocal).cls}" data-key="${esc(key)}" data-i="${i}">
     <div class="repo-head" data-head data-i="${i}" role="button" tabindex="0" aria-expanded="${open}" title="Cliquez pour voir les branches">
-      <div class="repo-title"><span class="chev">${open ? "▾" : "▸"}</span> <span class="nm">${esc(title)}</span> ${vis}</div>
+      <div class="repo-title"><span class="chev">${open ? "▾" : "▸"}</span> ${r.has_remote ? repoTitleHTML(title) : `<span class="nm">${esc(title)}</span>`} ${vis}</div>
       ${stateBadge(r.state)}
     </div>
     <div class="repo-summary">${sum.join(" ")}</div>
@@ -1948,7 +1992,7 @@ async function renderDetail() {
   el("view").innerHTML = `
     <div class="detail-head">
       <button class="btn-back" id="back">‹ Dépôts</button>
-      <div class="detail-title">${esc(d.full_name || d.repo)}</div>
+      <div class="detail-title">${repoTitleHTML(d.full_name || d.repo)}</div>
       <div class="detail-actions">
         ${d.has_remote ? `<label class="sr-only" for="ref-sel">Branche ou version</label><select id="ref-sel" class="select ref-sel"></select>` : ""}
         ${d.has_remote ? `<button class="btn btn-ghost btn-sm" id="open-web">Ouvrir en ligne ↗</button>` : ""}
@@ -1965,7 +2009,14 @@ async function renderDetail() {
     <div id="detail-body"><div class="skeleton"></div></div>`;
   el("back").onclick = () => navTo("repos");
   if (el("open-web")) el("open-web").onclick = () => { try { window.runtime.BrowserOpenURL(d.html_url || ((state.repos || []).find((x) => x.full_name === d.full_name) || {}).html_url); } catch (e) {} };
-  if (el("unfollow")) el("unfollow").onclick = async () => { try { await App().RemoveLocalRepo(d.local_path); toast("Dépôt retiré du suivi", "ok"); navTo("repos"); } catch (e) { toast(cleanErr(e), "err"); } };
+  if (el("unfollow")) el("unfollow").onclick = () => {
+    // Protection (1.9.2) : « ne plus suivre » demande désormais une confirmation explicite. Le dossier
+    // local et son contenu ne sont PAS touchés — seul le suivi dans SituLab est retiré.
+    openModal("Ne plus suivre ce dépôt ?", `<div class="field"><div class="callout">SituLab cessera d'afficher le clone local <b>${esc(d.local_path)}</b>. <b>Aucun fichier n'est supprimé</b> : le dossier reste sur votre poste et peut être resuivi plus tard.</div></div>`, async () => {
+      try { await App().RemoveLocalRepo(d.local_path); closeModal(); toast("Dépôt retiré du suivi", "ok"); navTo("repos"); } catch (e) { toast(cleanErr(e), "err"); }
+    });
+    el("modal-ok").textContent = "Ne plus suivre";
+  };
   if (el("git-local")) el("git-local").onclick = () => gitLocalModal(d);
   if (el("repo-settings")) el("repo-settings").onclick = () => repoSettingsModal(d);
   if (el("del-repo")) el("del-repo").onclick = () => deleteRepoModal(d.owner, d.repo);
@@ -2029,9 +2080,10 @@ async function paintActivite(body, liveOnly) {
   if (liveOnly) return;
   const d = state.detail;
   body.innerHTML = `<div class="toolbar">
-      <button class="btn btn-primary btn-sm" id="new-issue">＋ Nouvelle issue</button>
-      <button class="btn btn-ghost btn-sm" id="new-pr">＋ Demande de fusion</button>
-      <button class="btn btn-ghost btn-sm" id="new-rel">＋ Version</button>
+      <button class="btn btn-primary btn-sm" id="new-issue" title="Une issue = une note de suivi : un bug à corriger, une idée, une question. Elle reste ouverte jusqu'à ce qu'on la ferme.">＋ Nouvelle issue</button>
+      <button class="btn btn-ghost btn-sm" id="new-pr" title="Une demande de fusion propose de réunir le travail d'une branche dans une autre, pour relecture avant d'intégrer.">＋ Demande de fusion</button>
+      <button class="btn btn-ghost btn-sm" id="new-rel" title="Une version (release) marque un point stable, étiqueté (ex. v1.0), à publier.">＋ Version</button>
+      <span class="act-help muted">Issues = notes de suivi · Fusions = réunir une branche après relecture · Versions = points stables publiés.</span>
     </div><div id="act"><div class="skeleton"></div></div>`;
   el("new-issue").onclick = () => newIssueModal(d);
   el("new-pr").onclick = () => newPullModal(d);
@@ -2510,29 +2562,137 @@ function paintCrumbs() {
   c.onclick = (ev) => { const a = ev.target.closest("a"); if (a) { d.path = a.dataset.p; paintFiles(el("detail-body")); } };
 }
 
+// mdToHTML : rendu Markdown MINIMAL et SÛR (échappement d'abord), zéro dépendance. Couvre titres, code
+// (inline + bloc), gras/italique, listes à puces, liens http(s) et paragraphes — suffisant pour un README.
+function mdToHTML(src) {
+  const esc2 = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (s) => esc2(s)
+    .replace(/`([^`]+)`/g, (_, c) => "<code>" + c + "</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\*([^*]+)\*/g, "<i>$1</i>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => `<a href="${u}" data-ext>${t}</a>`);
+  const lines = String(src).replace(/\r\n/g, "\n").split("\n");
+  const out = []; let inCode = false, inList = false; const buf = [];
+  const flushP = () => { if (buf.length) { out.push("<p>" + inline(buf.join(" ")) + "</p>"); buf.length = 0; } };
+  const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+  for (const ln of lines) {
+    if (/^```/.test(ln)) { if (inCode) { out.push("</code></pre>"); inCode = false; } else { flushP(); closeList(); out.push('<pre class="md-code"><code>'); inCode = true; } continue; }
+    if (inCode) { out.push(esc2(ln) + "\n"); continue; }
+    const h = ln.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { flushP(); closeList(); const lvl = Math.min(6, h[1].length) + 2; out.push(`<h${lvl}>` + inline(h[2]) + `</h${lvl}>`); continue; }
+    const li = ln.match(/^\s*[-*]\s+(.*)$/);
+    if (li) { flushP(); if (!inList) { out.push("<ul>"); inList = true; } out.push("<li>" + inline(li[1]) + "</li>"); continue; }
+    if (ln.trim() === "") { flushP(); closeList(); continue; }
+    buf.push(ln);
+  }
+  if (inCode) out.push("</code></pre>");
+  flushP(); closeList();
+  return out.join("\n");
+}
+
+// downloadText : propose le téléchargement d'un contenu texte via un lien blob (best-effort WebView2).
+function downloadText(name, text) {
+  try {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "application/octet-stream" }));
+    a.download = name || "fichier.txt"; document.body.appendChild(a); a.click();
+    setTimeout(() => { try { URL.revokeObjectURL(a.href); } catch (_) {} a.remove(); }, 1000);
+  } catch (_) { toast("Téléchargement impossible sur ce poste", "err"); }
+}
+
+// openFile : consultation d'un fichier en plusieurs MODES (1.9.2). Onglet « Interprété » (par défaut pour
+// .md et .html, mise en forme), onglet « Texte brut » (affichage d'origine), plus « Ouvrir dans le
+// navigateur » et « Télécharger ». Le HTML est rendu dans une iframe SANDBOXÉE (aucun script exécuté).
 async function openFile(e) {
   const d = state.detail, body = el("detail-body");
   body.innerHTML = `<div class="crumbs" id="crumbs"></div><div class="skeleton"></div>`;
   paintCrumbs();
-  try {
-    const content = await App().RepoFile(state.instance, d.owner, d.repo, e.path, d.ref);
-    if (state.detail !== d) return;
-    body.innerHTML = `<div class="file-head"><button class="btn-back" id="fback">‹ ${esc(parentOf(e.path) || d.repo)}</button><span class="file-name">${esc(e.name)}</span></div><pre class="filebox">${esc(content)}</pre>`;
-    el("fback").onclick = () => { d.path = parentOf(e.path); paintFiles(body); };
-  } catch (err) { body.innerHTML = surfaceError("Fichier illisible", cleanErr(err), null); }
+  let content;
+  try { content = await App().RepoFile(state.instance, d.owner, d.repo, e.path, d.ref); }
+  catch (err) { body.innerHTML = surfaceError("Fichier illisible", cleanErr(err), null); return; }
+  if (state.detail !== d) return;
+  const ext = (e.name.split(".").pop() || "").toLowerCase();
+  const isMd = ext === "md" || ext === "markdown";
+  const isHtml = ext === "html" || ext === "htm";
+  const canInterpret = isMd || isHtml;
+  const openBtn = e.html_url ? `<button class="btn btn-ghost btn-sm" id="f-open">Ouvrir dans le navigateur ↗</button>` : "";
+  const hasLocal = !!d.local_path; // l'historique par fichier se lit sur le clone local
+  const histoTab = hasLocal ? `<button class="ftab" data-ft="histo">Historique</button>` : "";
+  const tabs = `<div class="file-tabs">${canInterpret ? `<button class="ftab active" data-ft="rendu">Interprété</button>` : ""}<button class="ftab${canInterpret ? "" : " active"}" data-ft="brut">Texte brut</button>${histoTab}</div>`;
+  body.innerHTML = `<div class="file-head"><button class="btn-back" id="fback">‹ ${esc(parentOf(e.path) || d.repo)}</button><span class="file-name">${esc(e.name)}</span><span class="file-actions">${openBtn}<button class="btn btn-ghost btn-sm" id="f-dl">Télécharger</button></span></div>${tabs}<div id="fview"></div>`;
+  const fv = el("fview");
+  const showRaw = () => { fv.innerHTML = `<pre class="filebox">${esc(content)}</pre>`; };
+  const showRendered = () => {
+    if (isMd) { fv.innerHTML = `<div class="md-render">${mdToHTML(content)}</div>`; }
+    else if (isHtml) { fv.innerHTML = `<iframe class="html-render" sandbox title="aperçu"></iframe>`; const f = fv.querySelector("iframe"); if (f) f.srcdoc = content; }
+    fv.querySelectorAll("a[data-ext]").forEach((a) => a.onclick = (ev) => { ev.preventDefault(); try { window.runtime.BrowserOpenURL(a.getAttribute("href")); } catch (_) {} });
+  };
+  // Historique du FICHIER : qui a changé quoi/quand, diff coloré du commit choisi (clone local).
+  const showHisto = async () => {
+    fv.innerHTML = `<div class="skeleton"></div>`;
+    let rows = [];
+    try { rows = (await App().FileHistory(d.local_path, e.path, 50)) || []; } catch (err) { fv.innerHTML = `<div class="callout warn">${esc(cleanErr(err))}</div>`; return; }
+    if (!rows.length) { fv.innerHTML = blankslate("∅", "Aucun historique pour ce fichier", ""); return; }
+    fv.innerHTML = `<div class="fh-list">${rows.map((c) => `<button type="button" class="fh-row" data-sha="${esc(c.sha)}"><code>${esc(c.short)}</code><span class="fh-msg">${esc(c.message)}</span><span class="fh-meta">${esc(c.author)} · ${esc(fmtDate(c.date))}</span></button>`).join("")}</div><div class="fh-diff" id="fh-diff"></div>`;
+    const showDiff = async (sha) => {
+      const dd = el("fh-diff"); if (!dd) return;
+      dd.innerHTML = `<div class="skeleton"></div>`;
+      try { const diff = await App().FileDiffAt(d.local_path, sha, e.path); dd.innerHTML = `<pre class="filebox diff">${colorDiff(diff || "(aucune modification)")}</pre>`; }
+      catch (err) { dd.innerHTML = `<div class="callout warn">${esc(cleanErr(err))}</div>`; }
+    };
+    fv.querySelectorAll(".fh-row").forEach((r) => r.onclick = () => {
+      fv.querySelectorAll(".fh-row").forEach((x) => x.classList.remove("on")); r.classList.add("on");
+      showDiff(r.dataset.sha);
+    });
+    const first = fv.querySelector(".fh-row"); if (first) first.click();
+  };
+  const views = { rendu: showRendered, brut: showRaw, histo: showHisto };
+  (canInterpret ? showRendered : showRaw)();
+  el("fback").onclick = () => { d.path = parentOf(e.path); paintFiles(body); };
+  if (el("f-open")) el("f-open").onclick = () => { try { window.runtime.BrowserOpenURL(e.html_url); } catch (_) {} };
+  el("f-dl").onclick = () => downloadText(e.name, content);
+  body.querySelectorAll(".ftab").forEach((t) => t.onclick = () => {
+    body.querySelectorAll(".ftab").forEach((x) => x.classList.remove("active")); t.classList.add("active");
+    (views[t.dataset.ft] || showRaw)();
+  });
 }
 
 function paintHisto(body, liveOnly) {
   const d = state.detail, rem = d._remote || { commits: [] };
   const tags = (d.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("") || `<span class="muted">aucune version</span>`;
   const commits = (rem.commits || []).map((c) => `
-    <div class="cmt"><code>${esc(c.short)}</code>
+    <div class="cmt" data-sha="${esc(c.sha || "")}"><code>${esc(c.short)}</code> <span class="att-badge" data-att="${esc(c.sha || "")}"></span>
       <div class="cmt-msg">${esc(c.message)}</div>
       <div class="cmt-meta">${esc(c.author)} · ${esc(fmtDate(c.date))}</div></div>`).join("") || blankslate("∅", "Aucun commit", "");
-  const sig = "histo|" + JSON.stringify([d.ref, d.tags || [], rem.commits || []]);
+  const sig = "histo|" + JSON.stringify([d.ref, d.tags || [], rem.commits || [], d.local_path || ""]);
   if (liveOnly && sig === d._paintSig) return;
   d._paintSig = sig;
-  body.innerHTML = `<div class="blk"><div class="blk-h">Versions</div><div class="tags">${tags}</div></div><div class="blk"><div class="blk-h">Historique — ${esc(d.ref)}</div>${commits}</div>`;
+  body.innerHTML = `<div id="att-banner"></div>
+    <div class="blk"><div class="blk-h">Versions</div><div class="tags">${tags}</div></div>
+    <div class="blk"><div class="blk-h">Historique — ${esc(d.ref)} <span class="att-legend">✅ = créé via SituLab (signé)</span></div><div class="cmt-timeline">${commits}</div></div>`;
+  // Enrichissement « SituLab approved » (attestation locale) — async, best-effort, hors chemin de rendu.
+  enrichAttestation(d);
+}
+
+// enrichAttestation annote les commits avec leur verdict d'attestation (✅ « par Untel »), par SHA, et
+// affiche un bandeau tant que la racine embarquée est la racine de TEST. Lecture locale (clone requis).
+async function enrichAttestation(d) {
+  try {
+    if (await App().AttestUsingTestRoot()) {
+      const b = el("att-banner");
+      if (b) b.innerHTML = `<div class="callout warn" style="margin-bottom:10px">Signature en mode <b>TEST</b> — la racine de gouvernance n'est pas encore installée, les ✅ ne sont pas vérifiables réellement.</div>`;
+    }
+  } catch (_) {}
+  if (!d.local_path) return;
+  let rows = [];
+  try { rows = (await App().AttestHistory(d.local_path, 100)) || []; } catch (_) { return; }
+  if (state.detail !== d) return;
+  const map = {};
+  rows.forEach((r) => { if (r && r.sha) map[r.sha] = r.attestation; });
+  document.querySelectorAll("[data-att]").forEach((elm) => {
+    const v = map[elm.dataset.att];
+    if (v && v.verified) { elm.className = "att-badge ok"; elm.textContent = "✅"; elm.title = "SituLab approved — par " + (v.subject || ""); }
+  });
 }
 
 /* ---------------- Vue Projets = Tableau de bord 3 colonnes (v1.8) ---------------- */
@@ -2553,14 +2713,109 @@ function providerMark(instance) {
   if (prov === "github" || url.includes("github.")) return ZICON.github;
   return ZICON.forgejo; // Forgejo et Gitea partagent l'API ; même pictogramme « forge »
 }
-// Palette d'icônes proposées pour un projet (emoji, rendu partout, zéro dépendance).
-const PROJECT_ICONS = ["🗂️", "🚀", "🌐", "🛠️", "📦", "💡", "🧩", "🎨", "📊", "🔮", "🏷️", "🧪", "📝", "⚙️", "🔒", "🌱"];
+// Palette d'icônes proposées pour un projet (emoji, rendu partout, zéro dépendance). Une icône MAISON
+// (image recadrée en carré) est aussi possible : elle est stockée en data URL dans le même champ `icon`.
+const PROJECT_ICONS = ["🗂️", "🚀", "🌐", "🛠️", "📦", "💡", "🧩", "🎨", "📊", "🔮", "🏷️", "🧪", "📝", "⚙️", "🔒", "🌱",
+  "🖥️", "📱", "☁️", "🔧", "📚", "🗃️", "🧠", "⭐", "🔥", "🏔️", "🌲", "🏭", "🛰️", "🧰", "🔗", "📡"];
+
+// isCustomIcon : une icône maison est une image encodée en data URL (sinon c'est un emoji).
+function isCustomIcon(ic) { return typeof ic === "string" && ic.indexOf("data:image/") === 0; }
+
+// iconHTML rend une icône de projet partout de la même façon : <img> pour une icône maison (data URL),
+// sinon l'emoji en texte. cls donne la classe CSS de taille/forme.
+function iconHTML(ic, cls) {
+  if (!ic) return "";
+  if (isCustomIcon(ic)) return `<img class="${cls} custom-ico" src="${ic}" alt="" />`;
+  return `<span class="${cls}">${esc(ic)}</span>`;
+}
+
+// openIconCropper : éditeur de CADRAGE CARRÉ pour une icône maison. Overlay autonome (n'interfère pas
+// avec la modale en cours). L'utilisateur charge une image, la déplace et la zoome dans un cadre carré ;
+// « Utiliser » exporte une vignette 96×96 PNG en data URL passée à onPick. Zéro dépendance (canvas natif).
+function openIconCropper(onPick) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { const img = new Image(); img.onload = () => cropUI(img, onPick); img.src = r.result; };
+    r.readAsDataURL(f);
+  };
+  inp.click();
+}
+
+function cropUI(img, onPick) {
+  const BOX = 240; // viewport carré d'édition
+  const ov = document.createElement("div");
+  ov.className = "cropper-ov";
+  ov.innerHTML = `<div class="cropper-card">
+    <div class="cropper-ttl">Cadrer l'icône <span class="muted">(glissez pour positionner, curseur pour zoomer)</span></div>
+    <div class="cropper-stage" style="width:${BOX}px;height:${BOX}px"><canvas width="${BOX}" height="${BOX}"></canvas><div class="cropper-ring"></div></div>
+    <input type="range" class="cropper-zoom" min="1" max="3" step="0.01" value="1" />
+    <div class="cropper-actions"><button type="button" class="btn btn-ghost btn-sm cr-cancel">Annuler</button><button type="button" class="btn btn-primary btn-sm cr-ok">Utiliser</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const cv = ov.querySelector("canvas"), ctx = cv.getContext("2d"), zoom = ov.querySelector(".cropper-zoom");
+  const base = Math.max(BOX / img.width, BOX / img.height); // couvre le carré
+  let z = 1, ox = 0, oy = 0; // zoom relatif + décalage
+  const clamp = () => {
+    const w = img.width * base * z, h = img.height * base * z;
+    const mx = Math.max(0, (w - BOX) / 2), my = Math.max(0, (h - BOX) / 2);
+    ox = Math.min(mx, Math.max(-mx, ox)); oy = Math.min(my, Math.max(-my, oy));
+  };
+  const draw = () => {
+    clamp();
+    const w = img.width * base * z, h = img.height * base * z;
+    ctx.clearRect(0, 0, BOX, BOX);
+    ctx.drawImage(img, (BOX - w) / 2 + ox, (BOX - h) / 2 + oy, w, h);
+  };
+  draw();
+  zoom.oninput = () => { z = parseFloat(zoom.value); draw(); };
+  let drag = null;
+  cv.onpointerdown = (e) => { drag = { x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); };
+  cv.onpointermove = (e) => { if (!drag) return; ox += e.clientX - drag.x; oy += e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; draw(); };
+  cv.onpointerup = () => { drag = null; };
+  const close = () => ov.remove();
+  ov.querySelector(".cr-cancel").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  ov.querySelector(".cr-ok").onclick = () => {
+    const out = document.createElement("canvas"); out.width = out.height = 96;
+    const octx = out.getContext("2d"); const k = 96 / BOX;
+    const w = img.width * base * z * k, h = img.height * base * z * k;
+    octx.drawImage(img, (96 - w) / 2 + ox * k, (96 - h) / 2 + oy * k, w, h);
+    close(); onPick(out.toDataURL("image/png"));
+  };
+}
+
+// iconGridHTML : la grille d'icônes (∅ + emojis + icône maison courante + bouton « 📷 maison »).
+function iconGridHTML(cur) {
+  const none = `<button type="button" class="ep-ico${!cur ? " on" : ""}" data-ic="">∅</button>`;
+  const tiles = PROJECT_ICONS.map((ic) => `<button type="button" class="ep-ico${cur === ic ? " on" : ""}" data-ic="${esc(ic)}">${ic}</button>`).join("");
+  const custom = isCustomIcon(cur) ? `<button type="button" class="ep-ico on" data-ic="__cur__"><img src="${cur}" alt="" /></button>` : "";
+  const up = `<button type="button" class="ep-ico ep-ico-up" data-ic="__up__" title="Icône maison (image)">📷</button>`;
+  return none + tiles + custom + up;
+}
+
+// bindIconGrid remplit un conteneur de grille d'icônes et câble la sélection SANS re-render destructif :
+// un emoji bascule juste la classe active (le nom saisi est préservé) ; « 📷 » ouvre le cadreur carré et
+// ne re-rend QUE la grille. getCur/setCur lisent/écrivent l'icône dans l'état du formulaire (W ou E).
+function bindIconGrid(gridEl, getCur, setCur) {
+  if (!gridEl) return;
+  gridEl.innerHTML = iconGridHTML(getCur());
+  gridEl.querySelectorAll(".ep-ico").forEach((btn) => btn.onclick = () => {
+    const v = btn.dataset.ic;
+    if (v === "__up__") { openIconCropper((url) => { setCur(url); bindIconGrid(gridEl, getCur, setCur); }); return; }
+    if (v === "__cur__") return; // déjà l'icône maison courante
+    setCur(v);
+    gridEl.querySelectorAll(".ep-ico").forEach((x) => x.classList.toggle("on", x.dataset.ic === v));
+  });
+}
 
 // projectGraphCard : coquille d'une carte projet = en-tête + actions + le graphe (rempli async).
 function projectGraphCard(b, idx) {
   const atl = b.atelier || {}, prods = b.productions || [];
-  const syncBtn = b.local && (!b.local.clean || b.local.ahead || b.local.behind) ? `<button class="btn btn-ghost btn-sm" data-sync="${esc(b.name)}">Synchroniser</button>` : "";
-  const cloneBtn = !b.local ? `<button class="btn btn-ghost btn-sm" data-clone="${esc(b.name)}">Cloner ici</button>` : "";
+  const syncBtn = b.local && (!b.local.clean || b.local.ahead || b.local.behind) ? `<button class="btn btn-ghost btn-sm" data-sync="${esc(b.name)}" title="Récupérer, enregistrer vos modifications et les envoyer à l'atelier — en un geste, sous PIN. (Proposé seulement quand il y a quelque chose à synchroniser ; la lecture de l'état, elle, est automatique.)">Synchroniser</button>` : "";
+  const cloneBtn = !b.local ? `<button class="btn btn-ghost btn-sm" data-clone="${esc(b.name)}" title="Copier le dépôt atelier dans un dossier de ce poste">Cloner ici</button>` : "";
   const prodBtns = prods.map((p, i) => {
     if (p.error) return ""; // serveur vitrine déconnecté → masque + Reconnecter dans la boîte VITRINE
     const prod = `${esc(p.owner)}/${esc(p.repo)}`;
@@ -2568,11 +2823,11 @@ function projectGraphCard(b, idx) {
       ? `<button class="lnk" data-promote="${esc(b.name)}" data-idx="${i}" data-label="${prod}">repromouvoir</button>`
       : `<button class="btn btn-primary btn-sm" data-promote="${esc(b.name)}" data-idx="${i}" data-label="${prod}">Promouvoir →</button>`;
   }).join("");
-  const ico = b.icon ? `<span class="pboard-ico">${esc(b.icon)}</span>` : "";
+  const ico = iconHTML(b.icon, "pboard-ico");
   return `<div class="pboard">
     <div class="pboard-h">
       <div class="pboard-ttl">${ico}<b class="pboard-name">${esc(b.name)}</b> <span class="muted">${esc(atl.owner)}/${esc(atl.repo)}</span>${atl.version ? ` <span class="pill ver">${esc(atl.version)}</span>` : ""}</div>
-      <div class="pbc-act">${syncBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}">modifier</button><button class="lnk" data-detatl="${esc(b.name)}">détail ›</button><button class="lnk danger" data-delproj="${esc(b.name)}">supprimer</button></div>
+      <div class="pbc-act">${syncBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">modifier</button><button class="lnk" data-detatl="${esc(b.name)}" title="Ouvrir le détail du dépôt atelier (branches, fichiers, activité)">détail ›</button><button class="lnk danger" data-delproj="${esc(b.name)}" title="Retirer ce lien de projet (aucun dépôt n'est supprimé)">supprimer</button></div>
     </div>
     <div class="pgraph" id="pg-${idx}"><div class="skeleton"></div></div>
   </div>`;
@@ -2645,8 +2900,13 @@ function projectGraphHTML(b, branches) {
       const base = br.upstream.replace(/^origin\//, ""); const bt = tagOf(base);
       from = ` <small class="pg-from" title="suit ${esc(br.upstream)}">⇠ ${esc(base)}${bt ? " " + esc(bt) : ""}</small>`;
     }
+    // Branche PRINCIPALE (main/master ou la branche de prod) vs SECONDAIRE (feat/work…). Une secondaire
+    // non encore réunie vers l'atelier porte un marqueur « en cours » (orange = travail en cours).
+    const isPrincipal = br.name === prodBranch || br.name === "main" || br.name === "master";
+    const wip = !isPrincipal && br.has_local && (!br.has_remote || br.ahead);
+    const wipChip = wip ? ` <span class="chip-wip" title="travail en cours — pas encore réuni vers ${esc(prodBranch)}">en cours</span>` : "";
     return {
-      label: `⎇ ${esc(br.name)}${hereBranch ? ` <span class="pg-youare">ici</span>` : ""}${from}${br.author ? `<small> · ${esc(br.author)}</small>` : ""}`,
+      label: `<span class="pg-brn ${isPrincipal ? "pg-brn-main" : "pg-brn-sec"}">⎇ ${esc(br.name)}</span>${hereBranch ? ` <span class="pg-youare">ici</span>` : ""}${wipChip}${from}${br.author ? `<small> · ${esc(br.author)}</small>` : ""}`,
       title: esc(br.name),
       localOn: !!br.has_local, localNode,
       atlOn: !!br.has_remote, atelierNode,
@@ -2657,7 +2917,12 @@ function projectGraphHTML(b, branches) {
 
   // Chaque palier est une BOÎTE ; les traits de branche la traversent (bulle = présence/état),
   // et franchissent l'espace entre boîtes avec un segment coloré selon l'écart.
-  const cell = (on, inner) => `<div class="pg2-cell ${on ? "pg2-on" : "pg2-off"}">${inner}</div>`;
+  // Présence de branche : deux cas DISTINCTS (1.9.2). Si la branche EXISTE sur ce git → trait plein + sa
+  // bulle (vide si pas de version). Si elle N'EXISTE PAS ici → aucun trait et un picto « absent » clair,
+  // au lieu d'un trait grisé + bulle vide qui laissait croire qu'elle existait mais était vide.
+  const cell = (on, inner) => on
+    ? `<div class="pg2-cell pg2-on">${inner}</div>`
+    : `<div class="pg2-cell pg2-absent"><span class="pg-absent" title="cette branche n'existe pas ici">–</span></div>`;
   const gap = (cls, txt) => `<div class="pg2-cell pg-seg ${cls}"><em>${txt}</em></div>`;
   // Masque grisant posé sur une boîte dont le serveur est déconnecté : message amical + Reconnecter.
   const offMask = (inst, err) => inst ? `<div class="pg2-off-mask"><div class="pg2-off-ico">🔌</div><div class="pg2-off-t">Serveur « ${esc(inst)} » déconnecté</div><button class="btn btn-primary btn-sm" data-reconinst="${esc(inst)}">Reconnecter</button></div>` : "";
@@ -2667,18 +2932,28 @@ function projectGraphHTML(b, branches) {
   const atl = b.atelier || {}, prod0 = (b.productions || [])[0] || {};
   const atlMask = atl.error ? offMask(atl.instance, atl.error) : "";
   const prodErr = (b.productions || []).find((p) => p.error);
-  const prodMask = prodErr ? offMask(prodErr.instance, prodErr.error)
-    : (!(b.productions || []).length ? `<div class="pg2-note">Aucune vitrine<br><span class="muted">« modifier » pour en relier une</span></div>` : "");
+  const hasVitrine = !!(b.productions || []).length;
 
   const labelCol = `<div class="pg2-col pg2-labels"><div class="pg2-head"></div>` +
     lanes.map((r) => `<div class="pg2-name" title="${r.title}">${r.label}</div>`).join("") + `</div>`;
   const localCol = zone("LOCAL", "pg2-local", lanes.map((r) => cell(r.localOn, r.localNode)), ZICON.desktop);
   const g1 = gapCol(lanes.map((r) => gap(r.la, r.laTxt)));
   const atlCol = zone("ATELIER", "pg2-atl", lanes.map((r) => cell(r.atlOn, r.atelierNode)), providerMark(atl.instance), atlMask);
-  const g2 = gapCol(lanes.map((r) => gap(r.ap, r.apTxt)));
-  const prodCol = zone("VITRINE", "pg2-prod", lanes.map((r) => cell(r.prodOn, r.prodNode)), providerMark(prod0.instance), prodMask);
 
-  return `<div class="pg2">${labelCol}${localCol}${g1}${atlCol}${g2}${prodCol}</div>`;
+  // Colonne Vitrine CONDITIONNELLE (1.9.2) : affichée seulement s'il y a une vitrine (ou un serveur
+  // vitrine déconnecté à signaler). Sans vitrine → pas de colonne « Aucune vitrine » vide, mais un
+  // simple bouton « connecter une vitrine » qui ouvre le tunnel à l'étape vitrine.
+  let tail;
+  if (hasVitrine || prodErr) {
+    const prodMask = prodErr ? offMask(prodErr.instance, prodErr.error) : "";
+    const g2 = gapCol(lanes.map((r) => gap(r.ap, r.apTxt)));
+    const prodCol = zone("VITRINE", "pg2-prod", lanes.map((r) => cell(r.prodOn, r.prodNode)), providerMark(prod0.instance), prodMask);
+    tail = g2 + prodCol;
+  } else {
+    tail = `<div class="pg2-col pg2-connect"><div class="pg2-head"></div><div class="pg2-connect-box"><button type="button" class="btn btn-ghost btn-sm" data-addvitrine="${esc(b.name)}">＋ Connecter une vitrine</button></div></div>`;
+  }
+
+  return `<div class="pg2">${labelCol}${localCol}${g1}${atlCol}${tail}</div>`;
 }
 
 // projectSync : Synchroniser le clone local avec l'atelier. L'atelier n'exige pas le PIN par défaut
@@ -2737,6 +3012,7 @@ function bindProjectBoard(boards) {
     if (pr) return promoteWizard(byName[pr.dataset.promote], parseInt(pr.dataset.idx, 10), pr.dataset.label);
     const rc = ev.target.closest("[data-reconinst]"); if (rc) return reconnectModal(rc.dataset.reconinst);
     const ep = ev.target.closest("[data-editproj]"); if (ep) return editProjectModal(byName[ep.dataset.editproj]);
+    const av = ev.target.closest("[data-addvitrine]"); if (av) return editProjectModal(byName[av.dataset.addvitrine], { addVitrine: true });
     const sy = ev.target.closest("[data-sync]"); if (sy) return projectSync(byName[sy.dataset.sync]);
     const cl = ev.target.closest("[data-clone]"); if (cl) return projectCloneModal(byName[cl.dataset.clone]);
     const dt = ev.target.closest("[data-detatl]"); if (dt) { const b = byName[dt.dataset.detatl]; return openProjectDetail(b.atelier.instance, b.atelier.owner, b.atelier.repo, b.local ? b.local.path : ""); }
@@ -2763,7 +3039,8 @@ async function promoteWizard(b, idx, label) {
   const onOk = async () => {
     const er = el("promo-err"); if (!er || !ci) return;
     try {
-      const res = await App().ProjectPromote(b.name, idx, el("pw-src").value, el("pw-ver").value, el("pw-dst").value, ci.read());
+      const pwMode = el("pw-mode"), pwNotes = el("pw-notes");
+      const res = await App().ProjectPromote(b.name, idx, el("pw-src").value, el("pw-ver").value, el("pw-dst").value, (pwMode ? pwMode.value : "tag"), (pwNotes ? pwNotes.value : ""), ci.read());
       closeModal(); toast(res && res.summary ? res.summary : "Promu en production", "ok"); renderProjects();
     } catch (e) { er.textContent = cleanErr(e); er.classList.remove("hidden"); ci.clear(); }
   };
@@ -2789,8 +3066,28 @@ async function promoteWizard(b, idx, label) {
     <select class="select" id="pw-ver"><option>…</option></select>
     <label>Branche de la production (cible)</label>
     <select class="select" id="pw-dst">${prodBranches.map((x) => opt(x, prodDef)).join("")}</select>
+    <label>Méthode</label>
+    <select class="select" id="pw-mode">
+      <option value="tag" selected>Version (code + tag)</option>
+      <option value="code">Code seul (sans tag)</option>
+      <option value="release">Version + Release</option>
+    </select>
+    <div id="pw-mode-help" class="set-note"></div>
+    <div id="pw-notes-wrap" class="hidden"><label>Notes de version</label><textarea class="inp" id="pw-notes" rows="3" placeholder="Nouveautés de cette version…"></textarea></div>
     <label>PIN</label><div id="promo-pin"></div>
     <div class="inline-error hidden" id="promo-err"></div></div>`;
+  // Explication de la méthode (promouvoir ≠ publier une Release) + champ notes réservé au mode release.
+  const MODE_HELP = {
+    code: "Met à jour la branche de la vitrine sans tag — aucune version ni Release créée.",
+    tag: "Pousse le code + un tag de version. Sur GitHub, le tag déclenche la CI qui bâtit les installeurs et publie la Release (vérifiez Actions — la Release n'est pas automatique côté app).",
+    release: "Pousse le code + un tag ET crée la Release (avec notes). Les installeurs restent bâtis par la CI.",
+  };
+  const onMode = () => {
+    const m = el("pw-mode").value;
+    el("pw-mode-help").textContent = MODE_HELP[m] || "";
+    el("pw-notes-wrap").classList.toggle("hidden", m !== "release");
+  };
+  el("pw-mode").onchange = onMode; onMode();
   // Recharge les versions (tags) joignables à chaque changement de branche source.
   const loadVersions = async () => {
     const sel = el("pw-ver"); const src = el("pw-src").value;
@@ -2813,8 +3110,7 @@ async function promoteWizard(b, idx, label) {
 async function renderProjects(live) {
   if (!live) {
     el("view").innerHTML = `<div class="view-head view-head-row">
-      <div><div class="view-title">Projets</div>
-        <div class="view-sub">Votre tableau de bord transverse : pour chaque projet, l'état <b>Local · Atelier · Vitrine</b> en une vue. La vitrine (production) ne se déploie qu'ici (<b>Promouvoir</b>), sous votre PIN.</div></div>
+      <div><div class="view-title">Projets</div></div>
       <button class="btn btn-primary btn-sm" id="proj-add">＋ Nouveau projet</button></div>
     <div id="proj-board"><div class="skeleton"></div><div class="skeleton" style="margin-top:10px"></div></div>`;
     el("proj-add").onclick = addProjectModal;
@@ -2833,7 +3129,7 @@ async function renderProjects(live) {
     board.innerHTML = `<div class="proj-empty">
       <div class="pe-ico">⇄</div>
       <div class="pe-title">Reliez votre premier projet</div>
-      <p class="pe-txt">Un projet relie un dépôt <b>atelier</b> (votre terrain de dev) à sa <b>vitrine de production</b>. SituLab vous montre alors, en une vue, ce qui est à jour entre votre <b>poste</b>, l'<b>atelier</b> et la <b>prod</b> — et vous laisse <b>promouvoir</b> une version en production, sous votre PIN, sans jamais confier de jeton à une IA.</p>
+      <p class="pe-txt">Un projet relie un dépôt <b>atelier</b> à sa <b>vitrine</b>, et montre en une vue l'état entre <b>poste</b>, <b>atelier</b> et <b>prod</b>.</p>
       <button class="btn btn-primary" id="proj-add2">＋ Créer mon premier projet</button>
     </div>`;
     if (el("proj-add2")) el("proj-add2").onclick = addProjectModal;
@@ -2936,12 +3232,13 @@ function addProjectModal() {
 
   // Étape 1 — nom.
   function stepName() {
-    const icons = ["", ...PROJECT_ICONS].map((ic) => `<button type="button" class="ep-ico${W.icon === ic ? " on" : ""}" data-ic="${esc(ic)}">${ic || "∅"}</button>`).join("");
     screen(`${head(1, 4, "Nom & icône du projet")}<input id="wiz-name" class="inp" placeholder="ex. mon-site" value="${esc(W.name)}" />
-      <label style="margin-top:10px">Icône <span class="muted">(facultatif)</span></label><div class="ep-icogrid">${icons}</div>`);
+      <label style="margin-top:10px">Icône <span class="muted">(facultatif)</span></label><div class="ep-icogrid" id="wiz-icogrid"></div>`);
     buttons("Suivant", () => { const v = el("wiz-name").value.trim(); if (!v) { toast("Donnez un nom de projet.", "err"); return; } W.name = v; go(stepAtelierConn); });
-    const inp = el("wiz-name"); if (inp) { inp.focus(); inp.onkeydown = (e) => { if (e.key === "Enter") okBtn.click(); }; }
-    el("modal-body").querySelectorAll(".ep-ico").forEach((btn) => btn.onclick = () => { W.icon = btn.dataset.ic; stepName(); });
+    const inp = el("wiz-name"); if (inp) { inp.focus(); inp.oninput = () => W.name = inp.value; inp.onkeydown = (e) => { if (e.key === "Enter") okBtn.click(); }; }
+    // Grille d'icônes (emoji + icône maison) ; la sélection ne re-rend pas l'écran → le nom saisi est
+    // préservé (correction du bug 1.9.1 « changer d'icône efface le nom »).
+    bindIconGrid(el("wiz-icogrid"), () => W.icon, (v) => W.icon = v);
   }
   // Étape 2 — atelier : compte git.
   function stepAtelierConn() {
@@ -2981,7 +3278,7 @@ function addProjectModal() {
     const prodList = W.productions.map((p) => `<li>${esc(p.owner)}/${esc(p.repo)} <span class="muted">(${esc(p.instance)})</span></li>`).join("");
     screen(`${head(4, 4, "Récapitulatif")}
       <div class="wiz-recap">
-        <div>${W.icon ? `<span class="pboard-ico">${esc(W.icon)}</span> ` : ""}<b>${esc(W.name)}</b></div>
+        <div>${W.icon ? iconHTML(W.icon, "pboard-ico") + " " : ""}<b>${esc(W.name)}</b></div>
         <div style="margin-top:6px"><span class="role-badge role-atelier">ATELIER</span> ${esc(W.atelier.owner)}/${esc(W.atelier.repo)} <span class="muted">(${esc(W.atelier.instance)})</span></div>
         <div class="wiz-recap-t">Vitrine(s) :</div>
         <ul class="wiz-recap-prods">${prodList || '<li class="muted">aucune — local + atelier</li>'}</ul>
@@ -3000,8 +3297,9 @@ function addProjectModal() {
 
 // editProjectModal : modifier un projet à tout moment — renommer, icône, changer l'atelier, ajouter/
 // retirer des vitrines (passer de « local + atelier » à « local + atelier + vitrine » et inversement).
-function editProjectModal(b) {
+function editProjectModal(b, opts) {
   if (!b) return;
+  opts = opts || {};
   const insts = state.instances || [];
   const ateliers = insts.filter((i) => (i.role || "atelier") !== "production");
   const prodsConn = insts.filter((i) => i.role === "production");
@@ -3041,13 +3339,12 @@ function editProjectModal(b) {
   }
 
   function draw() {
-    const icons = ["", ...PROJECT_ICONS].map((ic) => `<button type="button" class="ep-ico${E.icon === ic ? " on" : ""}" data-ic="${esc(ic)}">${ic || "∅"}</button>`).join("");
     const prodRows = E.productions.length
       ? E.productions.map((p, i) => `<div class="ep-slot"><span class="role-badge role-production">VITRINE</span> ${esc(p.owner + "/" + p.repo)} <span class="muted">(${esc(p.instance)})</span> <button type="button" class="lnk danger" data-rmprod="${i}">retirer</button></div>`).join("")
       : `<div class="muted">Aucune vitrine — projet <b>local + atelier</b>.</div>`;
     el("ep-body").innerHTML = `
       <label>Nom du projet</label><input id="ep-name" class="inp" value="${esc(E.name)}" />
-      <label style="margin-top:10px">Icône</label><div class="ep-icogrid">${icons}</div>
+      <label style="margin-top:10px">Icône</label><div class="ep-icogrid" id="ep-icogrid"></div>
       <label style="margin-top:10px">Atelier (source)</label>
       <div class="ep-slot"><span class="role-badge role-atelier">ATELIER</span> ${E.atelier ? esc(E.atelier.owner + "/" + E.atelier.repo) + ` <span class="muted">(${esc(E.atelier.instance)})</span>` : '<span class="muted">non défini</span>'} <button type="button" class="lnk" id="ep-chg-atl">changer…</button></div>
       <label style="margin-top:10px">Vitrines (production)</label>
@@ -3056,21 +3353,78 @@ function editProjectModal(b) {
       <div id="ep-pick" style="margin-top:10px"></div>
       <div class="inline-error hidden" id="ep-err" style="margin-top:10px"></div>`;
     el("ep-name").oninput = () => E.name = el("ep-name").value;
-    el("ep-body").querySelectorAll(".ep-ico").forEach((btn) => btn.onclick = () => { E.icon = btn.dataset.ic; draw(); });
+    // Grille d'icônes (emoji + icône maison) sans re-render destructif (préserve le nom et le focus).
+    bindIconGrid(el("ep-icogrid"), () => E.icon, (v) => E.icon = v);
     el("ep-body").querySelectorAll("[data-rmprod]").forEach((btn) => btn.onclick = () => { E.productions.splice(+btn.dataset.rmprod, 1); draw(); });
     const chg = el("ep-chg-atl"); if (chg) chg.onclick = () => repoPickInto("atelier", ateliers, (ref) => { E.atelier = ref; draw(); });
     const addp = el("ep-add-prod"); if (addp) addp.onclick = () => repoPickInto("production", prodsConn, (ref) => { const k = ref.instance + "/" + ref.owner + "/" + ref.repo; if (!E.productions.some((p) => p.instance + "/" + p.owner + "/" + p.repo === k)) E.productions.push(ref); draw(); });
   }
   draw();
+  // Entrée depuis « connecter une vitrine » (projet local+atelier seul) : ouvrir directement le choix
+  // de vitrine, sinon guider vers Réglages s'il n'existe aucune connexion « production ».
+  if (opts.addVitrine) {
+    if (prodsConn.length) repoPickInto("production", prodsConn, (ref) => { const k = ref.instance + "/" + ref.owner + "/" + ref.repo; if (!E.productions.some((p) => p.instance + "/" + p.owner + "/" + p.repo === k)) E.productions.push(ref); draw(); });
+    else toast("Aucune connexion « production » : marquez-en une dans Réglages d'abord.", "err");
+  }
+}
+
+// renderPromptLib : la bibliothèque de prompts (accordéons éditables). Les prompts par défaut portent un
+// badge ; les personnalisations de l'utilisateur sont conservées à travers les mises à jour (stockées en config).
+async function renderPromptLib() {
+  const box = el("prompt-lib"); if (!box) return;
+  box.innerHTML = `<div class="skeleton"></div>`;
+  let rows = [];
+  try { rows = (await App().Prompts()) || []; } catch (_) { box.innerHTML = ""; return; }
+  box.innerHTML = rows.map((p) => `
+    <details class="plib-item">
+      <summary><span class="plib-title">${esc(p.title)}</span> ${p.builtin ? `<span class="pill sm">${p.overridden ? "modifié" : "par défaut"}</span>` : `<span class="pill sm">perso</span>`}</summary>
+      <pre class="plib-body">${esc(p.body)}</pre>
+      <div class="plib-actions">
+        <button class="btn btn-ghost btn-sm" data-pcopy="${esc(p.id)}">Copier</button>
+        <button class="btn btn-ghost btn-sm" data-pedit="${esc(p.id)}">Modifier</button>
+        ${p.builtin && p.overridden ? `<button class="btn btn-ghost btn-sm" data-preset="${esc(p.id)}">Réinitialiser</button>` : ""}
+        <button class="lnk danger" data-pdel="${esc(p.id)}">${p.builtin ? "Masquer" : "Supprimer"}</button>
+      </div>
+    </details>`).join("") || `<div class="muted">Aucun prompt.</div>`;
+  const byId = {}; rows.forEach((r) => byId[r.id] = r);
+  box.querySelectorAll("[data-pcopy]").forEach((b) => b.onclick = () => copyPrompt(byId[b.dataset.pcopy].body, { title: byId[b.dataset.pcopy].title }));
+  box.querySelectorAll("[data-pedit]").forEach((b) => b.onclick = () => promptEditModal(byId[b.dataset.pedit]));
+  box.querySelectorAll("[data-preset]").forEach((b) => b.onclick = async () => { try { await App().ResetPrompt(b.dataset.preset); renderPromptLib(); } catch (e) { toast(cleanErr(e), "err"); } });
+  box.querySelectorAll("[data-pdel]").forEach((b) => b.onclick = () => {
+    const p = byId[b.dataset.pdel];
+    openModal(p.builtin ? "Masquer ce prompt ?" : "Supprimer ce prompt ?", `<div class="field"><div class="callout">« ${esc(p.title)} »${p.builtin ? " sera masqué (réversible via « réinitialiser » plus tard)." : " sera supprimé."}</div></div>`, async () => {
+      try { await App().DeletePrompt(p.id); closeModal(); renderPromptLib(); } catch (e) { toast(cleanErr(e), "err"); }
+    });
+  });
+}
+
+// promptEditModal : créer (p=null) ou modifier un prompt. Un prompt par défaut modifié devient une
+// surcharge (conservée) sans toucher l'original livré.
+function promptEditModal(p) {
+  const isNew = !p;
+  openModal(isNew ? "Nouveau prompt" : "Modifier le prompt", `<div class="field">
+    <label>Titre<input id="pe-title" class="inp" value="${esc(p ? p.title : "")}" /></label>
+    <label>Prompt<textarea id="pe-body" rows="6" style="width:100%;resize:vertical">${esc(p ? p.body : "")}</textarea></label>
+    <div class="inline-error hidden" id="pe-err"></div></div>`, async () => {
+    const er = el("pe-err");
+    try { await App().SavePrompt(p ? p.id : "", el("pe-title").value, el("pe-body").value); closeModal(); renderPromptLib(); }
+    catch (e) { if (er) { er.textContent = cleanErr(e); er.classList.remove("hidden"); } }
+  });
+  el("modal-ok").textContent = "Enregistrer";
 }
 
 async function renderSettings() {
   const theme = readTheme();
+  const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions"], ["app", "🎨 Apparence"], ["ia", "🤖 Assistant IA"], ["diag", "🩺 Diagnostic"], ["ver", "🏷️ Versions"], ["lic", "⚖️ Licence"]];
+  let setTab = "secu";
+  try { setTab = localStorage.getItem("situlab.settab") || "secu"; } catch (_) {}
   el("view").innerHTML = `
-    <div class="view-head"><div class="view-title">Réglages</div>
-      <div class="view-sub">Votre compte, vos connexions et l'apparence de SituLab.</div></div>
+    <div class="view-head"><div class="view-title">Réglages</div></div>
+    <div class="set-layout">
+      <nav class="set-nav">${navItems.map(([k, l]) => `<button class="set-navbtn" data-settab="${k}">${l}</button>`).join("")}</nav>
+      <div class="set-panels">
 
-    <section class="set-sec"><div class="set-sec-h">🔒 Compte &amp; sécurité</div>
+    <section class="set-sec set-panel" data-panel="secu"><div class="set-sec-h">🔒 Compte &amp; sécurité</div>
       <div class="set-sec-d">Votre PIN déverrouille vos accès (jetons chiffrés sur ce poste) et confirme chaque envoi vers le serveur. Personne ne peut lire vos accès sans lui.</div>
       <div class="set-row"><div class="set-row-l"><b id="pin-state"></b></div>
         <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="set-pin"></button><button class="lnk" id="pin-forgot">PIN oublié ?</button></div></div>
@@ -3088,13 +3442,13 @@ async function renderSettings() {
       <div class="set-note">Gestion des jetons d'accès : onglet <b>Tokens</b>.</div>
     </section>
 
-    <section class="set-sec"><div class="set-sec-h">🔗 Connexions</div>
+    <section class="set-sec set-panel" data-panel="conn"><div class="set-sec-h">🔗 Connexions</div>
       <div class="set-sec-d">Vos serveurs git (Forgejo/Gitea, GitHub). ★ = connexion par défaut.</div>
       <div id="inst-list"></div>
       <button class="btn btn-ghost btn-sm" id="add-inst" style="margin-top:10px">＋ Ajouter une connexion</button>
     </section>
 
-    <section class="set-sec"><div class="set-sec-h">🎨 Apparence &amp; affichage</div>
+    <section class="set-sec set-panel" data-panel="app"><div class="set-sec-h">🎨 Apparence &amp; affichage</div>
       <div class="set-row"><div class="set-row-l">Thème</div>
         <div class="set-row-c"><div class="seg" role="group" aria-label="Thème">
           <button data-th="auto" class="${theme === "auto" ? "on" : ""}">Auto</button>
@@ -3105,8 +3459,8 @@ async function renderSettings() {
         <span class="switch"><input id="adv-mode" type="checkbox" /><span class="track"></span></span></label>
     </section>
 
-    <section class="set-sec"><div class="set-sec-h">🤖 Assistant IA</div>
-      <div class="set-sec-d">SituLab dépose un fichier <code>AGENTS.md</code> près de vos dépôts : mode d'emploi pour votre IA + votre <b>fiche de collaboration</b>. Votre IA la lit au démarrage et peut l'enrichir avec vous.</div>
+    <section class="set-sec set-panel" data-panel="ia"><div class="set-sec-h">🤖 Assistant IA</div>
+      <div class="set-sec-d">SituLab dépose un fichier <code>AGENTS.md</code> près de vos dépôts : mode d'emploi pour votre IA + votre <b>fiche de collaboration</b>. Votre IA la lit au démarrage et peut l'enrichir avec vous. <button class="lnk" id="agents-view">Consulter AGENTS.md</button></div>
       <label class="set-row-l" style="display:block">Notes de collaboration (reprises dans AGENTS.md)
         <textarea id="agent-notes" rows="4" placeholder="Ex. : réponds en français ; propose toujours un plan avant d'agir ; mes dépôts de prod sont sur l'organisation apcom…" style="width:100%;margin-top:6px;resize:vertical"></textarea></label>
       <div class="set-row-c" style="margin-top:10px;justify-content:flex-start">
@@ -3114,17 +3468,50 @@ async function renderSettings() {
         <button class="btn btn-ghost btn-sm" id="agent-deposit">Déposer AGENTS.md dans un dossier…</button>
         <button class="btn btn-ghost btn-sm" id="agent-config">Configurer mon agent IA</button>
       </div>
+      <div class="plib-h"><b>Bibliothèque de prompts</b> <span class="muted">— des messages prêts à coller dans votre IA. Les vôtres sont conservés lors des mises à jour.</span></div>
+      <div id="prompt-lib"></div>
+      <button class="btn btn-ghost btn-sm" id="prompt-add" style="margin-top:8px">＋ Ajouter un prompt</button>
     </section>
 
-    <section class="set-sec"><div class="set-sec-h">🩺 Diagnostic</div>
-      <div class="set-sec-d">Autres accès git présents sur ce poste, qui échappent à la confirmation par PIN.</div>
+    <section class="set-sec set-panel" data-panel="diag"><div class="set-sec-h">🩺 Diagnostic</div>
+      <div class="set-sec-d">L'état de SituLab sur ce poste en un coup d'œil : git, PIN, session, connexions, coffre, signature, et les accès git qui échappent à la confirmation PIN.</div>
       <div id="diag-creds"><div class="muted">Vérification…</div></div>
     </section>
 
-    <section class="set-sec danger-zone"><div class="dz-h">⚠ Zone sensible — effacer mes données de ce poste</div>
+    <section class="set-sec set-panel" data-panel="ver"><div class="set-sec-h">🏷️ Versions</div>
+      <div class="set-row"><div class="set-row-l">Version installée <b id="app-ver">…</b></div>
+        <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-check">Vérifier les mises à jour ↗</button></div></div>
+      <div class="set-row"><div class="set-row-l">Téléchargements (votre OS)</div>
+        <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-site">situememoring.com ↗</button><button class="btn btn-ghost btn-sm" id="ver-gh">GitHub ↗</button></div></div>
+      <div class="set-note">Les installeurs et l'historique complet des versions sont publiés sur situememoring.com (lecture en direct des Releases GitHub).</div>
+    </section>
+
+    <section class="set-sec set-panel" data-panel="lic"><div class="set-sec-h">⚖️ Licence</div>
+      <div class="set-sec-d">SituLab — logiciel libre sous licence <b>Apache-2.0</b>. © 2026 <b>APCOM Solutions SA</b>. La marque « SituLab » n'est pas couverte par la licence.</div>
+      <div class="set-row-c" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm" id="lic-show">Texte de la licence</button><button class="btn btn-ghost btn-sm" id="notice-show">NOTICE</button></div>
+    </section>
+
+    <section class="set-sec danger-zone set-panel" data-panel="secu"><div class="dz-h">⚠ Zone sensible — effacer mes données de ce poste</div>
       <p class="sub">Supprime définitivement vos connexions, votre trousseau chiffré, vos réglages et les jetons du coffre Windows sur cette machine. Pour repartir à zéro ou céder le poste. <b>Irréversible.</b></p>
       <button class="btn btn-ghost btn-sm btn-danger" id="purge-data">Effacer mes données…</button>
-    </section>`;
+    </section>
+
+      </div>
+    </div>`;
+
+  // Nav à onglets : affiche un panneau à la fois (le DOM garde tous les panneaux → le câblage par id
+  // ci-dessous reste valable). Onglet mémorisé par poste (confort local).
+  const showTab = (k) => {
+    document.querySelectorAll(".set-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== k));
+    document.querySelectorAll(".set-navbtn").forEach((b) => b.classList.toggle("active", b.dataset.settab === k));
+    try { localStorage.setItem("situlab.settab", k); } catch (_) {}
+  };
+  document.querySelectorAll(".set-navbtn").forEach((b) => b.onclick = () => showTab(b.dataset.settab));
+  showTab(setTab);
+  const agv = el("agents-view");
+  if (agv) agv.onclick = async () => { try { infoModal("AGENTS.md", `<div class="md-render" style="max-height:60vh;overflow:auto">${mdToHTML(await App().Doc())}</div>`); } catch (_) {} };
+  renderPromptLib();
+  if (el("prompt-add")) el("prompt-add").onclick = () => promptEditModal(null);
 
   document.querySelectorAll("[data-th]").forEach((b) => b.onclick = () => { writeTheme(b.dataset.th); applyTheme(b.dataset.th); renderSettings(); });
   const adv = el("adv-mode");
@@ -3132,6 +3519,18 @@ async function renderSettings() {
     adv.checked = !!state.advanced;
     adv.onchange = () => { setAdvanced(adv.checked); toast(adv.checked ? "Mode avancé activé" : "Mode simplifié activé", "ok"); };
   }
+
+  // Section Versions : version installée + liens (téléchargement/MAJ sur le site, lecture en direct des
+  // Releases GitHub). La détection fine de MAJ se fait côté site (connect-src 'self' interdit le fetch
+  // d'une API externe depuis la fenêtre) ; le bouton ouvre donc la page des versions dans le navigateur.
+  const openURL = (u) => { try { window.runtime.BrowserOpenURL(u); } catch (_) {} };
+  try { el("app-ver").textContent = await App().AppVersion(); } catch (_) { el("app-ver").textContent = "?"; }
+  if (el("ver-check")) el("ver-check").onclick = () => openURL("https://situememoring.com/#telecharger");
+  if (el("ver-site")) el("ver-site").onclick = () => openURL("https://situememoring.com/");
+  if (el("ver-gh")) el("ver-gh").onclick = () => openURL("https://situememoring.com/#telecharger");
+  // Section Licence : texte Apache-2.0 + NOTICE embarqués (go:embed), affichés en modale.
+  if (el("lic-show")) el("lic-show").onclick = async () => { try { infoModal("Licence Apache-2.0", `<pre class="filebox" style="user-select:text;white-space:pre-wrap">${esc(await App().License())}</pre>`); } catch (_) {} };
+  if (el("notice-show")) el("notice-show").onclick = async () => { try { infoModal("NOTICE", `<pre class="filebox" style="user-select:text;white-space:pre-wrap">${esc(await App().Notice())}</pre>`); } catch (_) {} };
 
   try {
     const ins = await App().GetInstances();
@@ -3217,16 +3616,36 @@ async function renderSettings() {
       el("agent-deposit").onclick = installDirectives;
       el("agent-config").onclick = aiAgentModal;
     }
-    // Diagnostic : si le poste a d'AUTRES identifiants git (clé SSH, credential helper), la
-    // confirmation par PIN ne suffit plus à empêcher un accès git — on le signale honnêtement.
-    try {
-      const doc = await App().Doctor();
-      const dc = el("diag-creds");
-      if (dc && doc && (doc.other_git_creds || []).length) {
-        dc.innerHTML = `<div class="callout warn" style="margin-top:10px"><b>Autres accès git détectés sur ce poste</b> : ${doc.other_git_creds.map(esc).join(", ")}.<br>La confirmation par PIN de SituLab protège vos jetons, mais ces identifiants permettent un accès git <b>indépendant</b> de SituLab. Pour un cloisonnement strict, faites tourner vos agents sous un autre compte/bac à sable.</div>`;
-      }
-    } catch (e) {}
   } catch (e) {}
+  renderDiagnostic();
+}
+
+// renderDiagnostic : diagnostic VIVANT (1.9.4) — une liste de contrôles lisibles (git, PIN, session,
+// connexions, coffre OS, signature, autres accès git) avec statut, explication et action quand utile.
+async function renderDiagnostic() {
+  const dc = el("diag-creds"); if (!dc) return;
+  dc.innerHTML = `<div class="skeleton"></div>`;
+  let doc;
+  try { doc = await App().Doctor(); } catch (e) { dc.innerHTML = `<div class="callout warn">${esc(cleanErr(e))}</div>`; return; }
+  const row = (state, label, detail, action) => `<div class="diag-row diag-${state}"><span class="diag-ico">${state === "ok" ? "✅" : state === "warn" ? "⚠️" : "ℹ️"}</span><div class="diag-txt"><b>${esc(label)}</b>${detail ? `<div class="muted">${detail}</div>` : ""}</div>${action || ""}</div>`;
+  const rows = [];
+  rows.push(doc.git_available
+    ? row("ok", "Git installé", esc(doc.git_version || ""))
+    : row("warn", "Git absent", "Clone, synchro et versions locales sont indisponibles.", `<button class="btn btn-ghost btn-sm" data-openurl="https://git-scm.com/downloads">Installer git ↗</button>`));
+  rows.push(doc.pin_set ? row("ok", "PIN configuré", "Vos jetons sont chiffrés par votre PIN.") : row("warn", "Aucun PIN", "Définissez-en un dans Compte & sécurité."));
+  rows.push(doc.unlocked ? row("ok", "Session déverrouillée", "SituLab peut lire vos accès.") : row("info", "Session verrouillée", "Déverrouillez avec votre PIN pour agir."));
+  rows.push(row("info", "Connexions", `${doc.instances} serveur(s) configuré(s).`));
+  rows.push(doc.vault_residual ? row("warn", "Coffre Windows", `${doc.vault_residual} jeton(s) encore dans l'ancien coffre OS — ils seront migrés automatiquement au prochain déverrouillage.`) : row("ok", "Coffre Windows", "Aucun jeton résiduel."));
+  let swActive = false; try { swActive = await App().AttestSoftwareActive(); } catch (_) {}
+  rows.push(doc.sign_test_root
+    ? row("warn", "Signature de garantie", "Racine de TEST embarquée — la vraie racine de gouvernance n'est pas installée (les ✅ ne sont pas vérifiables réellement).")
+    : swActive
+      ? row("ok", "Signature logicielle", "Active — chaque commit via SituLab porte la garantie « SituLab » (signature du logiciel, pas par utilisateur).")
+      : row("info", "Signature logicielle", "Pas encore activée sur ce binaire — elle sera mintée par la gouvernance (identité unique « SituLab »)."));
+  rows.push((doc.other_git_creds || []).length
+    ? row("warn", "Autres accès git sur ce poste", `${doc.other_git_creds.map(esc).join(", ")}. Ces identifiants (clé SSH, credential helper) permettent un accès git <b>indépendant</b> de SituLab, hors confirmation PIN. Pour un cloisonnement strict, faites tourner vos agents sous un autre compte / bac à sable.`)
+    : row("ok", "Autres accès git", "Aucun identifiant git concurrent détecté — la confirmation PIN protège bien."));
+  dc.innerHTML = `<div class="diag-list">${rows.join("")}</div>`;
 }
 
 // pinForgotModal : explication HONNÊTE (le PIN est irrécupérable) + action « repartir de zéro ».
@@ -3455,49 +3874,98 @@ function pinConfirm(reason, onPin) {
   ci = codeInput(el("pc-pin"), true, () => modalOk(), true);
 }
 
+// providerLogo : logo inline (zéro dépendance, CSP-safe) pour les cartes de choix de serveur.
+function providerLogo(kind) {
+  if (kind === "github") {
+    return `<svg class="conn-logo" viewBox="0 0 16 16" width="34" height="34" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>`;
+  }
+  return `<svg class="conn-logo" viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="17.5" cy="9" r="2.2"/><path d="M6 8.2v7.6M8.1 7.1 15.4 9M6 15.8c0-3 .5-4.8 3.5-4.8H15"/></svg>`;
+}
+
+// addInstanceModal : TUNNEL d'ajout de connexion (1.9.4) — nom → type (cartes/logos) → rôle → jeton
+// (+ aide et URL) → confirmation. Réutilise AddInstanceToken/AddInstanceLogin + SetInstanceRole.
 function addInstanceModal() {
-  let provider = "forgejo";
-  openModal("Ajouter une instance", `<div class="field">
-    <label>Nom de la connexion<input id="m-name" placeholder="Travail" /><small>Une étiquette à votre choix.</small></label>
-    <div class="seg" id="m-seg">
-      <button type="button" class="seg-btn active" data-provider="forgejo">Forgejo / Gitea</button>
-      <button type="button" class="seg-btn" data-provider="github">GitHub</button>
-    </div>
-    <div id="m-forgejo">${forgejoBlock(`
-      <label>Adresse du serveur<input id="m-url" placeholder="https://git.apcom.app" /></label>
-      <label>Identifiant<input id="m-user" /></label>
-      <label>Mot de passe<input id="m-pass" type="password" /></label>
-      <label>Code 2FA <span class="muted">(laisser vide si aucun)</span></label><div id="m-otp" class="git-code"></div>
-      <label style="flex-direction:row;align-items:center"><input id="m-remember" type="checkbox" checked style="width:auto;margin-right:8px" />Mémoriser le mot de passe (chiffré par le PIN)</label>
-      <label style="flex-direction:row;align-items:center"><input id="m-admin" type="checkbox" style="width:auto;margin-right:8px" />Compte administrateur</label>`, "")}
-      <small>SituLab crée un accès chiffré par votre PIN.</small>
+  const W = { name: "", provider: "", role: "atelier" };
+  const hist = [];
+  const m = el("modal"), okBtn = el("modal-ok"), cancelBtn = el("modal-cancel");
+  m.classList.remove("hidden");
+  m.onclick = (ev) => { if (ev.target === m) closeModal(); };
+  const head = (n, t) => `<h3 id="modal-title">Nouvelle connexion</h3><div class="wiz-head"><span class="wiz-step">Étape ${n}/4</span> · ${esc(t)}</div>`;
+  const screen = (html) => { el("modal-body").innerHTML = html; };
+  const buttons = (okText, okFn) => {
+    okBtn.classList.toggle("hidden", !okText);
+    okBtn.disabled = false; okBtn.textContent = okText || ""; okBtn.onclick = okFn || null;
+    cancelBtn.classList.remove("hidden");
+    cancelBtn.textContent = hist.length > 1 ? "Retour" : "Annuler";
+    cancelBtn.onclick = hist.length > 1 ? back : closeModal;
+  };
+  const go = (fn) => { hist.push(fn); fn(); };
+  const back = () => { hist.pop(); const p = hist[hist.length - 1]; if (p) p(); };
+
+  function stepName() {
+    screen(`${head(1, "Nom de la connexion")}<div class="field"><input id="c-name" class="inp" placeholder="ex. Travail, GitHub perso…" value="${esc(W.name)}" /><small class="muted">Une étiquette à votre choix.</small></div>`);
+    buttons("Suivant", () => { const v = el("c-name").value.trim(); if (!v) { toast("Donnez un nom.", "err"); return; } W.name = v; go(stepType); });
+    const i = el("c-name"); if (i) { i.focus(); i.onkeydown = (e) => { if (e.key === "Enter") okBtn.click(); }; }
+  }
+  function stepType() {
+    screen(`${head(2, "Type de serveur")}<div class="conn-cards">
+      <button type="button" class="conn-card" data-p="github">${providerLogo("github")}<span class="cc-name">GitHub</span><span class="cc-sub">github.com</span></button>
+      <button type="button" class="conn-card" data-p="forgejo">${providerLogo("forgejo")}<span class="cc-name">Forgejo / Gitea</span><span class="cc-sub">serveur auto-hébergé</span></button>
+    </div>`);
+    buttons("", null);
+    el("modal-body").querySelectorAll(".conn-card").forEach((b) => b.onclick = () => { W.provider = b.dataset.p; go(stepRole); });
+  }
+  function stepRole() {
+    screen(`${head(3, "Rôle de cette connexion")}<div class="conn-cards">
+      <button type="button" class="conn-card" data-r="atelier"><span class="cc-ico">🛠️</span><span class="cc-name">Atelier</span><span class="cc-sub">votre terrain de dev (autonome)</span></button>
+      <button type="button" class="conn-card" data-r="production"><span class="cc-ico cc-vitrine">🌐</span><span class="cc-name">Vitrine</span><span class="cc-sub">production — tout sous PIN</span></button>
+    </div>`);
+    buttons("", null);
+    el("modal-body").querySelectorAll(".conn-card").forEach((b) => b.onclick = () => { W.role = b.dataset.r; go(stepCreds); });
+  }
+  function stepCreds() {
+    if (W.provider === "github") {
+      screen(`${head(4, "Jeton d'accès GitHub")}<div class="field">
+        <label>Jeton d'accès personnel (PAT)<input id="c-gtoken" type="password" placeholder="ghp_… ou github_pat_…" /></label>
+        <small>Collez un jeton GitHub (accès <b>repo</b> / Contents). Chiffré par votre PIN.</small>
+        ${tokenHelp("github")}
+        <div class="inline-error hidden" id="c-err"></div></div>`);
+      buttons("Créer la connexion", () => doCreate({ token: el("c-gtoken").value.trim() }));
+      return;
+    }
+    screen(`${head(4, "Connexion au serveur")}<div class="field">
+      <label>Adresse du serveur<input id="c-url" class="inp" placeholder="https://git.apcom.app" /></label>
+      <label>Identifiant<input id="c-user" class="inp" /></label>
+      <label>Mot de passe<input id="c-pass" type="password" /></label>
+      <label>Code 2FA <span class="muted">(laisser vide si aucun)</span></label><div id="c-otp" class="git-code"></div>
+      <label style="flex-direction:row;align-items:center"><input id="c-remember" type="checkbox" checked style="width:auto;margin-right:8px" />Mémoriser le mot de passe (chiffré par le PIN)</label>
+      <label style="flex-direction:row;align-items:center"><input id="c-admin" type="checkbox" style="width:auto;margin-right:8px" />Compte administrateur</label>
       ${tokenHelp("forgejo")}
-    </div>
-    <div id="m-github" hidden>${forgejoBlock(`
-      <label>Jeton d'accès personnel (PAT)<input id="m-gtoken" type="password" placeholder="ghp_… ou github_pat_…" /></label>
-      <small>Collez un jeton GitHub (accès <b>repo</b> / Contents). Chiffré par votre PIN.</small>
-      ${tokenHelp("github")}`, "https://github.com", "github")}
-    </div>
-    <div class="inline-error hidden" id="m-error"></div></div>`, async () => {
-    const er = el("m-error"); er.classList.add("hidden");
+      <div class="inline-error hidden" id="c-err"></div></div>`);
+    const ciOtp = codeInput(el("c-otp"), false, null);
+    buttons("Créer la connexion", () => doCreate({
+      url: el("c-url").value.trim(), user: el("c-user").value.trim(), pass: el("c-pass").value,
+      otp: ciOtp.read(), admin: !!(el("c-admin") && el("c-admin").checked), remember: !!(el("c-remember") && el("c-remember").checked),
+    }));
+  }
+  async function doCreate(dd) {
+    const er = el("c-err"); if (er) er.classList.add("hidden");
+    okBtn.disabled = true;
     try {
-      if (provider === "github") {
-        await App().AddInstanceToken(el("m-name").value.trim(), "github", "", el("m-gtoken").value.trim());
-      } else {
-        await App().AddInstanceLogin(el("m-name").value.trim(), el("m-url").value.trim(), el("m-user").value.trim(), el("m-pass").value, ciOtp.read(), !!(el("m-admin") && el("m-admin").checked), !!(el("m-remember") && el("m-remember").checked));
-      }
-      location.reload();
-    } catch (e) { er.textContent = cleanErr(e); er.classList.remove("hidden"); }
-  });
-  const ciOtp = codeInput(el("m-otp"), false, null);
-  document.querySelectorAll("#m-seg .seg-btn").forEach((b) => {
-    b.onclick = () => {
-      provider = b.dataset.provider;
-      document.querySelectorAll("#m-seg .seg-btn").forEach((x) => x.classList.toggle("active", x === b));
-      el("m-forgejo").hidden = provider !== "forgejo";
-      el("m-github").hidden = provider !== "github";
-    };
-  });
+      if (W.provider === "github") await App().AddInstanceToken(W.name, "github", "", dd.token);
+      else await App().AddInstanceLogin(W.name, dd.url, dd.user, dd.pass, dd.otp, dd.admin, dd.remember);
+      try { await App().SetInstanceRole(W.name, W.role); } catch (_) {}
+      stepDone();
+    } catch (e) { okBtn.disabled = false; if (er) { er.textContent = cleanErr(e); er.classList.remove("hidden"); } }
+  }
+  function stepDone() {
+    hist.length = 0;
+    screen(`<div class="conn-done"><div class="cd-ico">✅</div><h3 id="modal-title">Connexion active</h3>
+      <p class="sub">« <b>${esc(W.name)}</b> » — ${W.provider === "github" ? "GitHub" : "Forgejo / Gitea"} · <span class="role-badge ${W.role === "production" ? "role-production" : "role-atelier"}">${W.role === "production" ? "VITRINE" : "ATELIER"}</span> est prête.</p></div>`);
+    okBtn.classList.remove("hidden"); okBtn.disabled = false; okBtn.textContent = "Terminer"; okBtn.onclick = () => location.reload();
+    cancelBtn.classList.add("hidden");
+  }
+  go(stepName);
 }
 
 // reconnectModal : recrée le token d'une instance existante (passer en admin, mémoriser le
@@ -3633,6 +4101,8 @@ function connPolicyModal(name) {
   const inst = (state._settingsInstances || []).find((i) => i.name === name) || { name, role: "atelier" };
   let role = inst.role === "production" ? "production" : "atelier";
   let policy = inst.pin_policy || null;
+  let signMode = inst.sign_mode === "server" ? "server" : "local";
+  let signURL = inst.sign_server_url || "";
 
   const rows = () => PIN_ACTIONS.map((a) =>
     `<label class="set-row toggle"><div class="set-row-l">${a.label}<small>activé = votre PIN est demandé ; désactivé = autorisé dès que SituLab est déverrouillé</small></div>
@@ -3652,6 +4122,15 @@ function connPolicyModal(name) {
       <button data-preset="production">Préréglage Production protégée</button>
     </div>
     <div id="pol-rows">${rows()}</div>
+    <div class="set-row" style="margin-top:14px"><div class="set-row-l">Signature des commits<small>empreinte « SituLab approved »</small></div>
+      <div class="set-row-c"><div class="seg" role="group" aria-label="Signature" id="sign-seg">
+        <button data-sign="local" class="${signMode === "server" ? "" : "on"}">Logiciel</button>
+        <button data-sign="server" class="${signMode === "server" ? "on" : ""}">Serveur</button>
+      </div></div></div>
+    <div id="sign-url-row" class="${signMode === "server" ? "" : "hidden"}"><label>URL du service de signature<input id="sign-url" class="inp" value="${esc(signURL)}" placeholder="https://situememoring.com" /></label></div>
+    <div class="set-sec-d" id="sign-help">${signMode === "server"
+      ? "Serveur : la clé de signature ne quitte jamais le serveur — un agent sur le poste ne peut rien forger (audit, rate-limit, révocation)."
+      : "Logiciel : clé embarquée dans SituLab — marqueur d'authenticité « fait via SituLab » (extractible, limite assumée)."}</div>
   </div>`;
 
   openModal("🏷️ Rôle & PIN — " + esc(name), body(), async () => {
@@ -3666,8 +4145,9 @@ function connPolicyModal(name) {
       // Si la politique correspond exactement aux défauts du rôle, on renvoie null (héritage) plutôt
       // qu'un figement explicite — ainsi un futur changement de rôle reste effectif.
       await App().SetInstancePINPolicy(name, differs ? pol : null);
+      await App().SetInstanceSignMode(name, signMode, (el("sign-url") && signMode === "server") ? el("sign-url").value.trim() : "");
       await refreshInstances(); // met à jour immédiatement le badge du header et le sélecteur (pas de redémarrage)
-      closeModal(); toast("Rôle & politique mis à jour", "ok"); renderSettings();
+      closeModal(); toast("Rôle, PIN & signature mis à jour", "ok"); renderSettings();
     } catch (e) { toast(cleanErr(e), "err"); }
   });
   el("modal-ok").textContent = "Enregistrer";
@@ -3688,6 +4168,15 @@ function connPolicyModal(name) {
     policy = null; role = b.dataset.preset; // le préréglage fixe aussi le rôle cohérent
     document.querySelectorAll("#role-seg button").forEach((x) => x.classList.toggle("on", x.dataset.role === role));
     reseed();
+  };
+  el("sign-seg").onclick = (e) => {
+    const b = e.target.closest("[data-sign]"); if (!b) return;
+    signMode = b.dataset.sign;
+    document.querySelectorAll("#sign-seg button").forEach((x) => x.classList.toggle("on", x.dataset.sign === signMode));
+    el("sign-url-row").classList.toggle("hidden", signMode !== "server");
+    el("sign-help").textContent = signMode === "server"
+      ? "Serveur : la clé de signature ne quitte jamais le serveur — un agent sur le poste ne peut rien forger (audit, rate-limit, révocation)."
+      : "Logiciel : clé embarquée dans SituLab — marqueur d'authenticité « fait via SituLab » (extractible, limite assumée).";
   };
 }
 

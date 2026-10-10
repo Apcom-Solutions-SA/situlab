@@ -157,6 +157,7 @@ type Args struct {
 	Head        string   `json:"head,omitempty"`     // pull.create : branche source
 	Base        string   `json:"base,omitempty"`     // pull.create : branche cible
 	Method      string   `json:"method,omitempty"`   // pull.merge : merge|rebase|squash
+	Mode        string   `json:"mode,omitempty"`     // project.promote : code|tag|release
 	Event       string   `json:"event,omitempty"`    // pull.review : APPROVED|REQUEST_CHANGES|COMMENT
 	Tag         string   `json:"tag,omitempty"`      // release/tag
 	Target      string   `json:"target,omitempty"`   // release/tag : branche/commit cible
@@ -181,12 +182,24 @@ type Status struct {
 	Instances int  `json:"instances"`
 }
 
+// PINOutcome décrit le RÉSULTAT d'une demande de PIN, pour que le client (souvent un agent) distingue
+// clairement l'état au lieu d'un échec opaque : confirmé / refusé par l'humain / délai écoulé / pas
+// d'interface pour demander. L'invariant est préservé : le PIN se saisit dans la fenêtre, jamais ici.
+type PINOutcome int
+
+const (
+	PINConfirmed   PINOutcome = iota // l'humain a saisi et validé le PIN dans la fenêtre
+	PINRefused                       // l'humain a annulé la fenêtre
+	PINTimedOut                      // aucune réponse dans le délai de garde (la fenêtre a pu rester ouverte)
+	PINUnavailable                   // aucune interface disponible pour demander le PIN
+)
+
 // PINPrompter demande le PIN à l'humain sur le poste. reason décrit l'action à autoriser.
-// Renvoie (pin, true) si saisi, ("", false) si annulé ou indisponible (pas d'UI).
+// Renvoie (pin, PINConfirmed) si saisi, ("", …) sinon selon la cause (voir PINOutcome).
 type PINPrompter interface {
 	// detail porte un aperçu optionnel de l'action (ex. *core.PushPreview pour un envoi) afin
 	// d'enrichir le consentement ; nil quand il n'y a rien de plus à montrer que `reason`.
-	PromptPIN(reason string, detail any) (string, bool)
+	PromptPIN(reason string, detail any) (string, PINOutcome)
 }
 
 // Daemon exécute les opérations sur un noyau partagé, avec consentement humain par modale.
@@ -234,6 +247,10 @@ func (d *Daemon) handle(req ipc.Request) ipc.Response {
 	return ipc.Response{OK: true, Data: raw}
 }
 
+// IsWriteOp expose isWriteOp au client CLI : savoir à l'avance qu'une opération est une MUTATION
+// (donc susceptible d'ouvrir la fenêtre PIN sur le poste) permet d'avertir l'agent AVANT de bloquer.
+func IsWriteOp(op string) bool { return isWriteOp(op) }
+
 // isWriteOp liste les opérations de mutation (celles qui ont exigé le PIN). Sert au
 // verrouillage-après-écriture. On exclut les flux d'installation (ajout/reconnexion
 // d'instance) qui ne sont pas des écritures de contenu.
@@ -259,6 +276,8 @@ func kindOf(err error) string {
 		return "noinstance"
 	case errors.Is(err, core.ErrPINNeeded):
 		return "pinneeded"
+	case errors.Is(err, core.ErrPINTimeout):
+		return "pintimeout"
 	case errors.Is(err, core.ErrPINLocked):
 		return "pinlocked"
 	case errors.Is(err, core.ErrNoGit):
@@ -278,11 +297,15 @@ func (d *Daemon) ensureUnlocked() error {
 	if !d.svc.PINSet() {
 		return errors.New("aucun PIN configuré : définissez-en un dans la fenêtre SituLab")
 	}
-	pin, ok := d.prompter.PromptPIN("Déverrouiller SituLab", nil)
-	if !ok {
+	pin, outcome := d.prompter.PromptPIN("Déverrouiller SituLab", nil)
+	switch outcome {
+	case PINConfirmed:
+		return d.svc.Unlock(pin)
+	case PINTimedOut:
+		return core.ErrPINTimeout
+	default: // refusé / indisponible
 		return core.ErrLocked
 	}
-	return d.svc.Unlock(pin)
 }
 
 // writePIN obtient le PIN d'autorisation d'une écriture EXCLUSIVEMENT via la modale sur le
@@ -336,11 +359,15 @@ func (d *Daemon) writePIN(reason string, detail any) (string, error) {
 	if !d.svc.PINSet() {
 		return "", errors.New("aucun PIN configuré : définissez-en un d'abord")
 	}
-	pin, ok := d.prompter.PromptPIN(reason, detail)
-	if !ok {
+	pin, outcome := d.prompter.PromptPIN(reason, detail)
+	switch outcome {
+	case PINConfirmed:
+		return pin, nil
+	case PINTimedOut:
+		return "", core.ErrPINTimeout
+	default: // refusé / indisponible
 		return "", core.ErrPINNeeded
 	}
-	return pin, nil
 }
 
 func (d *Daemon) dispatch(op string, a Args) (any, error) {
@@ -559,7 +586,7 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return d.svc.ProjectPromote(a.Name, a.Index, core.PromoteOptions{SourceBranch: a.Head, Version: a.Tag, TargetBranch: a.Base}, pin)
+		return d.svc.ProjectPromote(a.Name, a.Index, core.PromoteOptions{SourceBranch: a.Head, Version: a.Tag, TargetBranch: a.Base, Mode: a.Mode, Notes: a.Body}, pin)
 
 	// --- écritures : PIN confirmé EXCLUSIVEMENT par la modale sur le poste (jamais le socket) ---
 	case OpPush:

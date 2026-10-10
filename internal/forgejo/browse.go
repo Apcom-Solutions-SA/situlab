@@ -75,6 +75,10 @@ type Entry struct {
 	Path string `json:"path"`
 	Type string `json:"type"` // "dir" | "file"
 	Size int64  `json:"size"`
+	// URLs renvoyées par l'API contents (Forgejo/Gitea et GitHub) : page web du fichier et lien de
+	// téléchargement brut. Servent aux actions « ouvrir dans le navigateur » / « télécharger » (v1.9.2).
+	HTMLURL     string `json:"html_url,omitempty"`
+	DownloadURL string `json:"download_url,omitempty"`
 }
 
 // contentsPath construit le chemin d'API contents avec une éventuelle réf.

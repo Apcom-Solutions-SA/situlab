@@ -33,3 +33,19 @@ func ReadNote(dir, ref, sha string) string {
 	}
 	return strings.TrimSpace(out)
 }
+
+// PushNotes publie la ref de notes <ref> (ex. "situlab") vers le distant, pour que la signature de
+// garantie « SituLab approved » soit VISIBLE en ligne et par les autres clones — sans quoi l'attestation
+// resterait purement locale. L'appelant l'invoque en best-effort après l'envoi du code : un échec
+// (aucune note encore écrite, distant sans la ref) ne doit jamais faire échouer le push de code.
+func PushNotes(dir, ref, token string, github bool, baseURL string) (string, error) {
+	full := "refs/notes/" + ref
+	return runC(dir, NetTimeout, authCfg(token, github, baseURL), "push", remoteName(dir), full+":"+full)
+}
+
+// FetchNotes récupère la ref de notes <ref> depuis le distant pour voir les attestations des autres
+// (force « + » : les notes peuvent avoir été réécrites côté serveur). Best-effort chez l'appelant.
+func FetchNotes(dir, ref, token string, github bool, baseURL string) (string, error) {
+	full := "refs/notes/" + ref
+	return runC(dir, NetTimeout, authCfg(token, github, baseURL), "fetch", remoteName(dir), "+"+full+":"+full)
+}

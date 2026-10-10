@@ -6,6 +6,7 @@ package core
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"situlab/internal/config"
@@ -234,31 +235,40 @@ type ProjectBoard struct {
 // remonte son erreur par dépôt sans bloquer les autres. Lecture (pas de PIN).
 func (s *Service) ProjectBoards() ([]ProjectBoard, error) {
 	projs := s.Projects()
-	out := make([]ProjectBoard, 0, len(projs))
-	for _, p := range projs {
-		b := ProjectBoard{Name: p.Name, Icon: p.Icon}
-		// Atelier (distant) : version = dernier tag.
-		atelierTags, av, aerr := s.latestTags(p.Atelier)
-		b.Atelier = RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo, Version: av}
-		if aerr != nil {
-			b.Atelier.Error = cleanClientErr(aerr)
-		}
-		// Clone local de l'atelier (colonne Local).
-		if path := s.localCloneFor(p.Atelier); path != "" {
-			if sum, err := gitx.SummaryOf(path); err == nil && sum.IsRepo {
-				b.Local = &ProjectLocal{
-					Path: path, Branch: sum.Branch, Clean: sum.Clean, Ahead: sum.Ahead, Behind: sum.Behind,
-					Changed: len(sum.Changed), Describe: sum.Describe, LastDate: sum.LastDate,
+	out := make([]ProjectBoard, len(projs))
+	// Perf (1.9.3) : chaque projet fait plusieurs appels API (tags atelier + prods) + une lecture du
+	// clone local ; on les calcule EN PARALLÈLE (chaque goroutine écrit SON index → pas de course ;
+	// les caches partagés sont protégés par s.mu). Concurrence bornée pour ne pas saturer le serveur.
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 6)
+	for i := range projs {
+		wg.Add(1)
+		go func(i int, p config.Project) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			b := ProjectBoard{Name: p.Name, Icon: p.Icon}
+			atelierTags, av, aerr := s.latestTags(p.Atelier)
+			b.Atelier = RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo, Version: av}
+			if aerr != nil {
+				b.Atelier.Error = cleanClientErr(aerr)
+			}
+			if path := s.localCloneFor(p.Atelier); path != "" {
+				if sum, err := gitx.SummaryOf(path); err == nil && sum.IsRepo {
+					b.Local = &ProjectLocal{
+						Path: path, Branch: sum.Branch, Clean: sum.Clean, Ahead: sum.Ahead, Behind: sum.Behind,
+						Changed: len(sum.Changed), Describe: sum.Describe, LastDate: sum.LastDate,
+					}
 				}
 			}
-		}
-		// Productions : version + « équilibré » / « en retard de N versions ».
-		idx := tagIndex(atelierTags)
-		for _, pr := range p.Productions {
-			b.Prods = append(b.Prods, s.prodLine(pr, idx, av, p.Promotions))
-		}
-		out = append(out, b)
+			idx := tagIndex(atelierTags)
+			for _, pr := range p.Productions {
+				b.Prods = append(b.Prods, s.prodLine(pr, idx, av, p.Promotions))
+			}
+			out[i] = b
+		}(i, projs[i])
 	}
+	wg.Wait()
 	return out, nil
 }
 
@@ -294,13 +304,52 @@ type PromoteResult struct {
 	Summary    string `json:"summary"`
 }
 
+// Modes de promotion (v1.9.2) — l'utilisateur choisit AU CAS PAR CAS la méthode. Clarifie la confusion
+// « promouvoir ≠ publier une Release » : pousser du code (± un tag) sur la vitrine ne crée PAS, à lui
+// seul, une Release GitHub ni ses installeurs. La Release et les binaires sont produits par la CI,
+// déclenchée par le PUSH DU TAG (`release.yml`). Trois méthodes :
+const (
+	// PromoteModeCode : met à jour la branche de la vitrine SANS tag — aucune nouvelle version publiée
+	// (utile pour aligner du contenu sans déclencher de release).
+	PromoteModeCode = "code"
+	// PromoteModeTag (défaut) : code + tag de version → sur GitHub, le tag DÉCLENCHE la CI qui bâtit les
+	// installeurs et publie la Release. C'est le cas normal d'une mise en vitrine versionnée.
+	PromoteModeTag = "tag"
+	// PromoteModeRelease : code + tag + création EXPLICITE de l'objet Release via l'API (avec notes de
+	// version). Garantit que la Release existe même sans attendre la CI — mais les INSTALLEURS restent
+	// produits par la CI (l'app ne compile pas de binaires). À utiliser quand on veut la page Release
+	// tout de suite, les assets suivant via la CI.
+	PromoteModeRelease = "release"
+)
+
 // PromoteOptions précise CE qui est promu : l'utilisateur décide la version, la branche d'atelier
-// source et la branche de production cible. Champs vides = valeurs par défaut (dernier tag de la
-// branche par défaut de l'atelier → branche par défaut de la prod), pour les appels non interactifs.
+// source, la branche de production cible et la MÉTHODE (Mode). Champs vides = valeurs par défaut
+// (dernier tag de la branche par défaut de l'atelier → branche par défaut de la prod ; Mode = tag).
 type PromoteOptions struct {
 	SourceBranch string `json:"source_branch"` // branche de l'atelier d'où provient la version
 	Version      string `json:"version"`       // tag/ref exact publié (ex. v1.8.0) ; vide = dernier tag de la branche
 	TargetBranch string `json:"target_branch"` // branche de la production où publier
+	Mode         string `json:"mode"`          // code | tag (défaut) | release
+	Notes        string `json:"notes"`         // notes de version (Mode release) ; vide = généré
+}
+
+// promotionPlan traduit un mode (+ cible GitHub ou non) en actions concrètes et en une explication
+// lisible — fonction PURE, testable, et source unique de vérité du « qui fait quoi » de la promotion.
+func promotionPlan(mode string, github bool) (pushTag, makeRelease bool, explain string) {
+	switch mode {
+	case PromoteModeCode:
+		return false, false, "Code publié sur la vitrine (sans tag) — aucune version ni Release créée."
+	case PromoteModeRelease:
+		if github {
+			return true, true, "Code + tag poussés et Release GitHub créée (notes de version). Les INSTALLEURS sont bâtis par la CI (Actions) ; vérifiez qu'elle passe au vert."
+		}
+		return true, true, "Code + tag poussés et Release créée sur la vitrine."
+	default: // PromoteModeTag
+		if github {
+			return true, false, "Code + tag poussés. Sur GitHub, le tag DÉCLENCHE la CI (release.yml) qui bâtit les installeurs et publie la Release — vérifiez Actions, la Release n'est pas automatique côté app."
+		}
+		return true, false, "Code + tag poussés sur la vitrine."
+	}
 }
 
 // ProjectPromote publie une version choisie de l'atelier vers UNE production du projet, en UN commit
@@ -398,6 +447,7 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 		branch = "main"
 	}
 	token, github, base := s.instanceToken(prod.Instance), s.isGitHub(prod.Instance), s.instanceBaseURL(prod.Instance)
+	pushTag, makeRelease, explain := promotionPlan(opts.Mode, github) // méthode choisie (code | tag | release)
 
 	// 4) Base = état actuel de la prod (vide à la 1re promotion) ; squash propre par-dessus.
 	baseSHA, ferr := gitx.FetchURL(path, pr.CloneURL, branch, token, github, base)
@@ -420,18 +470,38 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 		return nil, fmt.Errorf("publication vers la production échouée : %w", err)
 	}
 
-	// 6) Étiqueter la version sur la vitrine (OBLIGATOIRE) : une version promue porte toujours son tag,
-	//    pour que la vitrine soit identifiable et que l'équilibre se lise par version.
-	if _, err := gitx.PushTagTo(path, pr.CloneURL, version, sha, token, github, base); err != nil {
-		return nil, fmt.Errorf("commit publié mais étiquetage « %s » de la vitrine échoué : %w", version, err)
+	// 6) Étiqueter la version sur la vitrine — SELON LA MÉTHODE. Mode « code » : pas de tag (simple
+	//    alignement de contenu). Sinon le tag accompagne la vitrine (et, sur GitHub, déclenche la CI).
+	if pushTag {
+		if _, err := gitx.PushTagTo(path, pr.CloneURL, version, sha, token, github, base); err != nil {
+			return nil, fmt.Errorf("commit publié mais étiquetage « %s » de la vitrine échoué : %w", version, err)
+		}
 	}
 
-	// 7) Marqueur d'équilibre : version promue + date.
-	s.recordPromotion(projectName, prod.Key(), version)
+	// 6b) Mode « release » : créer EXPLICITEMENT l'objet Release via l'API (notes de version). Les
+	//     installeurs, eux, restent bâtis par la CI. Échec signalé sans défaire le code déjà publié.
+	if makeRelease {
+		notes := strings.TrimSpace(opts.Notes)
+		if notes == "" {
+			notes = fmt.Sprintf("Version %s promue depuis l'atelier %s.", version, srcLabel)
+		}
+		if _, err := s.CreateRelease(prod.Instance, prod.Owner, prod.Repo, version, version, notes, version, false, false, pin); err != nil {
+			return &PromoteResult{
+				Project: projectName, Production: prod.Owner + "/" + prod.Repo, Version: version, Branch: branch,
+				Summary: fmt.Sprintf("Code + tag %s publiés sur %s/%s, mais la création de la Release a échoué : %s", version, prod.Owner, prod.Repo, cleanClientErr(err)),
+			}, nil
+		}
+	}
+
+	// 7) Marqueur d'équilibre : une version n'est « promue » que si elle a été taguée (sinon simple
+	//    alignement de contenu sans version publiée).
+	if pushTag {
+		s.recordPromotion(projectName, prod.Key(), version)
+	}
 
 	res := &PromoteResult{
 		Project: projectName, Production: prod.Owner + "/" + prod.Repo, Version: version, Branch: branch,
-		Summary: fmt.Sprintf("Version %s (%s) publiée et étiquetée sur la production %s/%s → %s.", version, srcLabel, prod.Owner, prod.Repo, branch),
+		Summary: fmt.Sprintf("%s/%s → %s : %s", prod.Owner, prod.Repo, branch, explain),
 	}
 	return res, nil
 }

@@ -65,9 +65,21 @@ bloquante** : elle rend visible qui respecte la discipline, elle ne rejette rien
 **Ce n'est pas infalsifiable en local.** Un attaquant **déterminé sous le même compte OS** peut lire
 la clé d'appareil dans la mémoire du démon déverrouillé et forger un faux « approved ». C'est le même
 plafond que partout ailleurs dans SituLab ; on le **borne** par des certificats à **courte durée** et
-une **révocation** (serials). Seul un modèle **T3** (signature produite côté serveur, clé jamais sur le
-poste) fermerait ce vecteur — hors périmètre de cette phase. On ne peut pas *forger* un faux ✅ sans le
-certificat ; on peut seulement *se priver* du ✅ (commettre hors SituLab) — ce qui est le signal voulu.
+une **révocation** (serials). On ne peut pas *forger* un faux ✅ sans le certificat ; on peut seulement
+*se priver* du ✅ (commettre hors SituLab) — ce qui est le signal voulu.
+
+**Depuis 1.9.5**, le modèle par défaut est une **garantie LOGICIEL** : une identité « SituLab » unique
+**embarquée** signe (plus de cert par utilisateur). Même plafond T2 : une clé dans le binaire est
+extractible → marqueur d'authenticité « fait via SituLab », pas une preuve inviolable localement.
+
+**Depuis 1.9.6 — mode « signature serveur » (T3), par connexion.** L'empreinte peut être demandée au
+**service de signature APCOM** : la **clé privée ne quitte jamais le serveur**, donc un attaquant/agent
+**sur le poste** ne peut **rien forger hors ligne**. Le démon appelle le service avec le **jeton Forgejo**
+(jamais remis au client) ; l'autorisation = accès au dépôt visé ; en plus : **audit, rate-limit,
+révocation**. **Honnêteté** : sans **racine matérielle** (TPM/WebAuthn, option future), on ne distingue
+pas parfaitement un « vrai SituLab » d'un agent muni d'un jeton valide ; le gain réel est **la clé hors du
+poste** + audit/rate-limit/révocation. La **vérification client ne change pas** (chaîne jusqu'à la racine
+APCOM embarquée). Contrat & runbook serveur : `STACK_TECHNIQUE/SITULAB/signserver/` (KERNEL).
 
 ## Distribution
 

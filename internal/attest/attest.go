@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -45,6 +46,38 @@ func UsingTestRoot() bool {
 	return strings.TrimSpace(rootPubB64) == testRootB64
 }
 
+// situlab_sign.* : identité de SIGNATURE LOGICIELLE embarquée (v1.9.5) — UNE SEULE identité « SituLab »,
+// la même pour toutes les installations (ni par utilisateur, ni par organisation). Mintée une fois par la
+// gouvernance (clé signée par la CA, cf. `attest gen-software`) puis embarquée dans le binaire.
+//
+//go:embed situlab_sign.key
+var softwareKeyB64 string
+
+//go:embed situlab_sign.cert.json
+var softwareCertJSON string
+
+// SoftwareSigner renvoie la clé privée + le certificat de signature LOGICIELLE embarqués. ok=false tant
+// qu'ils ne sont pas mintés (placeholder).
+//
+// ⚠️ Limite ASSUMÉE (garantie logiciel LOCALE) : une clé embarquée dans le binaire est extractible par un
+// process du même poste → c'est un marqueur d'authenticité « fait via SituLab », PAS une preuve
+// infalsifiable face à un attaquant local. La version inviolable est la signature CÔTÉ SERVEUR (T3) :
+// la clé ne quitte jamais le serveur et le poste ne peut rien forger (voir SECURITY.md / directives serveur).
+func SoftwareSigner() (ed25519.PrivateKey, Cert, bool) {
+	kb, err := base64.StdEncoding.DecodeString(strings.TrimSpace(softwareKeyB64))
+	if err != nil || len(kb) != ed25519.PrivateKeySize {
+		return nil, Cert{}, false
+	}
+	var c Cert
+	if json.Unmarshal([]byte(softwareCertJSON), &c) != nil || len(c.DevicePub) != ed25519.PublicKeySize {
+		return nil, Cert{}, false
+	}
+	return ed25519.PrivateKey(kb), c, true
+}
+
+// HasSoftwareSigner indique si la signature logicielle « SituLab » est active (clé+cert embarqués).
+func HasSoftwareSigner() bool { _, _, ok := SoftwareSigner(); return ok }
+
 // Root renvoie la clé publique racine APCOM épinglée.
 func Root() (ed25519.PublicKey, error) {
 	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rootPubB64))
@@ -54,48 +87,100 @@ func Root() (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(b), nil
 }
 
-// Cert lie une clé d'appareil à une identité vérifiée, pour une fenêtre de validité, signé par la racine.
-// Le certificat n'est pas secret (stocké en config).
+// maxChainDepth borne la profondeur de la chaîne de certificats : au plus UNE autorité intermédiaire
+// entre la racine et le certificat d'appareil (racine → CA intermédiaire → appareil). Empêche qu'une
+// chaîne arbitrairement profonde serve à masquer une rupture de confiance ou à épuiser la pile.
+const maxChainDepth = 1
+
+// Cert lie une clé (d'appareil, ou d'autorité intermédiaire) à une identité, pour une fenêtre de
+// validité, signé par son émetteur. Le certificat n'est pas secret (stocké en config).
+//
+// Chaîne à deux niveaux (v1.9.2) : un certificat d'appareil peut être signé SOIT directement par la
+// racine (Issuer nil — 1 niveau, rétro-compatible), SOIT par une autorité intermédiaire (Issuer = le
+// cert de cette CA, elle-même signée par la racine). `IsCA` distingue une autorité d'un appareil et
+// EST couvert par la signature : un certificat d'appareil ne peut pas être détourné en autorité.
 type Cert struct {
 	DevicePub ed25519.PublicKey `json:"device_pub"`
 	Subject   string            `json:"subject"`
 	NotBefore time.Time         `json:"not_before"`
 	NotAfter  time.Time         `json:"not_after"`
 	Serial    string            `json:"serial"`
-	RootSig   []byte            `json:"root_sig"` // signature racine sur certSigningBytes (hors RootSig)
+	IsCA      bool              `json:"is_ca,omitempty"`  // true = autorité intermédiaire (peut signer d'autres certs)
+	Issuer    *Cert             `json:"issuer,omitempty"` // nil = signé par la racine ; sinon la CA émettrice (chaînée à la racine)
+	RootSig   []byte            `json:"root_sig"`         // signature de l'émetteur sur certSigningBytes (hors Issuer/RootSig)
 }
 
-// certSigningBytes est la représentation canonique STABLE signée par la racine (timestamps en Unix pour
-// éviter toute ambiguïté de sérialisation). Préfixe de domaine anti-confusion.
-func certSigningBytes(devicePub ed25519.PublicKey, subject string, nb, na time.Time, serial string) []byte {
+// certSigningBytes est la représentation canonique STABLE signée par l'émetteur (timestamps en Unix pour
+// éviter toute ambiguïté de sérialisation ; IsCA couvert pour empêcher la promotion appareil→autorité).
+// Préfixe de domaine anti-confusion.
+func certSigningBytes(devicePub ed25519.PublicKey, subject string, nb, na time.Time, serial string, isCA bool) []byte {
 	payload, _ := json.Marshal(struct {
 		DevicePub []byte `json:"device_pub"`
 		Subject   string `json:"subject"`
 		NotBefore int64  `json:"not_before"`
 		NotAfter  int64  `json:"not_after"`
 		Serial    string `json:"serial"`
-	}{devicePub, subject, nb.Unix(), na.Unix(), serial})
-	return append([]byte("situlab-cert-v1\x00"), payload...)
+		IsCA      bool   `json:"is_ca"`
+	}{devicePub, subject, nb.Unix(), na.Unix(), serial, isCA})
+	return append([]byte("situlab-cert-v2\x00"), payload...)
 }
 
-// IssueCert signe un certificat d'appareil avec la clé privée RACINE. Geste de GOUVERNANCE (hors ligne)
-// — exposé ici pour l'émission manuelle et les tests ; le privé racine n'est jamais présent dans le démon.
-func IssueCert(rootPriv ed25519.PrivateKey, devicePub ed25519.PublicKey, subject string, notBefore, notAfter time.Time, serial string) Cert {
-	c := Cert{DevicePub: devicePub, Subject: subject, NotBefore: notBefore, NotAfter: notAfter, Serial: serial}
-	c.RootSig = ed25519.Sign(rootPriv, certSigningBytes(devicePub, subject, notBefore, notAfter, serial))
+// signCert fabrique un certificat signé par signerPriv (racine ou CA). Facteur commun des trois émissions.
+func signCert(signerPriv ed25519.PrivateKey, issuer *Cert, pub ed25519.PublicKey, subject string, notBefore, notAfter time.Time, serial string, isCA bool) Cert {
+	c := Cert{DevicePub: pub, Subject: subject, NotBefore: notBefore, NotAfter: notAfter, Serial: serial, IsCA: isCA, Issuer: issuer}
+	c.RootSig = ed25519.Sign(signerPriv, certSigningBytes(pub, subject, notBefore, notAfter, serial, isCA))
 	return c
 }
 
-// verifyCert : le cert chaîne à la racine épinglée, est dans sa fenêtre de validité et non révoqué.
+// IssueCert signe un certificat d'APPAREIL directement avec la clé privée RACINE (chaîne 1 niveau).
+// Geste de GOUVERNANCE (hors ligne) ; le privé racine n'est jamais présent dans le démon.
+func IssueCert(rootPriv ed25519.PrivateKey, devicePub ed25519.PublicKey, subject string, notBefore, notAfter time.Time, serial string) Cert {
+	return signCert(rootPriv, nil, devicePub, subject, notBefore, notAfter, serial, false)
+}
+
+// IssueCA signe un certificat d'AUTORITÉ INTERMÉDIAIRE avec la clé privée RACINE (geste hors ligne).
+// La CA ainsi certifiée peut émettre des certificats d'appareil via IssueCertFrom (chaîne 2 niveaux).
+func IssueCA(rootPriv ed25519.PrivateKey, caPub ed25519.PublicKey, subject string, notBefore, notAfter time.Time, serial string) Cert {
+	return signCert(rootPriv, nil, caPub, subject, notBefore, notAfter, serial, true)
+}
+
+// IssueCertFrom signe un certificat d'APPAREIL avec une CA intermédiaire, en embarquant le cert de la CA
+// (issuer) pour que la chaîne soit vérifiable hors ligne jusqu'à la racine épinglée.
+func IssueCertFrom(caPriv ed25519.PrivateKey, issuer Cert, devicePub ed25519.PublicKey, subject string, notBefore, notAfter time.Time, serial string) Cert {
+	return signCert(caPriv, &issuer, devicePub, subject, notBefore, notAfter, serial, false)
+}
+
+// verifyCert : le cert chaîne à la racine épinglée (directement ou via une CA intermédiaire), est dans
+// sa fenêtre de validité et non révoqué. Fail-closed : toute rupture → erreur.
 func verifyCert(c Cert, now time.Time, revoked map[string]bool) error {
-	root, err := Root()
-	if err != nil {
-		return err
+	return verifyCertDepth(c, now, revoked, 0)
+}
+
+func verifyCertDepth(c Cert, now time.Time, revoked map[string]bool, depth int) error {
+	if depth > maxChainDepth {
+		return errors.New("chaîne de certificats trop longue")
 	}
 	if len(c.DevicePub) != ed25519.PublicKeySize {
-		return errors.New("clé d'appareil invalide")
+		return errors.New("clé invalide")
 	}
-	if !ed25519.Verify(root, certSigningBytes(c.DevicePub, c.Subject, c.NotBefore, c.NotAfter, c.Serial), c.RootSig) {
+	// Déterminer la clé émettrice : la racine épinglée, ou la CA intermédiaire (elle-même vérifiée).
+	var signer ed25519.PublicKey
+	if c.Issuer == nil {
+		root, err := Root()
+		if err != nil {
+			return err
+		}
+		signer = root
+	} else {
+		if !c.Issuer.IsCA {
+			return errors.New("l'émetteur n'est pas une autorité (CA)")
+		}
+		if err := verifyCertDepth(*c.Issuer, now, revoked, depth+1); err != nil {
+			return fmt.Errorf("émetteur invalide : %w", err)
+		}
+		signer = c.Issuer.DevicePub
+	}
+	if !ed25519.Verify(signer, certSigningBytes(c.DevicePub, c.Subject, c.NotBefore, c.NotAfter, c.Serial, c.IsCA), c.RootSig) {
 		return errors.New("certificat non émis par la racine APCOM")
 	}
 	if now.Before(c.NotBefore) || now.After(c.NotAfter) {

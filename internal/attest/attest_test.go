@@ -6,9 +6,20 @@ package attest
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"os"
 	"testing"
 	"time"
 )
+
+// TestMain force la racine EMBARQUÉE à la racine de TEST connue le temps des tests, pour que ceux-ci
+// vérifient la LOGIQUE de la chaîne indépendamment de la valeur réellement embarquée dans le binaire
+// (qui est la vraie racine de gouvernance dans un build de release). Sans cela, embarquer la vraie
+// racine — dont les tests n'ont pas le privé — casserait les chemins positifs.
+func TestMain(m *testing.M) {
+	rootPubB64 = base64.StdEncoding.EncodeToString(testRootPriv().Public().(ed25519.PublicKey))
+	os.Exit(m.Run())
+}
 
 // testRootPriv reconstruit la racine de TEST à partir de la graine fixe (la même qui a produit
 // apcom_root.pub embarqué), pour émettre des certificats dans les tests.

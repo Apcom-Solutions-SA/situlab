@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"situlab/internal/attest"
 	"situlab/internal/core"
 	"situlab/internal/ipc"
 
@@ -48,7 +49,7 @@ func codeFor(err error) int {
 	switch {
 	case errors.Is(err, core.ErrNoInstance):
 		return 2
-	case errors.Is(err, core.ErrPINNeeded), errors.Is(err, core.ErrPINLocked), errors.Is(err, core.ErrLocked):
+	case errors.Is(err, core.ErrPINNeeded), errors.Is(err, core.ErrPINLocked), errors.Is(err, core.ErrLocked), errors.Is(err, core.ErrPINTimeout):
 		return 3
 	case errors.Is(err, core.ErrNoGit):
 		return 4
@@ -1592,11 +1593,11 @@ func cmdProject() *cobra.Command {
 		},
 	}
 	var promIdx int
-	var promSrc, promVer, promDst string
+	var promSrc, promVer, promDst, promMode, promNotes string
 	promote := &cobra.Command{
-		Use: "promote <nom>", Short: "Publie une version choisie de l'atelier vers une production (--prod ; --from/--version/--to ; PIN sur le poste)", Args: cobra.ExactArgs(1),
+		Use: "promote <nom>", Short: "Publie une version choisie de l'atelier vers une production (--prod ; --from/--version/--to ; --mode ; PIN sur le poste)", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := svc.ProjectPromote(args[0], promIdx, promSrc, promVer, promDst)
+			res, err := svc.ProjectPromote(args[0], promIdx, promSrc, promVer, promDst, promMode, promNotes)
 			if err != nil {
 				return err
 			}
@@ -1607,6 +1608,8 @@ func cmdProject() *cobra.Command {
 	promote.Flags().StringVar(&promSrc, "from", "", "branche de l'atelier à promouvoir (défaut : branche par défaut)")
 	promote.Flags().StringVar(&promVer, "version", "", "version/tag exact à publier (défaut : dernier tag de la branche)")
 	promote.Flags().StringVar(&promDst, "to", "", "branche de la production cible (défaut : branche par défaut)")
+	promote.Flags().StringVar(&promMode, "mode", "tag", "méthode : code (sans tag) | tag (code+tag, déclenche la CI) | release (code+tag+Release)")
+	promote.Flags().StringVar(&promNotes, "notes", "", "notes de version (mode release)")
 	c.AddCommand(list, status, promote)
 	return c
 }
@@ -1622,6 +1625,9 @@ func cmdAttest() *cobra.Command {
 				return err
 			}
 			return emit(cmd, rows, func() {
+				if attest.UsingTestRoot() {
+					fmt.Fprintln(cmd.OutOrStdout(), "⚠️  racine de signature = racine de TEST (forgeable) — à remplacer par la vraie racine de gouvernance.")
+				}
 				for _, r := range rows {
 					mark := "⬜"
 					who := ""
@@ -1655,6 +1661,7 @@ func cmdAttest() *cobra.Command {
 			return emit(cmd, map[string]string{"status": "ok"}, func() { fmt.Fprintln(cmd.OutOrStdout(), "Certificat d'appareil installé.") })
 		}}
 	c.AddCommand(status, genkey, installCert)
+	c.AddCommand(cmdAttestEmit()...) // gen-root / gen-ca / issue (gouvernance, hors ligne)
 	return c
 }
 

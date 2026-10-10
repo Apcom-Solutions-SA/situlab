@@ -37,6 +37,10 @@ import (
 var (
 	ErrNoInstance = errors.New("instance introuvable ou non configurée")
 	ErrPINNeeded  = errors.New("PIN requis : confirmez l'action dans la fenêtre SituLab")
+	// ErrPINTimeout distingue, pour l'agent, le DÉLAI écoulé (personne n'a validé dans la fenêtre à
+	// temps) d'un refus explicite (ErrPINNeeded). Permet à la CLI/au MCP de dire « relance et valide »
+	// plutôt que « refusé ». La fenêtre reste le seul point de saisie (invariant inchangé).
+	ErrPINTimeout = errors.New("délai de confirmation du PIN écoulé : relancez l'action et validez la fenêtre SituLab sur le poste (max 120 s)")
 	ErrNoGit      = errors.New("git n'est pas installé sur cette machine")
 	ErrPINLocked  = errors.New("trop d'essais : PIN temporairement verrouillé")
 	ErrLocked     = errors.New("session verrouillée : déverrouillez avec le PIN")
@@ -72,6 +76,7 @@ type Service struct {
 	repoCache map[string]repoCache // dépôts distants par instance (TTL court)
 	ioMu      sync.Mutex           // sérialise les mutations persistantes (keyring + disque)
 	fetchMu   sync.Mutex           // anti-chevauchement de la récupération de fond (FetchAllLocal)
+	repoLocks sync.Map             // map[string]*sync.Mutex : sérialise les opérations git PAR dépôt (lockRepo)
 	version   string
 
 	// Session : DEK du trousseau tenue en mémoire après déverrouillage par le PIN.
@@ -432,6 +437,37 @@ func (s *Service) SetInstanceRole(name, role string) error {
 	return nil
 }
 
+// SetInstanceSignMode règle le mode de signature d'une connexion (v1.9.6) : "local" (clé logicielle
+// embarquée) ou "server" (empreinte demandée au service, clé jamais sur le poste). url = base du service
+// (vide = défaut). Réglage LOCAL, FENÊTRE UNIQUEMENT (non exposé socket/CLI/MCP — doctrine PIN).
+func (s *Service) SetInstanceSignMode(name, mode, url string) error {
+	switch mode {
+	case "", "local", "server":
+	default:
+		return fmt.Errorf("mode de signature inconnu : %q (local|server)", mode)
+	}
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	in := cfg.Find(name)
+	if in == nil {
+		return ErrNoInstance
+	}
+	if mode == "local" {
+		mode = "" // défaut = local
+	}
+	in.SignMode = mode
+	in.SignServerURL = strings.TrimSpace(url)
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	s.publish(cfg)
+	return nil
+}
+
 // SetInstancePINPolicy remplace la politique PIN d'une connexion (nil = revenir aux défauts du
 // rôle). Réglage local, fenêtre uniquement.
 func (s *Service) SetInstancePINPolicy(name string, p *config.PINPolicy) error {
@@ -762,7 +798,12 @@ func (s *Service) Fetch(instance, path string) (string, error) {
 	if !gitx.Available() {
 		return "", ErrNoGit
 	}
-	return gitx.Fetch(path, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
+	defer s.lockRepo(path)() // pas de fetch de fond concurrent sur ce dépôt
+	out, err := gitx.Fetch(path, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
+	if err == nil {
+		s.fetchAttestNotes(instance, path) // récupère les attestations des autres (best-effort)
+	}
+	return out, err
 }
 
 // Pull met à jour la branche locale en fast-forward (pas de PIN : rien ne part en ligne, mais
@@ -774,7 +815,12 @@ func (s *Service) Pull(instance, path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
-	return gitx.Pull(path, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance), false)
+	defer s.lockRepo(path)() // pas de fetch de fond concurrent sur ce dépôt
+	out, err := gitx.Pull(path, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance), false)
+	if err == nil {
+		s.fetchAttestNotes(instance, path) // récupère les attestations des autres (best-effort)
+	}
+	return out, err
 }
 
 // Commit enregistre une version locale (pas de PIN : rien ne part en ligne ; refusé en lecture seule).
@@ -785,6 +831,7 @@ func (s *Service) Commit(path, message string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // pas de fetch de fond concurrent pendant l'enregistrement
 	out, err := gitx.Commit(path, message)
 	if err == nil {
 		s.attestCommit(path, gitx.HeadSHA(path)) // signature de garantie (best-effort, non bloquant)
@@ -1130,7 +1177,12 @@ func (s *Service) Push(instance, path, pinCode string) (string, error) {
 	if err := s.authorizePush(instance, path, pinCode); err != nil {
 		return "", err
 	}
-	return gitx.Push(path, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
+	defer s.lockRepo(path)() // pas de fetch de fond concurrent sur ce dépôt
+	out, err := gitx.Push(path, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
+	if err == nil {
+		s.pushAttestNotes(instance, path) // rend la signature de garantie visible en ligne (best-effort)
+	}
+	return out, err
 }
 
 // SyncResult décrit, en clair, ce que Synchroniser a réalisé — pour un retour non technique.
@@ -1161,6 +1213,7 @@ func (s *Service) Synchronize(instance, path, message, pinCode string) (*SyncRes
 	if err := s.authorizePush(instance, path, pinCode); err != nil { // politique liée au dépôt réel ; une seule confirmation pour tout le geste
 		return nil, err
 	}
+	defer s.lockRepo(path)() // tout le geste récupérer→enregistrer→envoyer tient le verrou du dépôt
 	st, err := gitx.StatusOf(path)
 	if err != nil {
 		return nil, err
@@ -1183,6 +1236,7 @@ func (s *Service) Synchronize(instance, path, message, pinCode string) (*SyncRes
 	if _, err := gitx.Fetch(path, token, github, base); err != nil {
 		return nil, err
 	}
+	_, _ = gitx.FetchNotes(path, attestNotesRef, token, github, base) // attestations des autres (best-effort)
 	st2, err := gitx.StatusOf(path)
 	if err != nil {
 		return nil, err
@@ -1239,6 +1293,7 @@ func (s *Service) Synchronize(instance, path, message, pinCode string) (*SyncRes
 		if _, err := gitx.Push(path, token, github, base); err != nil {
 			return nil, fmt.Errorf("enregistré sur ce poste, mais l'envoi en ligne a échoué : %w", err)
 		}
+		_, _ = gitx.PushNotes(path, attestNotesRef, token, github, base) // publie la signature de garantie (best-effort)
 		res.Pushed = true
 	}
 

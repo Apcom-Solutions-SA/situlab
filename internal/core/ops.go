@@ -578,3 +578,19 @@ func (s *Service) GitPushTag(instance, path, tag, pinCode string) (string, error
 	}
 	return gitx.PushTag(path, tag, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
 }
+
+// FileHistory : commits qui ont touché un fichier dans un clone LOCAL (lecture, pas de PIN).
+func (s *Service) FileHistory(path, file string, limit int) ([]gitx.LocalCommit, error) {
+	if !gitx.Available() {
+		return nil, ErrNoGit
+	}
+	return gitx.FileLog(path, file, limit), nil
+}
+
+// FileDiffAt : diff d'un commit restreint à un fichier (clone local ; lecture, pas de PIN).
+func (s *Service) FileDiffAt(path, sha, file string) (string, error) {
+	if !gitx.Available() {
+		return "", ErrNoGit
+	}
+	return gitx.FileDiffAt(path, sha, file)
+}

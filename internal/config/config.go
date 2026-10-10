@@ -62,6 +62,12 @@ type Instance struct {
 	// SignCert : certificat d'appareil (JSON d'attest.Cert) liant la clé d'appareil à l'identité
 	// vérifiée, émis par la racine APCOM. Non secret. Vide = signature de garantie non activée.
 	SignCert string `json:"sign_cert,omitempty"`
+
+	// Mode de signature (v1.9.6). "server" = l'empreinte est demandée au service de signature serveur
+	// (clé privée jamais sur le poste, agent-proof) ; vide/"local" = signature logicielle embarquée.
+	// Réglé EN FENÊTRE uniquement (non exposé socket/CLI/MCP) — même doctrine que la politique PIN.
+	SignMode      string `json:"sign_mode,omitempty"`       // "" | "local" | "server"
+	SignServerURL string `json:"sign_server_url,omitempty"` // base du service ; vide = défaut
 }
 
 // IsGitHub indique si l'instance cible GitHub (plutôt que Forgejo/Gitea).
@@ -153,6 +159,20 @@ type Config struct {
 	Projects       []Project  `json:"projects,omitempty"`         // liens atelier↔production (v1.7.1)
 	LocalRepos     []string   `json:"local_repos"`
 	RevokedSerials []string   `json:"revoked_serials,omitempty"` // serials de certs d'appareil révoqués (signature de garantie)
+	// Bibliothèque de prompts (v1.9.4) : les prompts PAR DÉFAUT sont livrés avec le binaire (évoluent
+	// aux mises à jour) ; les personnalisations de l'utilisateur vivent ICI (config) et ne sont donc
+	// JAMAIS écrasées par une mise à jour. Surcharge d'un prompt par défaut par id ; masquage par id ;
+	// prompts ajoutés par l'utilisateur.
+	PromptOverrides map[string]Prompt `json:"prompt_overrides,omitempty"`
+	HiddenPrompts   []string          `json:"hidden_prompts,omitempty"`
+	UserPrompts     []Prompt          `json:"user_prompts,omitempty"`
+}
+
+// Prompt : un prompt réutilisable pour l'assistant IA (titre + corps).
+type Prompt struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
 }
 
 // PruneDanglingPromotions retire les marqueurs de promotion dont la vitrine n'existe plus dans le

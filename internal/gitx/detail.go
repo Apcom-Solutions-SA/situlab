@@ -89,6 +89,11 @@ func parseLog(dir, rng string, limit int) []LocalCommit {
 	if err != nil {
 		return nil
 	}
+	return parseLogLines(out)
+}
+
+// parseLogLines transforme la sortie « %H\x1f%h\x1f%s\x1f%cI\x1f%an » en commits locaux.
+func parseLogLines(out string) []LocalCommit {
 	var res []LocalCommit
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -102,4 +107,34 @@ func parseLog(dir, rng string, limit int) []LocalCommit {
 		res = append(res, LocalCommit{SHA: f[0], Short: f[1], Message: f[2], Date: f[3], Author: f[4]})
 	}
 	return res
+}
+
+// FileLog renvoie les commits qui ont modifié un fichier (git log --follow -- <file>), récents d'abord.
+// --follow suit les renommages. Le pathspec est passé après « -- » (jamais interprété comme option).
+func FileLog(dir, file string, limit int) []LocalCommit {
+	if limit <= 0 {
+		limit = 50
+	}
+	out, err := run(dir, LocalTimeout, "log", "--follow", "--pretty=format:%H\x1f%h\x1f%s\x1f%cI\x1f%an", "-n", strconv.Itoa(limit), "--", file)
+	if err != nil {
+		return nil
+	}
+	return parseLogLines(out)
+}
+
+// FileDiffAt renvoie le diff d'un commit RESTREINT à un fichier (git show <sha> -- <file>), durci
+// (pas de diff/textconv externe). Le SHA est validé ; le pathspec passe après « -- ».
+func FileDiffAt(dir, sha, file string) (string, error) {
+	if err := safeRevision(sha); err != nil {
+		return "", err
+	}
+	out, err := run(dir, LocalTimeout, "show", "--no-ext-diff", "--no-textconv", "--format=%b", sha, "--", file)
+	if err != nil {
+		return "", err
+	}
+	const max = 200 * 1024
+	if len(out) > max {
+		out = out[:max] + "\n… (diff tronqué)"
+	}
+	return out, nil
 }

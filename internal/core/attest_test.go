@@ -44,6 +44,12 @@ func TestAttestEndToEnd(t *testing.T) {
 	if !gitx.Available() {
 		t.Skip("git indisponible")
 	}
+	// Ce test de bout en bout signe avec la racine de TEST. Quand la VRAIE racine de gouvernance est
+	// embarquée (build de release), on ne peut pas produire de cert vérifiable sans son privé → on saute
+	// (la logique de la chaîne reste couverte par les tests du paquet internal/attest).
+	if !attest.UsingTestRoot() {
+		t.Skip("racine réelle embarquée — le bout-en-bout nécessite la racine de test")
+	}
 	s := newInTemp(t)
 	if err := s.SetPIN("", "123456"); err != nil {
 		t.Fatal(err)

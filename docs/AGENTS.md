@@ -57,6 +57,12 @@ Rien à pousser sans votre **PIN** : les actions qui écrivent vers le distant l
 | 3 | PIN requis / session verrouillée en mode non-interactif (push, ou lecture sans session) |
 | 4 | git absent de la machine |
 
+**Quittance PIN (1.9.2)** : une mutation qui attend le PIN distingue désormais, pour toi, **refusé**
+(l'humain a annulé) de **délai écoulé** (personne n'a validé dans les ~120 s — relance et demande à
+l'humain de confirmer la fenêtre). En mode texte, un message stderr t'avertit dès qu'une fenêtre PIN
+peut s'ouvrir sur le poste (tu n'es pas figé — tu attends un geste humain). Le PIN ne transite jamais
+par le socket/MCP.
+
 ## Configuration
 
 `config.json` (instances, compteur anti-bruteforce du PIN, dépôts locaux suivis) et
@@ -171,6 +177,10 @@ le PIN de l'humain.**
 - **Promotion** : `situlab project promote <nom> --prod <index>` publie la version de l'atelier vers
   une production, en **une version propre** (pas les micro-commits). Vers la production → **PIN**
   confirmé dans la fenêtre. Jamais de jeton remis à l'agent.
+  - `--mode code|tag|release` (défaut `tag`) choisit la méthode. ⚠️ **Promouvoir ≠ publier une Release** :
+    `tag` pousse code + tag ; sur GitHub, c'est le **tag** qui déclenche la CI qui bâtit les installeurs
+    et publie la Release (vérifier Actions — la Release n'est pas créée par l'app). `release` crée en
+    plus l'objet Release (via `--notes`). `code` met à jour la branche sans tag.
 
 ### Écriture distante — PIN requis
 - Le PIN se **définit dans la fenêtre** (Réglages → Sécurité) — jamais par la CLI (`situlab pin set`
@@ -232,9 +242,25 @@ transite jamais par la CLI ni par l'agent.
 - `situlab repo delete-branch <owner>/<repo> <branche>` — supprime une branche distante (PIN ; refuse la branche par défaut).
 
 ### Signature de garantie « SituLab approved »
-- `situlab attest status <dossier>` — état d'attestation des derniers commits d'un dépôt local (✅ par Untel / ⬜). Lecture.
-- `situlab attest genkey --instance <nom>` — génère la clé d'appareil et affiche sa clé publique à faire certifier par la gouvernance.
-- `situlab attest install-cert <cert.json> --instance <nom>` — installe le certificat d'appareil émis par la gouvernance.
+- **Modèle (v1.9.5) : GARANTIE LOGICIEL.** C'est **le logiciel SituLab** qui signe — une identité unique
+  « SituLab » embarquée, la même pour tout le monde (pas de certificat par utilisateur ni par organisation).
+  Chaque commit créé via SituLab est signé automatiquement ; tu n'as **rien à faire**. Limite assumée :
+  une clé embarquée est extractible → marqueur d'authenticité « fait via SituLab », pas une preuve
+  inviolable face à un attaquant local.
+- **Mode « signature serveur » (v1.9.6, agent-proof).** Réglable par connexion (en fenêtre) : l'empreinte
+  est demandée au **service de signature APCOM** ; la **clé ne quitte jamais le serveur** → tu ne peux rien
+  forger hors ligne. Le démon appelle le service avec le jeton Forgejo (jamais remis à l'agent). La
+  vérification et `attest status` ne changent pas (« approved par … Service de signature »).
+- `situlab attest status <dossier>` — état d'attestation des derniers commits (✅ « SituLab » / ⬜). Lecture.
+- *(Hérité, optionnel)* `situlab attest genkey` / `install-cert` — ancien chemin de cert d'appareil nominatif,
+  utilisé en repli uniquement si la signature logicielle n'est pas encore mintée sur ce binaire.
+- La signature est désormais **visible en ligne** : la note `refs/notes/situlab` est poussée à l'envoi et
+  récupérée au fetch/pull (best-effort) — l'attestation suit le dépôt, plus seulement locale.
+- **Émission (gouvernance, HORS LIGNE — pas via le démon)** : `situlab attest gen-root` (paire racine),
+  `gen-ca --root-key <f>` (autorité intermédiaire), **`gen-software --signer-key <ca.key> --issuer
+  <ca.cert.json>`** (identité de signature LOGICIELLE « SituLab », à embarquer dans le binaire — c'est
+  le chemin recommandé depuis 1.9.5), et `issue …` (ancien cert d'appareil nominatif, hérité). Les clés
+  privées restent dans des fichiers que l'humain contrôle ; le privé racine ne touche jamais un serveur.
 - La signature est **non bloquante** et apposée automatiquement sur les commits créés par SituLab. Limite T2 : voir `SECURITY.md`.
 
 ## Accès MCP (agents sans terminal)

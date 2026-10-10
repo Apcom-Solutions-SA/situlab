@@ -2,6 +2,127 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.9.6] — non publié
+
+### Signature serveur (« agent-proof »)
+- **Mode « signature serveur » par connexion** : l'empreinte « SituLab approved » peut être demandée au
+  **service de signature APCOM** (`https://situememoring.com/api/sign`) au lieu d'être signée en local. La
+  **clé privée ne quitte jamais le serveur** → un agent sur le poste ne peut **rien forger hors ligne**.
+  C'est **le démon** qui fait l'appel HTTPS, avec le **jeton Forgejo** qu'il détient déjà (jamais remis au
+  client/agent) ; l'autorisation côté service = accès au dépôt visé. Best-effort non bloquant (comme le local).
+- Réglage **`SignMode` (local | server) + `SignServerURL`** par connexion, **réglable en fenêtre uniquement**
+  (Réglages → Connexions → « Rôle & PIN ») — non exposé socket/CLI/MCP (doctrine PIN).
+- **Révocation** : récupération périodique de `/.well-known/situlab-revoked.json` → `RevokedSerials` (best-effort).
+- **Vérification INCHANGÉE** (hors ligne, racine embarquée) : le cert de service est accepté tel quel ;
+  `attest status` affiche « approved par … Service de signature ».
+- Scope : **Forgejo (git.apcom.app)** d'abord ; GitHub plus tard.
+
+## [1.9.5] — non publié
+
+### Signature = GARANTIE LOGICIEL (refonte du modèle)
+- **C'est le logiciel qui signe, plus l'utilisateur.** Une **identité unique « SituLab »** embarquée
+  signe tous les commits créés via SituLab — **pas de certificat nominatif, pas de cérémonie par
+  utilisateur** (`internal/attest.SoftwareSigner`). Minté une fois par la gouvernance avec la CA :
+  **`situlab attest gen-software --signer-key <ca.key> --issuer <ca.cert.json>`**, puis embarqué.
+- Repli automatique sur l'ancien cert d'appareil nominatif tant que l'identité logicielle n'est pas mintée.
+- **Limite assumée** (garantie logiciel LOCALE) : une clé embarquée est extractible → marqueur
+  d'authenticité « fait via SituLab », pas une preuve inviolable face à un attaquant local. La version
+  **inviolable = signature côté serveur (T3)** — directives serveur déposées pour situememoring.
+- Diagnostic + badge GUI reflètent l'état « Signature logicielle active / à minter ».
+
+## [1.9.4] — non publié
+
+> Lots résiduels : tunnel de connexion à cartes/logos, bibliothèque de prompts, diagnostic vivant.
+
+### Tunnel de connexion (cartes/logos)
+- L'ajout d'une connexion est désormais un **tunnel par étapes** : nom → **type de serveur** (cartes
+  GitHub / Forgejo-Gitea avec logos) → **rôle** (Atelier / Vitrine) → jeton (avec aide et URL) →
+  écran **« Connexion active »**. Le rôle est posé dès la création (`SetInstanceRole`).
+
+### Bibliothèque de prompts (Assistant IA)
+- **Prompts réutilisables** (accordéons éditables) dans Réglages → Assistant IA : des messages prêts
+  à coller dans votre IA. Prompts **par défaut livrés** avec SituLab (évoluent aux MàJ) + vos
+  **personnalisations** (modifier, masquer, ajouter) stockées en config et **jamais écrasées à la
+  mise à jour**. Copier / Modifier / Réinitialiser / Masquer-Supprimer.
+
+### Diagnostic vivant
+- La section Diagnostic liste désormais des **contrôles lisibles** (git, PIN, session, connexions,
+  coffre OS, **signature** racine réelle/test, autres accès git concurrents) avec **statut, explication
+  et action**.
+
+## [1.9.3] — non publié
+
+> Lots différés de la 1.9.2, menés en run autonome : badge d'attestation GUI, historique par fichier +
+> timeline, parité GitHub (lecture), refonte Réglages (onglets + tunnel connexion + assistant IA), perf.
+
+## [1.9.2] — non publié
+
+### Page Dépôts & détail (LOT H — partiel)
+- **Visualiseur de fichier multi-onglets** : onglet **Interprété** (rendu Markdown maison sûr, et HTML en
+  iframe sandboxée sans script), onglet **Texte brut**, boutons **Ouvrir dans le navigateur** et
+  **Télécharger**. Entrées de contenu enrichies (`html_url`/`download_url`).
+- **Protection « ne plus suivre »** : confirmation explicite ; le dossier local n'est jamais supprimé.
+- **Lisibilité non-initiés** : nom de dépôt mis en avant, organisation en préfixe discret ; multi-clone
+  (« N copies ») explicité.
+- *Restant LOT H : onglet historique par fichier (diff), Activité pédagogique, Historique en timeline.*
+
+### Page Projets : colonnes & branches (LOT C)
+- **Colonne Vitrine conditionnelle** : plus de colonne « Aucune vitrine » vide quand le projet est
+  local+atelier seul — à la place, un bouton **« ＋ Connecter une vitrine »** qui ouvre le tunnel
+  directement au choix de la vitrine.
+- **Branche inexistante vs vide** : une branche absente d'un git n'affiche plus un trait grisé + bulle
+  vide (qui laissait croire qu'elle existait) mais **aucun trait et un picto « absent »** ; une branche
+  présente sans version garde son trait plein et sa bulle.
+- **Principales vs secondaires** : `main`/`master`/branche de prod en gras ; les secondaires (feat/work)
+  atténuées, avec un marqueur **« en cours » (orange)** tant qu'elles ne sont pas réunies vers l'atelier.
+
+### Tunnel de projet : bug d'icône, icônes enrichies, icône maison (LOT D)
+- **Correction du bug « changer d'icône efface le nom »** (création ET modification) : la sélection
+  d'icône ne re-rend plus tout l'écran (le nom saisi mais non commité était perdu) — bascule de classe,
+  focus et caret préservés.
+- **Liste d'icônes enrichie** (32 emojis) + **icône maison** : importer une image et la **cadrer en
+  carré** (éditeur canvas : glisser pour positionner, curseur pour zoomer) → vignette 96×96 stockée en
+  data URL dans le projet, rendue partout (carte, récap).
+
+### Couleur Vitrine — cohérence chromatique
+- Nouveau token `--vitrine` (violet) pour l'IDENTITÉ de la vitrine/production, **distinct de l'orange**
+  (`--warn`) désormais réservé à « travail en cours / en retard ». Appliqué aux badges de rôle, à la
+  colonne Vitrine du graphe projet, au header et au tunnel.
+
+### Options de promotion atelier → vitrine (LOT B)
+- **Méthode de promotion au cas par cas** (`project promote --mode`) : **code** (met à jour la branche
+  vitrine sans tag), **tag** (défaut : code + tag ; sur GitHub, le tag **déclenche la CI** qui bâtit les
+  installeurs et publie la Release), **release** (code + tag + création explicite de l'objet Release via
+  l'API, avec notes de version ; les installeurs restent produits par la CI).
+- **Clarification « promouvoir ≠ publier une Release »** portée dans le résumé de chaque promotion et
+  dans l'aide CLI/MCP — évite la récidive du trou 1.9.0 (version promue mais invisible faute de Release).
+- Propagé sur les trois surfaces (GUI binding, CLI `--mode/--notes`, MCP `project_promote`).
+
+### Processus agent IA ↔ démon ↔ GUI (LOT K)
+- **Verrou par dépôt** : une action d'agent (push/pull/synchro/enregistrement) et la récupération de
+  fond (`FetchAllLocal`) ne lancent plus jamais deux processus git concurrents sur le même `.git` — le
+  fetch de fond **saute** un dépôt occupé au premier plan (`tryLockRepo`). Fin des échecs transitoires
+  de verrou de refs et des états lus pendant une écriture concurrente.
+- **Quittance PIN explicite pour l'agent** : nouvelle issue typée `PINConfirmed / PINRefused /
+  PINTimedOut / PINUnavailable`. Le **délai écoulé** (`ErrPINTimeout`) est désormais DISTINCT du refus
+  (`ErrPINNeeded`) — la CLI/MCP dit « relance et valide » au lieu de « refusé ». Le PIN reste saisi
+  dans la fenêtre uniquement (invariant inchangé) ; délai de garde affiché (120 s).
+- **Réactivité CLI** : en mode texte, une mutation signale immédiatement sur stderr qu'une fenêtre PIN
+  peut s'ouvrir sur le poste (l'agent ne paraît plus figé). En `--output json`, silence préservé.
+
+### Signature de garantie « SituLab approved » — finalisation (LOT A)
+- **Attestation désormais VISIBLE en ligne** : la ref de notes `refs/notes/situlab` est **poussée** à
+  chaque envoi (push/synchro) et **récupérée** à chaque fetch/pull — auparavant la signature restait
+  purement locale, donc invisible pour les autres postes et la vitrine (cause du « tourne sans servir »).
+- **Chaîne de confiance à deux niveaux** : racine APCOM (hors ligne) → **autorité intermédiaire** →
+  certificat d'appareil. Vérification locale remontant la chaîne jusqu'à la racine épinglée ; `IsCA`
+  couvert par la signature (pas de promotion appareil→autorité) ; profondeur bornée à une intermédiaire.
+- **Outil d'émission hors ligne** (gouvernance) : `situlab attest gen-root` / `gen-ca` / `issue` —
+  manipulent les clés privées dans des fichiers que l'humain contrôle, **jamais** via le démon/socket.
+  Certificats d'appareil à **90 jours** par défaut.
+- **Avertissement racine de TEST** : `attest status` (CLI) et binding GUI `AttestUsingTestRoot` signalent
+  tant que la racine embarquée est la racine de test (forgeable), à remplacer avant mise en prod.
+
 ## [1.9.1] — 2026-10-09
 
 ### Ajouté

@@ -49,6 +49,9 @@
   --danger: var(--red-500); --danger-soft: rgba(209, 73, 91, .12);
   --info: var(--blue-500); --info-soft: #e8f1fb;
   --violet: var(--violet-500); --violet-soft: rgba(124, 92, 222, .14);
+  /* Vitrine (production) : couleur d'IDENTITÉ distincte de l'orange (--warn), réservé à « travail en
+     cours / en retard ». Alias dynamique de --violet → suit automatiquement chaque thème. */
+  --vitrine: var(--violet); --vitrine-soft: var(--violet-soft);
   --focus: var(--blue-500);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
   --shadow-md: 0 4px 14px rgba(16, 24, 40, .08);
@@ -231,6 +234,10 @@ label small { font-weight: 500; color: var(--text-faint); }
 .repo-card:active { transform: translateY(.5px); }
 .repo-title { font-weight: 700; font-size: var(--fs-md); display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .repo-title .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Nom de dépôt en avant, organisation en préfixe discret (non-initiés : un dépôt = un dossier). */
+.nm-org { color: var(--text-faint); font-weight: 400; font-size: .92em; }
+.detail-title .nm { font-weight: 700; }
+.repo-sub { font-size: var(--fs-xs); padding: 2px 2px 6px; }
 
 /* Pastille d'état (modèle à 5+ états) */
 .state {
@@ -263,7 +270,7 @@ label small { font-weight: 500; color: var(--text-faint); }
 /* Badges de rôle (v1.7) : atelier / production. */
 .role-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; letter-spacing: .02em; vertical-align: middle; }
 .role-atelier { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-.role-production { background: var(--warn-soft); color: var(--warn); }
+.role-production { background: var(--vitrine-soft); color: var(--vitrine); }
 /* Tableau de bord Projets 3 colonnes (v1.8) */
 #proj-board { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
 .proj-empty { text-align: center; max-width: 640px; margin: 48px auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
@@ -324,7 +331,7 @@ label small { font-weight: 500; color: var(--text-faint); }
 .pg2-ico { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .pg2-local .pg2-ico { color: var(--ok); } .pg2-atl .pg2-ico, .pg2-prod .pg2-ico { color: inherit; }
 .pg2-atl .pg2-ico { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
-.pg2-prod .pg2-ico { fill: color-mix(in srgb, var(--warn) 22%, transparent); }
+.pg2-prod .pg2-ico { fill: color-mix(in srgb, var(--vitrine) 22%, transparent); }
 /* Masque grisant « serveur déconnecté » posé sur une boîte de palier. */
 .pg2-off-mask { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 10px;
   background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: grayscale(1) blur(1px); -webkit-backdrop-filter: grayscale(1) blur(1px); border-radius: inherit; }
@@ -336,6 +343,32 @@ label small { font-weight: 500; color: var(--text-faint); }
 .ep-icogrid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .ep-ico { width: 38px; height: 38px; font-size: 19px; line-height: 1; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--bg-surface); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .ep-ico.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ep-ico img { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; }
+.ep-ico-up { font-size: 16px; }
+/* Icône maison (image recadrée) rendue partout où une icône de projet apparaît. */
+.custom-ico { border-radius: 5px; object-fit: cover; vertical-align: middle; }
+.pboard-ico.custom-ico { width: 20px; height: 20px; }
+/* Cadreur d'icône carré (overlay autonome, indépendant de la modale). */
+.cropper-ov { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
+.cropper-card { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; max-width: 92vw; }
+.cropper-ttl { font-weight: 600; font-size: var(--fs-sm); align-self: flex-start; }
+.cropper-stage { position: relative; border-radius: var(--r-md); overflow: hidden; background: var(--bg-sunken); touch-action: none; cursor: grab; }
+.cropper-stage canvas { display: block; }
+.cropper-ring { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 2px var(--accent); border-radius: var(--r-md); }
+.cropper-zoom { width: 100%; accent-color: var(--accent); }
+.cropper-actions { display: flex; gap: 8px; align-self: flex-end; }
+/* Tunnel de connexion (1.9.4) : cartes de choix serveur/rôle avec logos. */
+.conn-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
+@media (max-width: 480px) { .conn-cards { grid-template-columns: 1fr; } }
+.conn-card { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 18px 12px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-surface); cursor: pointer; transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.conn-card:hover { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.conn-logo { margin-bottom: 4px; color: var(--text); }
+.cc-ico { font-size: 30px; line-height: 1; }
+.cc-ico.cc-vitrine { color: var(--vitrine); }
+.cc-name { font-weight: 700; font-size: var(--fs-md); }
+.cc-sub { font-size: var(--fs-xs); color: var(--text-faint); }
+.conn-done { text-align: center; padding: 20px 10px; }
+.conn-done .cd-ico { font-size: 44px; }
 .ep-slot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; margin-top: 6px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); }
 .ep-picker { margin-top: 6px; padding: 10px; border: 1px dashed var(--border-strong); border-radius: var(--r-sm); }
 .pboard-ico { font-size: 18px; margin-right: 2px; }
@@ -355,13 +388,24 @@ label small { font-weight: 500; color: var(--text-faint); }
 /* le trait de branche traverse la boîte : plein si la branche y existe, pointillé estompé sinon */
 .pg2-on::before { content: ""; position: absolute; left: -10px; right: -10px; top: 50%; height: 2px; transform: translateY(-50%); background: var(--border-strong); }
 .pg2-off::before { content: ""; position: absolute; left: -10px; right: -10px; top: 50%; border-top: 2px dotted var(--border); transform: translateY(-50%); }
+/* Branche INEXISTANTE sur ce git (1.9.2) : aucun trait (pas même grisé) + picto « absent » discret,
+   pour ne pas laisser croire que la branche existe mais est vide. */
+.pg2-absent { }
+.pg-absent { color: var(--text-faint); opacity: .45; font-weight: 700; font-size: var(--fs-sm); }
+/* Colonne « connecter une vitrine » (projet sans vitrine) : pas de colonne Vitrine vide. */
+.pg2-connect { flex: 1 1 0; min-width: 150px; display: flex; flex-direction: column; }
+.pg2-connect-box { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--border-strong); border-radius: var(--r-md); margin-top: 0; padding: 10px; }
+/* Branches principales vs secondaires + marqueur « en cours » (orange = travail en cours). */
+.pg-brn-main { font-weight: 600; }
+.pg-brn-sec { font-weight: 400; color: var(--text-soft); }
+.chip-wip { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .02em; padding: 0 6px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); vertical-align: middle; }
 /* teintes d'identité des paliers */
 .pg2-local { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 6%, transparent); }
 .pg2-local .pg2-head { color: var(--ok); }
 .pg2-atl { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .pg2-atl .pg2-head { color: var(--accent); }
-.pg2-prod { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 6%, transparent); }
-.pg2-prod .pg2-head { color: var(--warn); }
+.pg2-prod { border-color: color-mix(in srgb, var(--vitrine) 45%, var(--border)); background: color-mix(in srgb, var(--vitrine) 6%, transparent); }
+.pg2-prod .pg2-head { color: var(--vitrine); }
 @media (max-width: 760px) {
   .pg2-labels { flex-basis: 120px; }
   .pg2-gapcol { flex-basis: 36px; }
@@ -437,6 +481,29 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .fico { width: 18px; } .fname { flex: 1; } .fsize { color: var(--text-faint); font-size: var(--fs-xs); }
 .file-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: 10px; }
 .file-name { font-weight: 700; }
+.file-actions { margin-left: auto; display: flex; gap: 6px; }
+/* Visualiseur de fichier multi-onglets (1.9.2) : Interprété / Texte brut. */
+.file-tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+.ftab { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 12px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-soft); cursor: pointer; }
+.ftab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.md-render { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px 20px; max-height: 60vh; overflow: auto; line-height: 1.6; }
+.md-render h3, .md-render h4, .md-render h5 { margin: 1em 0 .4em; line-height: 1.3; }
+.md-render h3 { font-size: var(--fs-lg); }
+.md-render p { margin: .5em 0; }
+.md-render ul { margin: .4em 0; padding-left: 1.4em; }
+.md-render code { background: var(--bg-raised); border-radius: 3px; padding: 0 4px; font-family: var(--font-mono); font-size: .9em; }
+.md-render pre.md-code { background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px; overflow: auto; }
+.md-render pre.md-code code { background: none; padding: 0; }
+.md-render a { color: var(--accent); cursor: pointer; }
+.html-render { width: 100%; height: 60vh; border: 1px solid var(--border); border-radius: var(--r-md); background: #fff; }
+/* Historique d'un fichier : liste des commits + diff coloré du commit choisi. */
+.fh-list { max-height: 30vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); margin-bottom: 10px; }
+.fh-row { display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; align-items: baseline; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border); padding: 7px 10px; cursor: pointer; }
+.fh-row:hover { background: var(--bg-raised); }
+.fh-row.on { background: var(--accent-soft); }
+.fh-row code { color: var(--accent); font-size: var(--fs-xs); font-family: var(--font-mono); }
+.fh-msg { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fh-meta { color: var(--text-faint); font-size: var(--fs-xs); white-space: nowrap; }
 .filebox { background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px; overflow: auto; max-height: 60vh; font-family: var(--font-mono); font-size: var(--fs-sm); white-space: pre; line-height: 1.5; }
 
 /* Historique */
@@ -446,6 +513,16 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .cmt code { color: var(--accent); font-size: var(--fs-xs); font-family: var(--font-mono); }
 .cmt-msg { font-weight: 600; }
 .cmt-meta { grid-column: 2; color: var(--text-faint); font-size: var(--fs-xs); }
+.att-badge { font-size: var(--fs-xs); }
+.att-badge.ok { color: var(--ok); }
+.att-legend { float: right; font-size: var(--fs-xs); color: var(--text-faint); font-weight: 400; }
+/* Historique en TIMELINE visuelle (non-initiés) : une ligne verticale traversée de pastilles. */
+.cmt-timeline { position: relative; margin-left: 6px; }
+.cmt-timeline .cmt { position: relative; padding-left: 22px; border-bottom: none; }
+.cmt-timeline .cmt::before { content: ""; position: absolute; left: 4px; top: 0; bottom: -1px; width: 2px; background: var(--border); }
+.cmt-timeline .cmt:first-child::before { top: 10px; }
+.cmt-timeline .cmt:last-child::before { bottom: auto; height: 12px; }
+.cmt-timeline .cmt::after { content: ""; position: absolute; left: 0; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-surface); box-sizing: border-box; }
 
 /* ---------- Réglages ---------- */
 .srow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); padding: 10px 0; border-top: 1px solid var(--border); }
@@ -760,6 +837,14 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .bm-when { color: var(--text-faint); margin-left: auto; }
 
 /* Réglages : page structurée (v1.5.0) */
+/* Réglages : navigation à onglets latérale (1.9.3) — un panneau visible à la fois. */
+.set-layout { display: flex; gap: 18px; align-items: flex-start; }
+.set-nav { flex: 0 0 210px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 8px; }
+.set-navbtn { text-align: left; background: none; border: none; border-radius: var(--r-sm); padding: 9px 12px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-soft); cursor: pointer; }
+.set-navbtn:hover { background: var(--bg-raised); }
+.set-navbtn.active { background: var(--accent-soft); color: var(--accent); }
+.set-panels { flex: 1 1 0; min-width: 0; }
+@media (max-width: 720px) { .set-layout { flex-direction: column; } .set-nav { flex-direction: row; flex-wrap: wrap; position: static; flex-basis: auto; } }
 .set-sec { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); padding: 16px 18px; margin-bottom: 14px; }
 .set-sec-h { font-weight: 700; font-size: var(--fs-md); margin-bottom: 4px; }
 .set-sec-d { color: var(--text-soft); font-size: var(--fs-sm); line-height: 1.5; margin-bottom: 12px; }
@@ -856,3 +941,25 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .ai-invite b { font-size: var(--fs-sm); }
 .ai-invite .sub { margin-top: 2px; font-size: var(--fs-xs); }
 .ai-invite #ai-copy { align-self: flex-start; }
+
+.act-help { font-size: var(--fs-xs); align-self: center; margin-left: 4px; }
+
+/* Bibliothèque de prompts (Assistant IA, 1.9.4). */
+.plib-h { margin: 14px 0 6px; font-size: var(--fs-sm); }
+.plib-item { border: 1px solid var(--border); border-radius: var(--r-sm); margin-bottom: 6px; background: var(--bg-surface); }
+.plib-item > summary { cursor: pointer; padding: 8px 10px; font-size: var(--fs-sm); list-style: none; display: flex; align-items: center; gap: 8px; }
+.plib-item > summary::-webkit-details-marker { display: none; }
+.plib-item > summary::after { content: "▸"; margin-left: auto; color: var(--text-faint); transition: transform .15s; }
+.plib-item[open] > summary::after { transform: rotate(90deg); }
+.plib-title { font-weight: 600; }
+.plib-body { margin: 0 10px; padding: 8px 10px; background: var(--bg-sunken); border-radius: var(--r-sm); font-size: var(--fs-sm); white-space: pre-wrap; font-family: var(--font-mono); }
+.plib-actions { display: flex; gap: 6px; align-items: center; padding: 8px 10px; flex-wrap: wrap; }
+
+/* Diagnostic vivant (Réglages, 1.9.4). */
+.diag-list { display: flex; flex-direction: column; gap: 6px; }
+.diag-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-surface); }
+.diag-row.diag-warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: var(--warn-soft); }
+.diag-ico { flex: 0 0 auto; }
+.diag-txt { flex: 1 1 auto; min-width: 0; font-size: var(--fs-sm); }
+.diag-txt .muted { font-size: var(--fs-xs); margin-top: 2px; }
+.diag-row .btn { flex: 0 0 auto; align-self: center; }

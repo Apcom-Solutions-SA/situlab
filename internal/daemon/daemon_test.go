@@ -13,16 +13,24 @@ import (
 
 // prompteur factice : scénarise la saisie (ou le refus) du PIN et compte les appels.
 type fakePrompter struct {
-	pin    string
-	ok     bool
-	calls  int
-	reason string
+	pin     string
+	ok      bool
+	timeout bool // simule un délai écoulé (PINTimedOut) plutôt qu'un refus
+	calls   int
+	reason  string
 }
 
-func (f *fakePrompter) PromptPIN(reason string, _ any) (string, bool) {
+func (f *fakePrompter) PromptPIN(reason string, _ any) (string, PINOutcome) {
 	f.calls++
 	f.reason = reason
-	return f.pin, f.ok
+	switch {
+	case f.ok:
+		return f.pin, PINConfirmed
+	case f.timeout:
+		return "", PINTimedOut
+	default:
+		return "", PINRefused
+	}
 }
 
 func newDaemon(t *testing.T, p PINPrompter) *Daemon {
@@ -122,6 +130,28 @@ func TestWritePIN(t *testing.T) {
 	p.ok = false
 	if _, err := d.writePIN("Autoriser Y", nil); !errors.Is(err, core.ErrPINNeeded) {
 		t.Fatalf("refus modale : attendu ErrPINNeeded, obtenu %v", err)
+	}
+
+	// Délai écoulé : ErrPINTimeout DISTINCT du refus — l'agent doit savoir « relance et valide »
+	// plutôt que « refusé ».
+	p.ok, p.timeout = false, true
+	if _, err := d.writePIN("Autoriser Z", nil); !errors.Is(err, core.ErrPINTimeout) {
+		t.Fatalf("délai modale : attendu ErrPINTimeout, obtenu %v", err)
+	}
+	if errors.Is(core.ErrPINTimeout, core.ErrPINNeeded) {
+		t.Fatal("ErrPINTimeout et ErrPINNeeded doivent rester distincts")
+	}
+}
+
+// TestEnsureUnlockedTimeout : un déverrouillage non validé dans le délai renvoie ErrPINTimeout
+// (distinct de l'annulation ErrLocked).
+func TestEnsureUnlockedTimeout(t *testing.T) {
+	p := &fakePrompter{timeout: true}
+	d := newDaemon(t, p)
+	_ = d.svc.SetPIN("", "123456")
+	d.dispatch(OpLock, Args{})
+	if err := d.ensureUnlocked(); !errors.Is(err, core.ErrPINTimeout) {
+		t.Fatalf("délai déverrouillage : attendu ErrPINTimeout, obtenu %v", err)
 	}
 }
 

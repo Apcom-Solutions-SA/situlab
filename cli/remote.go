@@ -6,6 +6,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"time"
@@ -80,6 +81,8 @@ func (e kindError) Is(target error) bool {
 		return target == core.ErrNoGit
 	case "locked":
 		return target == core.ErrLocked
+	case "pintimeout":
+		return target == core.ErrPINTimeout
 	}
 	return false
 }
@@ -88,6 +91,13 @@ func (e kindError) Is(target error) bool {
 func (r *remote) call(op string, a daemon.Args, out any) error {
 	if err := r.ensure(); err != nil {
 		return err
+	}
+	// Réactivité agent : une mutation peut ouvrir la fenêtre PIN sur le poste et faire ATTENDRE l'appel.
+	// On le signale tout de suite sur stderr (en mode texte) pour que l'agent comprenne qu'il est en
+	// attente d'un geste humain, plutôt que de paraître figé. En --output json, le silence est préservé
+	// (l'issue — confirmé/refusé/expiré — est portée par le code et le type d'erreur).
+	if daemon.IsWriteOp(op) && flagOutput != "json" {
+		fmt.Fprintln(os.Stderr, "⏳ Action sensible : si un PIN est requis, validez la fenêtre SituLab sur le poste (max 120 s)…")
 	}
 	raw, _ := json.Marshal(a)
 	resp, err := r.cl.Call(ipc.Request{Op: op, Args: raw})
@@ -583,9 +593,9 @@ func (r *remote) ProjectStatus(name string) (*core.ProjectView, error) {
 	}
 	return &x, nil
 }
-func (r *remote) ProjectPromote(name string, prodIndex int, sourceBranch, version, targetBranch string) (*core.PromoteResult, error) {
+func (r *remote) ProjectPromote(name string, prodIndex int, sourceBranch, version, targetBranch, mode, notes string) (*core.PromoteResult, error) {
 	var x core.PromoteResult
-	if err := r.call(daemon.OpProjectPromote, daemon.Args{Name: name, Index: prodIndex, Head: sourceBranch, Tag: version, Base: targetBranch}, &x); err != nil {
+	if err := r.call(daemon.OpProjectPromote, daemon.Args{Name: name, Index: prodIndex, Head: sourceBranch, Tag: version, Base: targetBranch, Mode: mode, Body: notes}, &x); err != nil {
 		return nil, err
 	}
 	return &x, nil

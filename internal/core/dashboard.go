@@ -332,6 +332,7 @@ func (s *Service) FetchAllLocal() (int, error) {
 	if !s.Unlocked() {
 		return 0, nil // session verrouillée : on ne tente rien (les tokens ne sont pas déchiffrés)
 	}
+	s.RefreshRevokedServers() // révocation des services de signature serveur (best-effort, 1.9.6)
 	// Anti-chevauchement : un seul fetch de fond à la fois. Si un précédent tourne encore (dépôts
 	// lents/injoignables), on saute ce tour au lieu d'empiler des `git fetch` concurrents sur les
 	// mêmes dépôts (contention sur les verrous de refs .git).
@@ -353,11 +354,19 @@ func (s *Service) FetchAllLocal() (int, error) {
 		if err != nil || !st.IsRepo || st.Remote == "" {
 			continue
 		}
+		// Ne jamais lancer un fetch de fond sur un dépôt qu'une action au premier plan est en train
+		// d'utiliser : on saute ce tour pour ce dépôt (il sera repris au prochain cycle). Évite deux
+		// processus git concurrents sur le même .git et une info lue pendant une écriture de refs.
+		release, ok := s.tryLockRepo(p)
+		if !ok {
+			continue
+		}
 		inst := s.instanceForHost(hostOf(st.Remote))
 		token, github, baseURL := s.connFor(inst) // une seule résolution de config par dépôt
 		if _, err := gitx.Fetch(p, token, github, baseURL); err == nil {
 			n++
 		}
+		release()
 	}
 	return n, nil
 }
