@@ -71,6 +71,9 @@ une **révocation** (serials). On ne peut pas *forger* un faux ✅ sans le certi
 **Depuis 1.9.5**, le modèle par défaut est une **garantie LOGICIEL** : une identité « SituLab » unique
 **embarquée** signe (plus de cert par utilisateur). Même plafond T2 : une clé dans le binaire est
 extractible → marqueur d'authenticité « fait via SituLab », pas une preuve inviolable localement.
+⚠ Tant que la gouvernance n'a pas **minté** et embarqué l'identité logicielle (geste de cérémonie
+**hors ligne**, pas automatique), ce mode est **inactif** dans le binaire : repli sur le cert d'appareil,
+ou aucun ✅. `situlab doctor` / `attest status` indiquent l'état réel.
 
 **Depuis 1.9.6 — mode « signature serveur » (T3), par connexion.** L'empreinte peut être demandée au
 **service de signature APCOM** : la **clé privée ne quitte jamais le serveur**, donc un attaquant/agent
@@ -80,6 +83,16 @@ révocation**. **Honnêteté** : sans **racine matérielle** (TPM/WebAuthn, opti
 pas parfaitement un « vrai SituLab » d'un agent muni d'un jeton valide ; le gain réel est **la clé hors du
 poste** + audit/rate-limit/révocation. La **vérification client ne change pas** (chaîne jusqu'à la racine
 APCOM embarquée). Contrat & runbook serveur : `STACK_TECHNIQUE/SITULAB/signserver/` (KERNEL).
+
+**Depuis 1.9.7 — portage IMMUABLE par trailer de commit.** L'attestation **locale** (logiciel / cert
+d'appareil) n'est plus portée par une **note git** (effaçable, remplaçable) mais par un **trailer de
+commit** « SituLab-Approved: » : il fait **partie de l'objet commit** (inaltérable sans changer le commit)
+et **voyage avec le commit** — plus de note à pousser/récupérer, ce qui supprime le mode de panne
+« commit signé, aucun badge ». La signature couvre un **pré-image canonique** du commit (arbre, parents,
+auteur, committer, message **sans** le trailer), pas le SHA final : toute altération casse la vérification
+et un trailer ne peut pas être transplanté sur un autre commit. La **chaîne de confiance et la racine
+APCOM sont inchangées**. Le **mode serveur** (qui signe le SHA) reste porté par une **note** ; la
+vérification lit **le trailer d'abord, puis la note** (compatibilité des commits antérieurs et du serveur).
 
 ## Distribution
 

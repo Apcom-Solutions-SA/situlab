@@ -254,8 +254,12 @@ transite jamais par la CLI ni par l'agent.
 - `situlab attest status <dossier>` — état d'attestation des derniers commits (✅ « SituLab » / ⬜). Lecture.
 - *(Hérité, optionnel)* `situlab attest genkey` / `install-cert` — ancien chemin de cert d'appareil nominatif,
   utilisé en repli uniquement si la signature logicielle n'est pas encore mintée sur ce binaire.
-- La signature est désormais **visible en ligne** : la note `refs/notes/situlab` est poussée à l'envoi et
-  récupérée au fetch/pull (best-effort) — l'attestation suit le dépôt, plus seulement locale.
+- **Depuis 1.9.7 — portage IMMUABLE par TRAILER de commit.** L'attestation **locale** est écrite dans un
+  **trailer** « SituLab-Approved: » **dans le commit** (immuable, voyage avec le commit — plus de note à
+  pousser). Elle couvre un **pré-image canonique** du commit (arbre/parents/auteur/committer/message sans
+  trailer), pas le SHA. Le **mode serveur** (signe le SHA) reste en **note**. La vérification lit le trailer
+  d'abord, puis la note (commits antérieurs / serveur). `situlab attest status` est inchangé. **N'enlève ni
+  ne modifie jamais ce trailer** : cela retire le ✅.
 - **Émission (gouvernance, HORS LIGNE — pas via le démon)** : `situlab attest gen-root` (paire racine),
   `gen-ca --root-key <f>` (autorité intermédiaire), **`gen-software --signer-key <ca.key> --issuer
   <ca.cert.json>`** (identité de signature LOGICIELLE « SituLab », à embarquer dans le binaire — c'est

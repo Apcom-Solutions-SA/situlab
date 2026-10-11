@@ -239,6 +239,10 @@ func (s *Service) ProjectBoards() ([]ProjectBoard, error) {
 	// Perf (1.9.3) : chaque projet fait plusieurs appels API (tags atelier + prods) + une lecture du
 	// clone local ; on les calcule EN PARALLÈLE (chaque goroutine écrit SON index → pas de course ;
 	// les caches partagés sont protégés par s.mu). Concurrence bornée pour ne pas saturer le serveur.
+	// Perf (1.9.7) : on scanne les clones locaux UNE SEULE FOIS (index remote→chemin) au lieu de
+	// re-parcourir TOUS les dépôts suivis pour CHAQUE projet — l'ancienne boucle O(projets × dépôts)
+	// de gitx.StatusOf était l'amplificateur principal de la lenteur de la page Projets.
+	localIdx := s.localRemoteIndex()
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 6)
 	for i := range projs {
@@ -253,7 +257,7 @@ func (s *Service) ProjectBoards() ([]ProjectBoard, error) {
 			if aerr != nil {
 				b.Atelier.Error = cleanClientErr(aerr)
 			}
-			if path := s.localCloneFor(p.Atelier); path != "" {
+			if path := s.localCloneForIdx(p.Atelier, localIdx); path != "" {
 				if sum, err := gitx.SummaryOf(path); err == nil && sum.IsRepo {
 					b.Local = &ProjectLocal{
 						Path: path, Branch: sum.Branch, Clean: sum.Clean, Ahead: sum.Ahead, Behind: sum.Behind,
@@ -293,6 +297,46 @@ func (s *Service) localCloneFor(ref config.RepoRef) string {
 		}
 	}
 	return ""
+}
+
+// localRemoteIndex scanne UNE SEULE FOIS tous les clones locaux suivis et renvoie un index
+// remote(normalisé) → chemin. Il remplace, dans ProjectBoards, la boucle O(projets × dépôts) de
+// gitx.StatusOf par un seul balayage O(dépôts). Le premier clone trouvé pour un remote gagne
+// (ordre de cfg.LocalRepos — même choix que localCloneFor).
+func (s *Service) localRemoteIndex() map[string]string {
+	s.mu.Lock()
+	s.lockedReload()
+	paths := append([]string(nil), s.cfg.LocalRepos...)
+	s.mu.Unlock()
+	idx := make(map[string]string, len(paths))
+	for _, p := range paths {
+		st, err := gitx.StatusOf(p)
+		if err != nil || !st.IsRepo {
+			continue
+		}
+		k := normURL(st.Remote)
+		if k == "" {
+			continue
+		}
+		if _, exists := idx[k]; !exists {
+			idx[k] = p
+		}
+	}
+	return idx
+}
+
+// localCloneForIdx est localCloneFor appuyé sur un index pré-calculé (évite de re-balayer les dépôts
+// locaux par projet). La résolution du remote du dépôt visé reste via ViewRepo (CloneURL faisant foi).
+func (s *Service) localCloneForIdx(ref config.RepoRef, idx map[string]string) string {
+	r, err := s.ViewRepo(ref.Instance, ref.Owner, ref.Repo)
+	if err != nil {
+		return ""
+	}
+	want := normURL(r.CloneURL)
+	if want == "" {
+		return ""
+	}
+	return idx[want]
 }
 
 // PromoteResult décrit, en clair, ce qu'une promotion a publié.

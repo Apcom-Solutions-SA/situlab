@@ -116,6 +116,7 @@ func runC(dir string, timeout time.Duration, extraEnv []string, args ...string) 
 		"-c", "protocol.ext.allow=never", // bloque les transports ext:: (exécution de commande)
 		"-c", "protocol.file.allow=never", // bloque file:// (sous-modules malveillants)
 		"-c", "diff.external=", // neutralise un pilote de diff externe (dépôt piégé → exécution)
+		"-c", "commit.gpgsign=false", // SituLab gère sa propre attestation ; ne jamais déclencher la signature gpg/ssh du poste (en-tête gpgsig parasite)
 	}, args...)
 
 	cmd := exec.CommandContext(ctx, "git", full...)

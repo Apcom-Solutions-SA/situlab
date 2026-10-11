@@ -40,9 +40,10 @@ type pinResp struct {
 func newGUIPrompter(ctx context.Context) *guiPrompter { return &guiPrompter{ctx: ctx} }
 
 // PromptPIN bloque jusqu'à la saisie (ou l'annulation, ou un délai de garde de 2 min). detail est
-// un aperçu optionnel de l'action (ex. *core.PushPreview), transmis au frontend pour un consentement
-// éclairé ; il est sérialisé dans la charge utile de l'évènement.
-func (p *guiPrompter) PromptPIN(reason string, detail any) (string, daemon.PINOutcome) {
+// un aperçu optionnel de l'action (ex. *core.PushPreview) et action une clé de classe (push|delete|…) ;
+// tous deux transmis au frontend pour un consentement éclairé et un visuel adapté, sérialisés dans
+// la charge utile de l'évènement. Ni l'un ni l'autre n'autorise quoi que ce soit : pur affichage.
+func (p *guiPrompter) PromptPIN(reason string, detail any, action string) (string, daemon.PINOutcome) {
 	p.gate.Lock()
 	defer p.gate.Unlock()
 
@@ -65,7 +66,7 @@ func (p *guiPrompter) PromptPIN(reason string, detail any) (string, daemon.PINOu
 	wailsrt.WindowCenter(p.ctx)
 	wailsrt.WindowSetAlwaysOnTop(p.ctx, true)
 	defer wailsrt.WindowSetAlwaysOnTop(p.ctx, false)
-	wailsrt.EventsEmit(p.ctx, "situlab:pin-request", map[string]any{"reason": reason, "detail": detail})
+	wailsrt.EventsEmit(p.ctx, "situlab:pin-request", map[string]any{"reason": reason, "detail": detail, "action": action})
 
 	select {
 	case r := <-ch:

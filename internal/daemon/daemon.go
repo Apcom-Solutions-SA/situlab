@@ -199,7 +199,9 @@ const (
 type PINPrompter interface {
 	// detail porte un aperçu optionnel de l'action (ex. *core.PushPreview pour un envoi) afin
 	// d'enrichir le consentement ; nil quand il n'y a rien de plus à montrer que `reason`.
-	PromptPIN(reason string, detail any) (string, PINOutcome)
+	// action est une CLÉ de classe d'action (push|promote|delete|create|config|issue|admin|unlock)
+	// pour que la fenêtre adapte son visuel (couleur/icône) — ce n'est jamais une autorisation en soi.
+	PromptPIN(reason string, detail any, action string) (string, PINOutcome)
 }
 
 // Daemon exécute les opérations sur un noyau partagé, avec consentement humain par modale.
@@ -289,15 +291,24 @@ func kindOf(err error) string {
 	}
 }
 
-// ensureUnlocked garantit une session de lecture : si verrouillée, la modale demande le PIN.
+// ensureUnlocked garantit une session de lecture : si verrouillée, la modale demande le PIN (invite
+// générique de déverrouillage, pour les lectures).
 func (d *Daemon) ensureUnlocked() error {
+	return d.ensureUnlockedCtx("Déverrouiller SituLab", nil, "unlock")
+}
+
+// ensureUnlockedCtx est ensureUnlocked AVEC le contexte de l'action en attente. Quand la politique
+// n'exige pas le PIN mais que la session est verrouillée, l'invite UNIQUE montre l'action + aperçu
+// (Point 5 : un seul PIN quand verrouillé, et le BON message) au lieu d'un générique « Déverrouiller ».
+// Le même secret déverrouille ET ouvre la session (core.Unlock→openSession) : une seule saisie.
+func (d *Daemon) ensureUnlockedCtx(reason string, detail any, action string) error {
 	if d.svc.Unlocked() {
 		return nil
 	}
 	if !d.svc.PINSet() {
 		return errors.New("aucun PIN configuré : définissez-en un dans la fenêtre SituLab")
 	}
-	pin, outcome := d.prompter.PromptPIN("Déverrouiller SituLab", nil)
+	pin, outcome := d.prompter.PromptPIN(reason, detail, action)
 	switch outcome {
 	case PINConfirmed:
 		return d.svc.Unlock(pin)
@@ -318,18 +329,21 @@ func (d *Daemon) ensureUnlocked() error {
 // politique (fail-closed), donc sauter la modale ici ne peut jamais SUR-autoriser.
 func (d *Daemon) gate(op string, a Args, reason string) (string, error) {
 	act := actionOf(op)
+	action := actionLabel(op)
 	needPIN := d.svc.RequiresPIN(a.Instance, act)
 	if act == config.ActionPush { // la politique du push suit le DÉPÔT réel, pas la connexion nommée
 		needPIN = d.svc.RequiresPINForPush(a.Instance, a.Path)
 	}
-	if needPIN {
-		var detail any
-		if act == config.ActionPush && a.Path != "" { // aperçu éclairé pour un envoi/synchro
-			detail = d.svc.PushPreview(a.Path)
-		}
-		return d.writePIN(reason, detail)
+	var detail any
+	if act == config.ActionPush && a.Path != "" { // aperçu éclairé pour un envoi/synchro
+		detail = d.svc.PushPreview(a.Path)
 	}
-	if err := d.ensureUnlocked(); err != nil { // politique « sans PIN » : au minimum la session ouverte
+	if needPIN {
+		return d.writePIN(reason, detail, action)
+	}
+	// Politique « sans PIN » mais session verrouillée : l'invite UNIQUE de déverrouillage porte le
+	// contexte de l'action (Point 5), pas un générique « Déverrouiller SituLab ».
+	if err := d.ensureUnlockedCtx(reason, detail, action); err != nil {
 		return "", err
 	}
 	return "", nil
@@ -355,11 +369,33 @@ func actionOf(op string) config.PINAction {
 	return config.ActionUserAdmin
 }
 
-func (d *Daemon) writePIN(reason string, detail any) (string, error) {
+// actionLabel classe une opération en clé de VISUEL pour la fenêtre PIN (plus fine que PINAction :
+// distingue notamment les suppressions, à montrer en rouge). N'autorise rien : pur habillage.
+func actionLabel(op string) string {
+	switch op {
+	case OpPush, OpSync, OpGitPushForce, OpGitPushTag:
+		return "push"
+	case OpProjectPromote:
+		return "promote"
+	case OpRepoDelete, OpRepoDelBranch, OpReleaseDel, OpTagDel, OpTokenMgrDel:
+		return "delete"
+	case OpRepoCreate, OpReleaseNew, OpTagNew, OpTokenMgrNew, OpAdminUserNew:
+		return "create"
+	case OpRepoRename, OpRepoSetDesc, OpRepoVis, OpRepoArchive, OpRepoDefBranch:
+		return "config"
+	case OpIssueCreate, OpIssueComment, OpIssueState, OpIssueEdit,
+		OpIssueLabels, OpIssueAssign, OpIssueMilestn,
+		OpPullCreate, OpPullMerge, OpPullReview, OpPullState, OpPullEdit:
+		return "issue"
+	}
+	return "admin"
+}
+
+func (d *Daemon) writePIN(reason string, detail any, action string) (string, error) {
 	if !d.svc.PINSet() {
 		return "", errors.New("aucun PIN configuré : définissez-en un d'abord")
 	}
-	pin, outcome := d.prompter.PromptPIN(reason, detail)
+	pin, outcome := d.prompter.PromptPIN(reason, detail, action)
 	switch outcome {
 	case PINConfirmed:
 		return pin, nil
@@ -582,7 +618,7 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 	case OpProjectPromote:
 		// Publication vers la PRODUCTION : toujours confirmée par le PIN dans la fenêtre (le cœur
 		// réapplique la politique de la connexion prod). L'IA prépare, l'humain promeut.
-		pin, err := d.writePIN("Publier vers la PRODUCTION la version de l'atelier — projet « "+a.Name+" »", nil)
+		pin, err := d.writePIN("Publier vers la PRODUCTION la version de l'atelier — projet « "+a.Name+" »", nil, "promote")
 		if err != nil {
 			return nil, err
 		}

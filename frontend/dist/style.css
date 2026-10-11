@@ -509,20 +509,30 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 /* Historique */
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-chip { background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: var(--fs-xs); padding: 3px 10px; border-radius: var(--r-full); font-family: var(--font-mono); }
-.cmt { display: grid; grid-template-columns: 76px 1fr; gap: 4px 10px; padding: 8px 0; border-bottom: 1px solid var(--border); align-items: start; }
-.cmt code { color: var(--accent); font-size: var(--fs-xs); font-family: var(--font-mono); }
-.cmt-msg { font-weight: 600; }
-.cmt-meta { grid-column: 2; color: var(--text-faint); font-size: var(--fs-xs); }
-.att-badge { font-size: var(--fs-xs); }
-.att-badge.ok { color: var(--ok); }
-.att-legend { float: right; font-size: var(--fs-xs); color: var(--text-faint); font-weight: 400; }
-/* Historique en TIMELINE visuelle (non-initiés) : une ligne verticale traversée de pastilles. */
-.cmt-timeline { position: relative; margin-left: 6px; }
-.cmt-timeline .cmt { position: relative; padding-left: 22px; border-bottom: none; }
-.cmt-timeline .cmt::before { content: ""; position: absolute; left: 4px; top: 0; bottom: -1px; width: 2px; background: var(--border); }
-.cmt-timeline .cmt:first-child::before { top: 10px; }
-.cmt-timeline .cmt:last-child::before { bottom: auto; height: 12px; }
-.cmt-timeline .cmt::after { content: ""; position: absolute; left: 0; top: 11px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-surface); box-sizing: border-box; }
+
+/* Timeline aeree : une ligne verticale, un noeud par commit. Niveau 1 = quoi / qui / quand ; le corps se deplie. */
+.cmt-timeline { position: relative; display: flex; flex-direction: column; }
+.cmt { position: relative; padding: 11px 0 11px 28px; }
+.cmt::before { content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+.cmt:first-child::before { top: 16px; }
+.cmt:last-child::before { bottom: auto; height: 16px; }
+.cmt::after { content: ""; position: absolute; left: 0; top: 16px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 3px solid var(--bg-surface); box-sizing: border-box; transition: background var(--t-fast); }
+.cmt.signed::after { background: var(--ok); }
+.cmt-head { display: flex; align-items: center; gap: 8px; }
+.cmt-subject { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.cmt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px; color: var(--text-faint); font-size: var(--fs-xs); margin-top: 3px; }
+.cmt-meta code { color: var(--accent); font-family: var(--font-mono); }
+.cmt-who { color: var(--text-soft); }
+.cmt-more { background: none; border: none; color: var(--accent); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; padding: 4px 0 0; }
+.cmt-more:hover { text-decoration: underline; }
+.cmt-body { margin-top: 7px; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; font-size: var(--fs-sm); color: var(--text-soft); white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+
+/* Sceau « certified » SituLab : garantie d'origine du commit (remplace l'ancienne legende texte). */
+.att-badge { display: inline-flex; align-items: center; flex: none; }
+.seal { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--ok); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.att-badge.ok .seal { filter: drop-shadow(0 0 3px var(--ok-soft)); }
+.seal.lg { width: 20px; height: 20px; }
+.att-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: var(--fs-xs); font-weight: 400; }
 
 /* ---------- Réglages ---------- */
 .srow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); padding: 10px 0; border-top: 1px solid var(--border); }
@@ -634,6 +644,41 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 /* Encadré d'information / d'avertissement (distinction des notions, mises en garde). */
 .callout { background: var(--info-soft); border: 1px solid var(--accent); border-radius: var(--r-md); padding: 10px 14px; margin-bottom: var(--sp-4); color: var(--text); font-size: var(--fs-sm); }
 .callout.warn { background: var(--warn-soft); border-color: var(--warn); }
+.callout.danger { background: var(--danger-soft); border-color: var(--danger); }
+
+/* Fenetre PIN : visuel par TYPE d'action (Point 6) — couleur + icone + flux source->destination. */
+.pin-action { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: var(--fs-sm); padding: 6px 12px; border-radius: var(--r-full); margin-bottom: 10px; }
+.pin-ico { font-size: 1.15em; line-height: 1; }
+.pa-push { background: var(--accent-soft); color: var(--accent); }
+.pa-promote { background: var(--vitrine-soft); color: var(--vitrine); }
+.pa-delete { background: var(--danger-soft); color: var(--danger); }
+.pa-create { background: var(--ok-soft); color: var(--ok); }
+.pa-config { background: var(--warn-soft); color: var(--warn); }
+.pa-issue { background: var(--info-soft); color: var(--info); }
+.pa-admin { background: var(--violet-soft); color: var(--violet); }
+.pa-unlock { background: var(--bg-sunken); color: var(--text-soft); }
+.pin-flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; padding: 10px 12px; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); }
+.pf-node { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--fs-sm); padding: 4px 10px; border-radius: var(--r-sm); background: var(--bg-surface); border: 1px solid var(--border); }
+.pf-local { color: var(--ok); }
+.pf-atl { color: var(--accent); }
+.pf-prod { color: var(--vitrine); }
+.pf-arrow { color: var(--text-faint); font-weight: 700; font-size: 1.1em; }
+
+/* Comprendre git (page pedagogique) */
+.git-intro { color: var(--text-soft); margin-bottom: 14px; font-size: var(--fs-sm); line-height: 1.5; }
+.git-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+.git-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 14px 16px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; }
+.git-card-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.git-cmd { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: var(--r-sm); }
+.git-card-t { font-weight: 700; font-size: var(--fs-sm); }
+.git-viz { display: flex; justify-content: center; padding: 6px 0 8px; }
+.gviz { height: 42px; width: auto; max-width: 100%; fill: none; stroke: var(--text-faint); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.gviz .gv-ok { stroke: var(--ok); }
+.gviz .gv-accent { stroke: var(--accent); }
+.gviz .gv-vitrine { stroke: var(--vitrine); }
+.git-what { color: var(--text); font-size: var(--fs-sm); line-height: 1.5; }
+.git-what code { background: var(--bg-sunken); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+.git-in { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); color: var(--text-soft); font-size: var(--fs-xs); line-height: 1.5; }
 /* Bouton de confirmation d'une action destructive (suppression, réinitialisation). */
 .btn-primary.danger-btn { background: var(--danger); border-color: var(--danger); }
 .btn-primary.danger-btn:hover { filter: brightness(1.06); }

@@ -30,8 +30,9 @@ import (
 )
 
 // apcom_root.pub : clé publique racine APCOM (base64 ed25519), ancre de confiance de la vérification.
-// Valeur ACTUELLE = racine de TEST ; la gouvernance remplacera ce fichier par la vraie racine publique
-// (le privé racine ne doit jamais toucher un poste).
+// La vraie racine de gouvernance y est embarquée (cérémonie du 2026-10-10) ; le privé racine ne touche
+// jamais un poste. UsingTestRoot() indique si, dans un build donné, c'est encore la racine de TEST
+// (cf. testRootB64) — ce n'est PAS le cas d'un build de release.
 //
 //go:embed apcom_root.pub
 var rootPubB64 string
@@ -198,12 +199,21 @@ func CheckCert(c Cert, now time.Time, revoked map[string]bool) error {
 	return verifyCert(c, now, revoked)
 }
 
-// Attestation : preuve, portée par la note git d'un commit, qu'il est né dans SituLab.
+// Attestation : preuve qu'un commit est né dans SituLab. Deux portages coexistent :
+//   - v2 (défaut depuis 1.9.7) : portée par un TRAILER de commit « SituLab-Approved: » — IMMUABLE (dans
+//     l'objet commit) et voyage AVEC le commit (plus de note à pousser/récupérer). Sig couvre le
+//     pré-image du commit (CommitPreimage), pas le SHA : le trailer modifie le SHA, on ne peut donc pas
+//     signer le SHA final (auto-référence).
+//   - v1 (legacy + mode serveur) : portée par la note git refs/notes/situlab. Sig couvre le SHA.
+//
+// Verify (v1) et VerifyPreimage (v2) distinguent les deux ; V=2 marque une attestation de trailer. La
+// chaîne de certificat et la racine épinglée sont INCHANGÉES entre les deux : seule la charge signée diffère.
 type Attestation struct {
-	Commit string `json:"commit"`
+	Commit string `json:"commit,omitempty"` // v1 : SHA lié (vide en v2)
 	Cert   Cert   `json:"cert"`
-	Sig    []byte `json:"sig"` // ed25519(device_priv, commitSigningBytes(commit)) — lie la signature AU commit
-	TS     string `json:"ts"`  // horodatage indicatif (affichage) — NON couvert par la signature, non fiable
+	Sig    []byte `json:"sig"`         // v1 : ed25519(priv, commitSigningBytes(SHA)) ; v2 : ed25519(priv, CommitPreimage(...))
+	TS     string `json:"ts"`          // horodatage indicatif (affichage) — NON couvert par la signature, non fiable
+	V      int    `json:"v,omitempty"` // portage : 2 = trailer/pré-image ; absent/0 = v1 note/SHA
 }
 
 // commitSigningBytes lie la signature au SHA du commit (anti-rejeu : une signature d'un commit X ne
@@ -239,6 +249,51 @@ func Verify(att Attestation, commitSHA string, now time.Time, revoked map[string
 		return Verdict{Reason: err.Error()}
 	}
 	if !ed25519.Verify(att.Cert.DevicePub, commitSigningBytes(commitSHA), att.Sig) {
+		return Verdict{Reason: "signature d'appareil invalide"}
+	}
+	return Verdict{Verified: true, Subject: att.Cert.Subject}
+}
+
+// --- v2 (1.9.7) : attestation IMMUABLE portée par un trailer de commit ---------------------------
+//
+// Le trailer « SituLab-Approved: » fait partie de l'objet commit (il en modifie le SHA) : on ne peut
+// donc pas signer le SHA final (auto-référence). On signe à la place un PRÉ-IMAGE canonique du commit —
+// son arbre, ses parents, ses lignes auteur/committer et son message SANS le trailer. Toute altération
+// du commit (arbre, parent, auteur, message) change le pré-image → la vérification échoue ; transplanter
+// le trailer sur un autre commit échoue de même. La chaîne de certificat et la racine épinglée sont
+// INCHANGÉES : seule la charge signée diffère de la v1.
+
+// CommitPreimage construit la représentation canonique STABLE signée pour un commit v2. `author` et
+// `committer` sont les lignes d'identité git complètes (« Nom <email> ts tz ») ; `body` est le message
+// du commit SANS le trailer d'attestation, espaces de fin retirés. Préfixe de domaine anti-confusion.
+func CommitPreimage(tree string, parents []string, author, committer, body string) []byte {
+	payload, _ := json.Marshal(struct {
+		Tree      string   `json:"tree"`
+		Parents   []string `json:"parents"`
+		Author    string   `json:"author"`
+		Committer string   `json:"committer"`
+		Body      string   `json:"body"`
+	}{tree, parents, author, committer, body})
+	return append([]byte("situlab-attest-v2\x00"), payload...)
+}
+
+// SignPreimage produit une attestation v2 (trailer) : la clé d'appareil signe le pré-image du commit.
+func SignPreimage(devicePriv ed25519.PrivateKey, cert Cert, preimage []byte) Attestation {
+	return Attestation{
+		V:    2,
+		Cert: cert,
+		Sig:  ed25519.Sign(devicePriv, preimage),
+		TS:   time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// VerifyPreimage vérifie une attestation v2 pour un pré-image de commit : cert → racine + fenêtre de
+// validité + non révoqué + signature d'appareil sur le pré-image. Fail-closed : toute erreur → non vérifié.
+func VerifyPreimage(att Attestation, preimage []byte, now time.Time, revoked map[string]bool) Verdict {
+	if err := verifyCert(att.Cert, now, revoked); err != nil {
+		return Verdict{Reason: err.Error()}
+	}
+	if !ed25519.Verify(att.Cert.DevicePub, preimage, att.Sig) {
 		return Verdict{Reason: "signature d'appareil invalide"}
 	}
 	return Verdict{Verified: true, Subject: att.Cert.Subject}

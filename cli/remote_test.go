@@ -18,7 +18,7 @@ type stubPrompter struct {
 	ok  bool
 }
 
-func (s stubPrompter) PromptPIN(string, any) (string, daemon.PINOutcome) {
+func (s stubPrompter) PromptPIN(string, any, string) (string, daemon.PINOutcome) {
 	if s.ok {
 		return s.pin, daemon.PINConfirmed
 	}

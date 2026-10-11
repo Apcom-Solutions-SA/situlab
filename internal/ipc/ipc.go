@@ -24,12 +24,25 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"situlab/internal/config"
 )
 
-// maxFrame borne la taille d'un message (anti-saturation mémoire).
-const maxFrame = 8 << 20
+const (
+	// maxFrame borne la taille d'un message (anti-saturation mémoire).
+	maxFrame = 8 << 20
+	// maxConns borne le nombre de connexions simultanées servies (anti-saturation locale).
+	maxConns = 64
+	// idleTimeout borne l'inactivité ENTRE deux requêtes d'une même connexion (libère une
+	// connexion abandonnée). Choisi > pinPromptTTL (2 min) : le temps d'une modale PIN se passe
+	// dans le handler, pas en lecture de frame, donc il n'entre pas dans ce délai.
+	idleTimeout = 5 * time.Minute
+	// writeTimeout borne l'envoi d'une réponse (un client qui ne lit plus ne bloque pas la goroutine).
+	writeTimeout = 60 * time.Second
+	// dialTimeout borne la connexion au démon (socket local : immédiat en pratique).
+	dialTimeout = 5 * time.Second
+)
 
 // ErrFrameTooLarge : message au-delà de la borne autorisée.
 var ErrFrameTooLarge = errors.New("message IPC trop volumineux")
@@ -100,7 +113,7 @@ func Listen(path string, h Handler) (*Server, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	if c, derr := net.Dial("unix", path); derr == nil {
+	if c, derr := net.DialTimeout("unix", path, dialTimeout); derr == nil {
 		c.Close()
 		return nil, ErrAlreadyRunning // un démon vivant écoute : ne pas écraser
 	}
@@ -116,21 +129,33 @@ func Listen(path string, h Handler) (*Server, error) {
 }
 
 func (s *Server) loop() {
+	sem := make(chan struct{}, maxConns) // plafond de connexions simultanées
 	for {
 		c, err := s.ln.Accept()
 		if err != nil {
 			return // listener fermé
 		}
-		go s.serve(c)
+		select {
+		case sem <- struct{}{}:
+			go func() {
+				defer func() { <-sem }()
+				s.serve(c)
+			}()
+		default:
+			c.Close() // trop de connexions simultanées : refus propre (anti-saturation locale)
+		}
 	}
 }
 
 func (s *Server) serve(c net.Conn) {
 	defer c.Close()
 	for {
+		// Échéance d'inactivité entre requêtes : une connexion abandonnée (client qui n'envoie
+		// plus rien) est libérée au lieu de retenir une goroutine indéfiniment.
+		_ = c.SetReadDeadline(time.Now().Add(idleTimeout))
 		b, err := readFrame(c)
 		if err != nil {
-			return // connexion close ou erreur
+			return // connexion close, erreur, ou inactivité trop longue
 		}
 		var req Request
 		var resp Response
@@ -143,6 +168,7 @@ func (s *Server) serve(c net.Conn) {
 		if merr != nil {
 			out, _ = json.Marshal(Response{OK: false, Err: "réponse IPC non sérialisable", Kind: "generic"})
 		}
+		_ = c.SetWriteDeadline(time.Now().Add(writeTimeout)) // un client qui ne lit plus ne bloque pas la goroutine
 		if writeFrame(c, out) != nil {
 			return
 		}
@@ -166,7 +192,7 @@ type Client struct{ c net.Conn }
 // Dial se connecte au démon. Une erreur signifie généralement « démon absent » (l'appelant
 // peut alors le démarrer puis réessayer).
 func Dial(path string) (*Client, error) {
-	c, err := net.Dial("unix", path)
+	c, err := net.DialTimeout("unix", path, dialTimeout)
 	if err != nil {
 		return nil, err
 	}

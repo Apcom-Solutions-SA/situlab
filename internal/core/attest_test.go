@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,8 @@ func TestAttestEndToEnd(t *testing.T) {
 	// 3) Dépôt local dont l'origin pointe l'hôte de l'atelier → un commit via le cœur.
 	dir := t.TempDir()
 	gitRun(t, dir, "init")
+	gitRun(t, dir, "config", "user.name", "Grégory Liand")
+	gitRun(t, dir, "config", "user.email", "gl-lig@pm.me")
 	gitRun(t, dir, "remote", "add", "origin", "https://forge.example/o/r.git")
 	if err := os.WriteFile(dir+"/a.txt", []byte("bonjour"), 0o644); err != nil {
 		t.Fatal(err)
@@ -107,6 +110,10 @@ func TestAttestEndToEnd(t *testing.T) {
 	sha := gitx.HeadSHA(dir)
 	if sha == "" {
 		t.Fatal("HEAD introuvable après commit")
+	}
+	// Portage v2 : le commit attesté doit porter le TRAILER (immuable), pas une note.
+	if obj, err := gitx.CommitObject(dir, sha); err != nil || !strings.Contains(obj.Message, "SituLab-Approved: ") {
+		t.Fatalf("le commit attesté doit porter le trailer SituLab-Approved (err=%v)", err)
 	}
 	v := s.CommitAttestation(dir, sha)
 	if !v.Verified || v.Subject != subject {

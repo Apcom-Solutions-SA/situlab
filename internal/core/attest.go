@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"situlab/internal/attest"
@@ -16,8 +17,13 @@ import (
 	"situlab/internal/keyring"
 )
 
-// attestNotesRef : ref de notes git qui porte les attestations « SituLab approved ».
+// attestNotesRef : ref de notes git qui portait les attestations v1 (legacy) et porte encore celles du
+// mode serveur (signées sur le SHA, non transposables en trailer). Le portage par défaut depuis 1.9.7
+// est le TRAILER de commit « SituLab-Approved: » (immuable, voyage avec le commit) — cf. attestTrailerKey.
 const attestNotesRef = "situlab"
+
+// attestTrailerKey : clé du trailer de commit qui porte l'attestation v2 (immuable, dans l'objet commit).
+const attestTrailerKey = "SituLab-Approved"
 
 // signCertFor charge le certificat d'appareil d'une instance (config, non secret), ou nil.
 func (s *Service) signCertFor(instance string) *attest.Cert {
@@ -70,13 +76,13 @@ func (s *Service) attestCommit(path, sha string) {
 		s.attestCommitViaServer(inst, path, sha)
 		return
 	}
-	// Préférence (1.9.5) : signature LOGICIELLE unique « SituLab » si elle est embarquée — le logiciel
-	// signe, pas l'utilisateur. Pas de cert nominatif requis. (Repli sur le cert d'instance sinon.)
+	// Chemins LOCAUX souverains → attestation v2 IMMUABLE portée par un trailer de commit (voyage avec
+	// le commit, plus de note à pousser). Préférence (1.9.5) : signature LOGICIELLE unique « SituLab »
+	// si elle est embarquée — le logiciel signe, pas l'utilisateur. Repli sur le cert d'appareil de
+	// l'instance sinon.
 	if priv, cert, ok := attest.SoftwareSigner(); ok {
 		defer zero(priv)
-		if b, err := attest.Sign(priv, cert, sha).Encode(); err == nil {
-			_ = gitx.WriteNote(path, attestNotesRef, sha, string(b))
-		}
+		s.attestLocalTrailer(path, sha, priv, cert)
 		return
 	}
 	if inst == "" {
@@ -91,11 +97,41 @@ func (s *Service) attestCommit(path, sha string) {
 		return
 	}
 	defer zero(priv)
-	b, err := attest.Sign(priv, *cert, sha).Encode()
+	s.attestLocalTrailer(path, sha, priv, *cert)
+}
+
+// attestLocalTrailer signe le pré-image du commit avec la clé d'appareil puis recrée le commit en y
+// ajoutant le trailer « SituLab-Approved: ». Best-effort non bloquant : à la moindre anicroche, le
+// commit reste tel quel (sans attestation), jamais d'erreur propagée au geste de commit.
+func (s *Service) attestLocalTrailer(path, sha string, priv ed25519.PrivateKey, cert attest.Cert) {
+	obj, err := gitx.CommitObject(path, sha)
 	if err != nil {
 		return
 	}
-	_ = gitx.WriteNote(path, attestNotesRef, sha, string(b))
+	body := strings.TrimRight(obj.Message, "\n")
+	pre := attest.CommitPreimage(obj.Tree, obj.Parents, obj.Author, obj.Committer, body)
+	raw, err := attest.SignPreimage(priv, cert, pre).Encode()
+	if err != nil {
+		return
+	}
+	_, _ = gitx.RecommitWithTrailer(path, sha, attestTrailerKey, base64.StdEncoding.EncodeToString(raw))
+}
+
+// splitAttestTrailer isole le trailer d'attestation « SituLab-Approved: » du message d'un commit :
+// renvoie le corps SANS le trailer (fins de ligne retaillées, pour correspondre au pré-image signé),
+// la valeur base64 du trailer, et ok=false s'il n'y en a pas. On prend la DERNIÈRE occurrence (bloc
+// de trailer final).
+func splitAttestTrailer(message string) (body, val string, ok bool) {
+	prefix := attestTrailerKey + ": "
+	lines := strings.Split(message, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], prefix) {
+			val = strings.TrimSpace(strings.TrimPrefix(lines[i], prefix))
+			rest := append(append([]string{}, lines[:i]...), lines[i+1:]...)
+			return strings.TrimRight(strings.Join(rest, "\n"), "\n"), val, true
+		}
+	}
+	return strings.TrimRight(message, "\n"), "", false
 }
 
 // signModeServer indique si la connexion est configurée en mode « signature serveur » (1.9.6).
@@ -209,10 +245,25 @@ func (s *Service) fetchAttestNotes(instance, path string) {
 }
 
 // CommitAttestation renvoie l'état d'attestation d'un commit (lecture locale, pas de PIN, fail-closed).
+// v2 (défaut) : trailer immuable du commit. Repli v1 : note git (commits d'avant 1.9.7 / mode serveur).
 func (s *Service) CommitAttestation(path, sha string) attest.Verdict {
+	if obj, err := gitx.CommitObject(path, sha); err == nil {
+		if body, val, ok := splitAttestTrailer(obj.Message); ok {
+			dec, err := base64.StdEncoding.DecodeString(val)
+			if err != nil {
+				return attest.Verdict{Reason: "attestation illisible"}
+			}
+			att, err := attest.Decode(dec)
+			if err != nil {
+				return attest.Verdict{Reason: "attestation illisible"}
+			}
+			pre := attest.CommitPreimage(obj.Tree, obj.Parents, obj.Author, obj.Committer, body)
+			return attest.VerifyPreimage(att, pre, time.Now(), s.revokedSerials())
+		}
+	}
 	raw := gitx.ReadNote(path, attestNotesRef, sha)
 	if raw == "" {
-		return attest.Verdict{} // pas de note = non attesté
+		return attest.Verdict{} // ni trailer ni note = non attesté
 	}
 	att, err := attest.Decode([]byte(raw))
 	if err != nil {

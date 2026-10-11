@@ -2,7 +2,50 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
-## [1.9.6] — non publié
+## [1.9.7] — 2026-10-11
+
+### Signature « SituLab approved » — IMMUABLE (trailer de commit)
+- L'attestation d'origine passe de la **note git** (effaçable) à un **trailer de commit** « SituLab-Approved: »
+  **immuable** : il fait partie de l'objet commit et voyage avec lui (plus de note à pousser/récupérer),
+  ce qui supprime le mode de panne « commit signé mais aucun badge ». La signature couvre un **pré-image
+  canonique** du commit (arbre + parents + auteur + committer + corps sans trailer), pas le SHA final —
+  toute altération du commit casse la vérification, transplanter le trailer échoue. Chaîne de certificat
+  APCOM et racine épinglée **inchangées**. Vérification trailer-d'abord, repli note v1 (commits anciens /
+  mode serveur). `commit.gpgsign=false` ajouté au durcissement git.
+
+### Historique (UX)
+- Onglet Historique refondu : **timeline aérée** — niveau 1 = quoi (sujet) / qui / quand, corps **dépliable**
+  (corrige l'affichage où le message s'écrasait dans une colonne de 76 px). La légende texte est remplacée
+  par un **sceau « certified »** (bouclier + coche) apposé sur les commits vérifiés, avec infobulle d'origine ;
+  le trailer d'attestation est masqué à l'affichage.
+
+### Fenêtre PIN (consentement humain)
+- Session verrouillée sans PIN de politique : l'invite **unique** de déverrouillage porte désormais le
+  **contexte de l'action** (reason + aperçu), au lieu d'un générique « Déverrouiller SituLab ».
+- La fenêtre PIN s'**adapte au type d'action** (couleur + icône) : **suppression en rouge** (poubelle,
+  bouton de confirmation rouge, avertissement « destructive »), **flux source → destination** pour un envoi
+  ou une promotion. Le texte précise que SituLab **constate** l'action et que seul le PIN l'autorise
+  (clé `action` émise par le démon, pur habillage).
+
+### Page « Comprendre git » + Aide
+- Nouvelle page **Comprendre git** (nav latérale) : le vocabulaire git en clair, groupé (bases, branches,
+  annuler/réparer, synchroniser, promouvoir, copies de travail — **clone vs worktree**, signature) ; chaque
+  geste avec un petit visuel et un renvoi à l'écran SituLab. **Aide** refondue en nav latérale (Guide / À propos).
+
+### Performances & sécurité
+- **Projets** : l'état des projets ne re-balaye plus tous les dépôts locaux pour chaque projet — index
+  remote→chemin calculé **une seule fois** (fin de la boucle O(projets × dépôts), cause de lenteur).
+- **IPC** : échéances d'inactivité/écriture par connexion + plafond de connexions simultanées + `Dial` borné.
+- **Verrou PIN persistant** : le verrou anti-bruteforce (5 essais / 60 s) **survit à un redémarrage** de
+  l'app (fichier dédié `pinguard.json`, écriture atomique, chargement fail-safe ; jamais dans `config.json`).
+- **mdToHTML** : échappement des guillemets + ouverture externe restreinte aux schémas **http(s)** (`safeOpenURL`).
+
+### Reporté à 1.9.8
+- Éclatement de la page Projets (accueil « classeurs » + détail par projet) ; panneau git enrichi des projets
+  (suppression de branche avec alerte non-mergée, merge en interface, promotion local↔atelier, clones/worktrees
+  manipulables) ; découpage de `frontend/dist/main.js` en modules.
+
+## [1.9.6] — 2026-10-10
 
 ### Signature serveur (« agent-proof »)
 - **Mode « signature serveur » par connexion** : l'empreinte « SituLab approved » peut être demandée au
@@ -17,7 +60,7 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
   `attest status` affiche « approved par … Service de signature ».
 - Scope : **Forgejo (git.apcom.app)** d'abord ; GitHub plus tard.
 
-## [1.9.5] — non publié
+## [1.9.5] — 2026-10-10
 
 ### Signature = GARANTIE LOGICIEL (refonte du modèle)
 - **C'est le logiciel qui signe, plus l'utilisateur.** Une **identité unique « SituLab »** embarquée

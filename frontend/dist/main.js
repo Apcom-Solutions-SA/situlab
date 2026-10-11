@@ -150,7 +150,7 @@ async function init() {
     try { window.runtime.EventsOn("situlab:pin-request", (payload) => {
       // v1.7 : la charge utile est {reason, detail}. Compat : une ancienne chaîne seule reste gérée.
       const p = (payload && typeof payload === "object") ? payload : { reason: payload };
-      pinRequestModal(p.reason || "Autoriser l'opération", p.detail || null);
+      pinRequestModal(p.reason || "Autoriser l'opération", p.detail || null, p.action || "");
     }); pinEventBound = true; } catch (e) {}
   }
   let instances = [];
@@ -497,7 +497,7 @@ const isDisconnected = (name) => (state.disconnected || []).includes(name);
 
 // Vues de 1er niveau mémorisées (pour revenir au bon écran après un rechargement : reconnexion
 // admin, déverrouillage…). On exclut « detail » (dépend d'un état non reconstituable au reload).
-const TOP_VIEWS = ["repos", "projects", "settings", "tokens", "admin", "directory", "stats", "help"];
+const TOP_VIEWS = ["repos", "projects", "settings", "tokens", "admin", "directory", "stats", "help", "git"];
 function navTo(view) {
   state.view = view;
   if (view !== "detail") state.detail = null;
@@ -515,7 +515,7 @@ function setNav(view) {
 const UM_VIEWS = ["admin", "directory", "stats"];
 // Écrans qui NE dépendent PAS de la connexion courante : restent ouverts même serveur déconnecté.
 // Projets (tableau de bord transverse), Réglages (où l'on se reconnecte), Aide (statique).
-const OFFLINE_OK_VIEWS = ["projects", "settings", "help"];
+const OFFLINE_OK_VIEWS = ["projects", "settings", "help", "git"];
 function render() {
   // En quittant les Statistiques : détruire les graphiques (sinon fuite mémoire / observers
   // orphelins) et couper l'abonnement de progression éventuel.
@@ -533,6 +533,7 @@ function render() {
   if (state.view === "repos") renderRepos(false);
   else if (state.view === "projects") renderProjects();
   else if (state.view === "help") renderHelp();
+  else if (state.view === "git") renderGit();
   else if (state.view === "settings") renderSettings();
   else if (state.view === "admin") renderAdmin();
   else if (state.view === "directory") renderDirectory();
@@ -642,9 +643,16 @@ function serverLinkBtn(inst, kind, label) {
   if (!url) return "";
   return `<button class="btn btn-ghost btn-sm" data-openurl="${esc(url)}">${esc(label || "Gérer sur le serveur")} ↗</button>`;
 }
+// safeOpenURL n'ouvre dans le navigateur systeme qu'une URL http(s) EXPLICITE (defense en profondeur
+// contre file://, javascript:, data:… qu'un contenu Markdown/README non fiable tenterait d'injecter).
+function safeOpenURL(u) {
+  if (typeof u === "string" && /^https?:\/\//i.test(u.trim())) {
+    try { window.runtime.BrowserOpenURL(u.trim()); } catch (_) {}
+  }
+}
 document.addEventListener("click", (e) => {
   const b = e.target.closest && e.target.closest("[data-openurl]");
-  if (b) { try { window.runtime.BrowserOpenURL(b.dataset.openurl); } catch (_) {} }
+  if (b) safeOpenURL(b.dataset.openurl);
 });
 
 async function renderTokens() {
@@ -2008,7 +2016,7 @@ async function renderDetail() {
     </div>
     <div id="detail-body"><div class="skeleton"></div></div>`;
   el("back").onclick = () => navTo("repos");
-  if (el("open-web")) el("open-web").onclick = () => { try { window.runtime.BrowserOpenURL(d.html_url || ((state.repos || []).find((x) => x.full_name === d.full_name) || {}).html_url); } catch (e) {} };
+  if (el("open-web")) el("open-web").onclick = () => safeOpenURL(d.html_url || ((state.repos || []).find((x) => x.full_name === d.full_name) || {}).html_url);
   if (el("unfollow")) el("unfollow").onclick = () => {
     // Protection (1.9.2) : « ne plus suivre » demande désormais une confirmation explicite. Le dossier
     // local et son contenu ne sont PAS touchés — seul le suivi dans SituLab est retiré.
@@ -2565,7 +2573,7 @@ function paintCrumbs() {
 // mdToHTML : rendu Markdown MINIMAL et SÛR (échappement d'abord), zéro dépendance. Couvre titres, code
 // (inline + bloc), gras/italique, listes à puces, liens http(s) et paragraphes — suffisant pour un README.
 function mdToHTML(src) {
-  const esc2 = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc2 = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   const inline = (s) => esc2(s)
     .replace(/`([^`]+)`/g, (_, c) => "<code>" + c + "</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
@@ -2625,7 +2633,7 @@ async function openFile(e) {
   const showRendered = () => {
     if (isMd) { fv.innerHTML = `<div class="md-render">${mdToHTML(content)}</div>`; }
     else if (isHtml) { fv.innerHTML = `<iframe class="html-render" sandbox title="aperçu"></iframe>`; const f = fv.querySelector("iframe"); if (f) f.srcdoc = content; }
-    fv.querySelectorAll("a[data-ext]").forEach((a) => a.onclick = (ev) => { ev.preventDefault(); try { window.runtime.BrowserOpenURL(a.getAttribute("href")); } catch (_) {} });
+    fv.querySelectorAll("a[data-ext]").forEach((a) => a.onclick = (ev) => { ev.preventDefault(); safeOpenURL(a.getAttribute("href")); });
   };
   // Historique du FICHIER : qui a changé quoi/quand, diff coloré du commit choisi (clone local).
   const showHisto = async () => {
@@ -2649,7 +2657,7 @@ async function openFile(e) {
   const views = { rendu: showRendered, brut: showRaw, histo: showHisto };
   (canInterpret ? showRendered : showRaw)();
   el("fback").onclick = () => { d.path = parentOf(e.path); paintFiles(body); };
-  if (el("f-open")) el("f-open").onclick = () => { try { window.runtime.BrowserOpenURL(e.html_url); } catch (_) {} };
+  if (el("f-open")) el("f-open").onclick = () => safeOpenURL(e.html_url);
   el("f-dl").onclick = () => downloadText(e.name, content);
   body.querySelectorAll(".ftab").forEach((t) => t.onclick = () => {
     body.querySelectorAll(".ftab").forEach((x) => x.classList.remove("active")); t.classList.add("active");
@@ -2657,30 +2665,54 @@ async function openFile(e) {
   });
 }
 
+// Sceau « certified » SituLab (garantie d'origine) : bouclier + coche, stroke --ok.
+const SEAL_SVG = `<svg class="seal" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l7 2.3v5.3c0 4.6-3 7.9-7 9.2-4-1.3-7-4.6-7-9.2V4.9z"/><path d="M8.6 12l2.4 2.4 4.5-4.9"/></svg>`;
+
+// stripAttestTrailer retire le trailer « SituLab-Approved: » du message affiché : il est représenté
+// par le sceau, jamais montré en base64 brut.
+function stripAttestTrailer(msg) {
+  return String(msg || "").split("\n").filter((l) => !/^SituLab-Approved:\s/.test(l)).join("\n").replace(/\n+$/, "");
+}
+
 function paintHisto(body, liveOnly) {
   const d = state.detail, rem = d._remote || { commits: [] };
   const tags = (d.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("") || `<span class="muted">aucune version</span>`;
-  const commits = (rem.commits || []).map((c) => `
-    <div class="cmt" data-sha="${esc(c.sha || "")}"><code>${esc(c.short)}</code> <span class="att-badge" data-att="${esc(c.sha || "")}"></span>
-      <div class="cmt-msg">${esc(c.message)}</div>
-      <div class="cmt-meta">${esc(c.author)} · ${esc(fmtDate(c.date))}</div></div>`).join("") || blankslate("∅", "Aucun commit", "");
+  const commits = (rem.commits || []).map((c) => {
+    const full = stripAttestTrailer(c.message), nl = full.indexOf("\n");
+    const subject = nl < 0 ? full : full.slice(0, nl);
+    const bodyTxt = nl < 0 ? "" : full.slice(nl + 1).trim();
+    const sha = esc(c.sha || "");
+    return `<div class="cmt" data-sha="${sha}">
+      <div class="cmt-head"><span class="cmt-subject">${esc(subject)}</span><span class="att-badge" data-att="${sha}"></span></div>
+      <div class="cmt-meta"><code>${esc(c.short)}</code><span class="cmt-who">${esc(c.author)}</span><span class="cmt-when">${esc(fmtDate(c.date))}</span></div>
+      ${bodyTxt ? `<button class="cmt-more" data-more="${sha}">Détails ▾</button><div class="cmt-body hidden" id="cb-${sha}">${esc(bodyTxt)}</div>` : ""}
+    </div>`;
+  }).join("") || blankslate("∅", "Aucun commit", "");
   const sig = "histo|" + JSON.stringify([d.ref, d.tags || [], rem.commits || [], d.local_path || ""]);
   if (liveOnly && sig === d._paintSig) return;
   d._paintSig = sig;
   body.innerHTML = `<div id="att-banner"></div>
     <div class="blk"><div class="blk-h">Versions</div><div class="tags">${tags}</div></div>
-    <div class="blk"><div class="blk-h">Historique — ${esc(d.ref)} <span class="att-legend">✅ = créé via SituLab (signé)</span></div><div class="cmt-timeline">${commits}</div></div>`;
-  // Enrichissement « SituLab approved » (attestation locale) — async, best-effort, hors chemin de rendu.
+    <div class="blk"><div class="blk-h">Historique — ${esc(d.ref)}</div><div class="cmt-timeline">${commits}</div></div>`;
+  // Déplier/replier le corps d'un commit (délégation sur la timeline).
+  const tl = body.querySelector(".cmt-timeline");
+  if (tl) tl.onclick = (ev) => {
+    const btn = ev.target.closest(".cmt-more"); if (!btn) return;
+    const cb = el("cb-" + btn.dataset.more); if (!cb) return;
+    const hidden = cb.classList.toggle("hidden");
+    btn.textContent = hidden ? "Détails ▾" : "Masquer ▴";
+  };
+  // Enrichissement « SituLab approved » (sceau d'attestation locale) — async, best-effort, hors rendu.
   enrichAttestation(d);
 }
 
-// enrichAttestation annote les commits avec leur verdict d'attestation (✅ « par Untel »), par SHA, et
-// affiche un bandeau tant que la racine embarquée est la racine de TEST. Lecture locale (clone requis).
+// enrichAttestation appose le SCEAU « certified » sur les commits vérifiés (par SHA) et affiche un
+// bandeau tant que la racine embarquée est la racine de TEST. Lecture locale (clone requis).
 async function enrichAttestation(d) {
   try {
     if (await App().AttestUsingTestRoot()) {
       const b = el("att-banner");
-      if (b) b.innerHTML = `<div class="callout warn" style="margin-bottom:10px">Signature en mode <b>TEST</b> — la racine de gouvernance n'est pas encore installée, les ✅ ne sont pas vérifiables réellement.</div>`;
+      if (b) b.innerHTML = `<div class="callout warn" style="margin-bottom:10px">Signature en mode <b>TEST</b> — la racine de gouvernance n'est pas encore installée : les sceaux ne sont pas vérifiables réellement.</div>`;
     }
   } catch (_) {}
   if (!d.local_path) return;
@@ -2689,9 +2721,14 @@ async function enrichAttestation(d) {
   if (state.detail !== d) return;
   const map = {};
   rows.forEach((r) => { if (r && r.sha) map[r.sha] = r.attestation; });
-  document.querySelectorAll("[data-att]").forEach((elm) => {
-    const v = map[elm.dataset.att];
-    if (v && v.verified) { elm.className = "att-badge ok"; elm.textContent = "✅"; elm.title = "SituLab approved — par " + (v.subject || ""); }
+  document.querySelectorAll(".cmt[data-sha]").forEach((row) => {
+    const v = map[row.dataset.sha], badge = row.querySelector(".att-badge");
+    if (v && v.verified && badge) {
+      badge.className = "att-badge ok";
+      badge.innerHTML = SEAL_SVG;
+      badge.title = "Signé via SituLab — garantie d'origine" + (v.subject ? " · " + v.subject : "");
+      row.classList.add("signed");
+    }
   });
 }
 
@@ -3523,7 +3560,7 @@ async function renderSettings() {
   // Section Versions : version installée + liens (téléchargement/MAJ sur le site, lecture en direct des
   // Releases GitHub). La détection fine de MAJ se fait côté site (connect-src 'self' interdit le fetch
   // d'une API externe depuis la fenêtre) ; le bouton ouvre donc la page des versions dans le navigateur.
-  const openURL = (u) => { try { window.runtime.BrowserOpenURL(u); } catch (_) {} };
+  const openURL = (u) => safeOpenURL(u);
   try { el("app-ver").textContent = await App().AppVersion(); } catch (_) { el("app-ver").textContent = "?"; }
   if (el("ver-check")) el("ver-check").onclick = () => openURL("https://situememoring.com/#telecharger");
   if (el("ver-site")) el("ver-site").onclick = () => openURL("https://situememoring.com/");
@@ -3660,21 +3697,131 @@ function pinForgotModal() {
 }
 
 /* ---------------- Aide ---------------- */
+/* ---------------- Comprendre git (page pedagogique, nav laterale) ---------------- */
+// Petits visuels SVG inline (stroke = currentColor -> suit couleur/theme), CSP-safe (pas de handler inline).
+const GV = {
+  chain: `<svg class="gviz" viewBox="0 0 170 34" aria-hidden="true"><line x1="18" y1="17" x2="152" y2="17"/><circle cx="18" cy="17" r="6"/><circle cx="85" cy="17" r="6"/><circle class="gv-ok" cx="152" cy="17" r="6"/></svg>`,
+  fork: `<svg class="gviz" viewBox="0 0 170 46" aria-hidden="true"><path d="M16 31h40c14 0 14-16 28-16h66"/><line x1="56" y1="31" x2="150" y2="31"/><circle cx="16" cy="31" r="5"/><circle class="gv-accent" cx="150" cy="15" r="5"/><circle cx="150" cy="31" r="5"/></svg>`,
+  merge: `<svg class="gviz" viewBox="0 0 170 46" aria-hidden="true"><path d="M16 15h66c14 0 14 16 28 16h44"/><line x1="16" y1="31" x2="154" y2="31"/><circle class="gv-accent" cx="16" cy="15" r="5"/><circle cx="16" cy="31" r="5"/><circle class="gv-ok" cx="154" cy="31" r="5"/></svg>`,
+  sync: `<svg class="gviz" viewBox="0 0 190 48" aria-hidden="true"><rect x="6" y="14" width="54" height="20" rx="4"/><rect class="gv-accent" x="130" y="14" width="54" height="20" rx="4"/><line x1="62" y1="20" x2="124" y2="20"/><polyline points="119,16 124,20 119,24"/><line x1="128" y1="28" x2="66" y2="28"/><polyline points="71,24 66,28 71,32"/></svg>`,
+  pipeline: `<svg class="gviz" viewBox="0 0 220 40" aria-hidden="true"><rect class="gv-ok" x="4" y="10" width="56" height="20" rx="4"/><rect class="gv-accent" x="82" y="10" width="56" height="20" rx="4"/><rect class="gv-vitrine" x="160" y="10" width="56" height="20" rx="4"/><line x1="62" y1="20" x2="80" y2="20"/><polyline points="75,16 80,20 75,24"/><line x1="140" y1="20" x2="158" y2="20"/><polyline points="153,16 158,20 153,24"/></svg>`,
+  undo: `<svg class="gviz" viewBox="0 0 120 40" aria-hidden="true"><path d="M44 12a16 16 0 1 1-14 8"/><polyline points="24 10 30 20 42 16"/></svg>`,
+  stash: `<svg class="gviz" viewBox="0 0 150 44" aria-hidden="true"><line x1="14" y1="22" x2="92" y2="22"/><circle cx="14" cy="22" r="5"/><circle cx="54" cy="22" r="5"/><rect class="gv-accent" x="104" y="12" width="36" height="20" rx="4"/><line x1="92" y1="22" x2="102" y2="22" stroke-dasharray="3 3"/></svg>`,
+  cloud: `<svg class="gviz" viewBox="0 0 190 46" aria-hidden="true"><path d="M26 28a9 9 0 0 1 2-17 12 12 0 0 1 23 2 8 8 0 0 1-2 15z"/><rect class="gv-ok" x="128" y="12" width="52" height="22" rx="4"/><line x1="58" y1="23" x2="124" y2="23"/><polyline points="119,19 124,23 119,27"/></svg>`,
+  seal: `<svg class="gviz" viewBox="0 0 40 40" aria-hidden="true"><path class="gv-ok" d="M20 5l11 3.6v8.3c0 7.2-4.7 12.4-11 14.5-6.3-2.1-11-7.3-11-14.5V8.6z"/><path class="gv-ok" d="M14 20l4 4 7.5-8"/></svg>`,
+};
+// Contenu : groupe -> cartes { cmd?, t?, what (HTML de confiance, statique), in? (renvoi SituLab), viz? }.
+const GIT_GUIDE = [
+  { k: "bases", label: "🧭 Les bases", intro: "Enregistrer son travail, pas à pas. Ce sont les gestes de tous les jours.", items: [
+    { cmd: "git clone", what: "Copier un dépôt en ligne sur votre poste pour y travailler.", in: "Dépôts → « Lier un dépôt local », ou « Cloner ici » sur une carte de projet.", viz: GV.cloud },
+    { cmd: "git status", what: "Voir, d'un coup d'œil, ce qui a changé et où vous en êtes.", in: "L'état de chaque carte de dépôt (« à jour » / « modifications en cours »)." },
+    { cmd: "git add", t: "indexer", what: "Choisir les modifications qui entreront dans le prochain enregistrement.", in: "Fait pour vous : « Enregistrer » prend tout l'arbre de travail." },
+    { cmd: "git commit", what: "Figer un <b>point de sauvegarde</b> local, avec un message.", in: "Bouton « Enregistrer », ou l'étape 2 de « Synchroniser ».", viz: GV.chain },
+    { cmd: "git log", what: "Lister les enregistrements : qui a fait quoi, quand.", in: "Onglet <b>Historique</b> d'un dépôt — une timeline quoi / qui / quand.", viz: GV.chain },
+    { cmd: "git diff", what: "Voir, ligne par ligne, ce qui a changé.", in: "« Voir les modifications » et le diff coloré de l'historique par fichier." },
+    { cmd: "git show", what: "Le détail complet d'un enregistrement précis.", in: "Clic sur un commit ; historique par fichier." },
+  ]},
+  { k: "branch", label: "⎇ Branches", intro: "Travailler en parallèle sans se marcher dessus, puis réunir.", items: [
+    { cmd: "git branch", what: "Créer / lister des <b>lignes de travail parallèles</b>.", in: "La matrice des branches (mode avancé) ; les branches du poste sur chaque carte.", viz: GV.fork },
+    { cmd: "git switch", t: "changer de branche", what: "Basculer la branche active de votre dossier de travail.", in: "Outils git locaux (mode avancé)." },
+    { cmd: "git merge", what: "Réunir une branche dans une autre.", in: "Panneau git des projets (en interface).", viz: GV.merge },
+    { cmd: "git rebase", what: "Rejouer vos commits au sommet d'une autre branche (historique plus droit).", in: "Outils git locaux (mode avancé)." },
+    { cmd: "git cherry-pick", what: "Reprendre un commit précis, et lui seul, sur la branche courante.", in: "Outils git locaux (mode avancé)." },
+  ]},
+  { k: "undo", label: "↩ Annuler & réparer", intro: "Revenir en arrière proprement. Certains gestes sont destructifs : SituLab les confirme.", items: [
+    { cmd: "git revert", what: "Annuler un commit en créant son <b>inverse</b> — sûr, l'historique est préservé.", in: "Outils git locaux.", viz: GV.undo },
+    { cmd: "git reset", what: "Déplacer la tête en arrière (soft / mixed / hard). <b>⚠ hard = destructif</b> (perte des modifs).", in: "Outils git locaux — le mode hard est confirmé." },
+    { cmd: "git commit --amend", what: "Corriger le dernier enregistrement (message ou contenu).", in: "Outils git locaux." },
+    { cmd: "git stash", what: "Mettre de côté un travail en cours, puis le reprendre plus tard.", in: "Outils git locaux (ranger / reprendre).", viz: GV.stash },
+    { t: "Annuler les modifications", what: "Jeter les changements non encore enregistrés. <b>⚠ destructif</b>.", in: "« Annuler les modifications » — confirmation demandée." },
+  ]},
+  { k: "sync", label: "⇅ Synchroniser", intro: "Échanger avec le serveur : récupérer les nouveautés, envoyer son travail.", items: [
+    { cmd: "git fetch", what: "Regarder les nouveautés du serveur <b>sans</b> toucher à votre travail.", in: "Fait en fond ; « vérifié à l'instant » sur la vue Dépôts.", viz: GV.sync },
+    { cmd: "git pull", what: "Récupérer et intégrer les nouveautés (avance rapide, jamais de fusion surprise).", in: "Inclus dans « Synchroniser »." },
+    { cmd: "git push", what: "Envoyer vos enregistrements en ligne.", in: "« Synchroniser » / « Envoyer » — sous PIN selon la connexion.", viz: GV.sync },
+    { cmd: "git push --force-with-lease", what: "Republier après réécriture <b>sans</b> écraser le travail d'un autre apparu entre-temps.", in: "Outils git locaux — sous PIN." },
+    { cmd: "git tag", t: "versions", what: "Étiqueter une version (ex. <code>v1.2.3</code>).", in: "Bloc « Versions » de l'onglet Historique." },
+  ]},
+  { k: "promote", label: "🚀 Promouvoir", intro: "Le modèle SituLab : on travaille à l'atelier, on publie une version propre en production.", items: [
+    { t: "Les trois paliers", what: "<b>Local</b> (ce poste) → <b>Atelier</b> (le dépôt de travail, où l'IA peut être autonome) → <b>Vitrine</b> (la production, protégée).", viz: GV.pipeline, in: "Les 3 colonnes d'une carte de projet." },
+    { t: "Promouvoir / repromouvoir", what: "Publier vers la production la version validée de l'atelier — en <b>un seul commit propre</b>, sous PIN.", in: "Bouton « Promouvoir » d'une carte de projet (fenêtre PIN violette « Production »)." },
+  ]},
+  { k: "copies", label: "🗂 Copies de travail", intro: "Deux façons d'avoir plusieurs dossiers de travail — utile quand plusieurs IA travaillent en parallèle.", items: [
+    { t: "Clone", what: "Un <b>dossier indépendant</b>, avec son propre <code>.git</code>. Isolation totale : idéale pour faire travailler plusieurs IA en parallèle sans qu'elles se gênent.", in: "« Cloner ici » ; la vue Dépôts montre « N copies » quand il y en a plusieurs.", viz: GV.cloud },
+    { t: "Worktree", what: "Plusieurs dossiers <b>greffés sur un seul</b> <code>.git</code>. Plus léger en disque, mais une branche ne peut être active que dans un seul worktree à la fois.", in: "Affiché comme « worktree » dans la liste des copies." },
+    { t: "⚠ Piège Windows", what: "Ne jamais partager un dossier entre worktrees par une <b>jonction</b> : retirer le worktree peut vider le dossier d'origine.", in: "SituLab vous guide au moment de créer une copie." },
+  ]},
+  { k: "sign", label: "🛡 Signature", intro: "La garantie d'origine « SituLab approved » — qui a fait le commit, via SituLab.", items: [
+    { t: "Le sceau « certified »", what: "Chaque commit créé via SituLab porte une <b>attestation d'origine immuable</b> (dans le commit lui-même), vérifiée localement contre la racine APCOM. Un agent ne peut pas la forger.", in: "Le <b>sceau vert</b> dans l'onglet Historique (infobulle « Signé via SituLab »).", viz: GV.seal },
+  ]},
+];
+
+function renderGit() {
+  let tab = "bases";
+  try { tab = localStorage.getItem("situlab.gittab") || "bases"; } catch (_) {}
+  const card = (it) => `<div class="git-card">
+    <div class="git-card-h">${it.cmd ? `<code class="git-cmd">${esc(it.cmd)}</code>` : ""}${(it.t || !it.cmd) ? `<span class="git-card-t">${esc(it.t || "")}</span>` : ""}</div>
+    ${it.viz ? `<div class="git-viz">${it.viz}</div>` : ""}
+    <div class="git-what">${it.what}</div>
+    ${it.in ? `<div class="git-in"><b>Dans SituLab :</b> ${it.in}</div>` : ""}
+  </div>`;
+  const panels = GIT_GUIDE.map((g) => `<section class="set-sec set-panel" data-panel="${g.k}">
+    <div class="set-sec-h">${esc(g.label)}</div>
+    ${g.intro ? `<div class="git-intro">${esc(g.intro)}</div>` : ""}
+    <div class="git-grid">${g.items.map(card).join("")}</div>
+  </section>`).join("");
+  el("view").innerHTML = `
+    <div class="view-head"><div class="view-title">Comprendre git</div><div class="view-sub">Le vocabulaire git en clair — et où chaque geste se trouve dans SituLab.</div></div>
+    <div class="set-layout">
+      <nav class="set-nav">${GIT_GUIDE.map((g) => `<button class="set-navbtn" data-gittab="${g.k}">${esc(g.label)}</button>`).join("")}</nav>
+      <div class="set-panels">${panels}</div>
+    </div>`;
+  const showTab = (k) => {
+    document.querySelectorAll("#view .set-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== k));
+    document.querySelectorAll("#view .set-navbtn").forEach((b) => b.classList.toggle("active", b.dataset.gittab === k));
+    try { localStorage.setItem("situlab.gittab", k); } catch (_) {}
+  };
+  document.querySelectorAll("#view .set-navbtn").forEach((b) => b.onclick = () => showTab(b.dataset.gittab));
+  if (!GIT_GUIDE.some((g) => g.k === tab)) tab = "bases";
+  showTab(tab);
+}
+
 async function renderHelp() {
-  el("view").innerHTML = `<div class="view-head"><div class="view-title">Aide</div><div class="view-sub">Documentation embarquée — pour vous comme pour vos agents.</div></div>
-    <div class="doc" id="doc"><div class="skeleton"></div></div>
-    <div class="about" id="about">
-      <div class="about-acts" style="margin-bottom:14px">
-        <button class="btn btn-primary btn-sm" id="replay-tour">↺ Rejouer la visite guidée</button>
-        <button class="btn btn-ghost btn-sm" id="copy-prompt">🤖 Configurer mon agent IA</button>
-      </div>
-      <div class="about-id">SituLab <span id="about-ver"></span></div>
-      <div class="about-cp">© 2026 APCOM Solutions SA — Logiciel libre sous licence Apache 2.0.</div>
-      <div class="about-acts">
-        <button class="btn btn-ghost btn-sm" id="show-license">Licence (Apache 2.0)</button>
-        <button class="btn btn-ghost btn-sm" id="show-notice">Avis &amp; marques (NOTICE)</button>
+  let tab = "guide";
+  try { tab = localStorage.getItem("situlab.helptab") || "guide"; } catch (_) {}
+  el("view").innerHTML = `
+    <div class="view-head"><div class="view-title">Aide</div><div class="view-sub">Documentation embarquée — pour vous comme pour vos agents.</div></div>
+    <div class="set-layout">
+      <nav class="set-nav">
+        <button class="set-navbtn" data-helptab="guide">📖 Guide</button>
+        <button class="set-navbtn" data-helptab="about">ℹ À propos</button>
+      </nav>
+      <div class="set-panels">
+        <section class="set-sec set-panel" data-panel="guide"><div class="doc" id="doc"><div class="skeleton"></div></div></section>
+        <section class="set-sec set-panel" data-panel="about">
+          <div class="set-sec-h">À propos de SituLab</div>
+          <div class="about">
+            <div class="about-id">SituLab <span id="about-ver"></span></div>
+            <div class="about-cp">© 2026 APCOM Solutions SA — Logiciel libre sous licence Apache 2.0.</div>
+            <div class="about-acts" style="margin-top:14px">
+              <button class="btn btn-primary btn-sm" id="replay-tour">↺ Rejouer la visite guidée</button>
+              <button class="btn btn-ghost btn-sm" id="copy-prompt">🤖 Configurer mon agent IA</button>
+            </div>
+            <div class="about-acts" style="margin-top:10px">
+              <button class="btn btn-ghost btn-sm" id="show-license">Licence (Apache 2.0)</button>
+              <button class="btn btn-ghost btn-sm" id="show-notice">Avis &amp; marques (NOTICE)</button>
+            </div>
+          </div>
+        </section>
       </div>
     </div>`;
+  const showTab = (k) => {
+    document.querySelectorAll("#view .set-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== k));
+    document.querySelectorAll("#view .set-navbtn").forEach((b) => b.classList.toggle("active", b.dataset.helptab === k));
+    try { localStorage.setItem("situlab.helptab", k); } catch (_) {}
+  };
+  document.querySelectorAll("#view .set-navbtn").forEach((b) => b.onclick = () => showTab(b.dataset.helptab));
+  showTab(tab === "about" ? "about" : "guide");
   try { el("doc").innerHTML = mdToHtml(await App().Doc()); }
   catch (e) { el("doc").innerHTML = surfaceError("Documentation indisponible", cleanErr(e), null); }
   try { el("about-ver").textContent = "v" + (await App().AppVersion()); } catch (e) {}
@@ -4180,18 +4327,51 @@ function connPolicyModal(name) {
   };
 }
 
-function pinRequestModal(reason, detail) {
+// Visuel par type d'action de la fenetre PIN (Point 6) : couleur + icone + flux source->destination.
+const PIN_ACTION_STYLE = {
+  push:    { cls: "pa-push",    ico: "⬆",  label: "Envoi en ligne" },
+  promote: { cls: "pa-promote", ico: "🚀", label: "Promotion vers la production" },
+  delete:  { cls: "pa-delete",  ico: "🗑",  label: "Suppression" },
+  create:  { cls: "pa-create",  ico: "✚",  label: "Création" },
+  config:  { cls: "pa-config",  ico: "⚙",  label: "Réglage" },
+  issue:   { cls: "pa-issue",   ico: "💬", label: "Issue / fusion" },
+  admin:   { cls: "pa-admin",   ico: "🔑", label: "Administration" },
+  unlock:  { cls: "pa-unlock",  ico: "🔓", label: "Déverrouillage" },
+};
+// pinFlowHTML : montre le SENS de l'action (ce poste -> en ligne, atelier -> production).
+function pinFlowHTML(action, detail) {
+  if (action === "push") {
+    const dest = (detail && detail.remote) ? esc(detail.remote) : "en ligne";
+    const br = (detail && detail.branch) ? ` <span class="muted">(${esc(detail.branch)})</span>` : "";
+    return `<div class="pin-flow"><span class="pf-node pf-local">🖥 Ce poste${br}</span><span class="pf-arrow">→</span><span class="pf-node pf-atl">☁ ${dest}</span></div>`;
+  }
+  if (action === "promote") {
+    return `<div class="pin-flow"><span class="pf-node pf-atl">Atelier</span><span class="pf-arrow">→</span><span class="pf-node pf-prod">Production</span></div>`;
+  }
+  return "";
+}
+
+function pinRequestModal(reason, detail, action) {
   let ci;
+  const st = PIN_ACTION_STYLE[action] || null;
+  const isDel = action === "delete";
+  const chip = st ? `<div class="pin-action ${st.cls}"><span class="pin-ico">${st.ico}</span><span>${esc(st.label)}</span></div>` : "";
+  const intro = isDel
+    ? `<b>Suppression demandée.</b> Cette action est <b>destructive</b> et irréversible.`
+    : `<b>Un agent / une commande demande votre feu vert.</b>`;
   openModal("🔐 Confirmation requise", `<div class="field">
-    <div class="callout warn"><b>Un agent / une commande demande votre feu vert.</b><br>Cette action ne se fera <b>que</b> si vous entrez votre PIN SituLab ci-dessous.</div>
+    ${chip}
+    <div class="callout ${isDel ? "danger" : "warn"}">${intro}<br>Elle ne se fera <b>que</b> si vous entrez votre PIN SituLab ci-dessous.</div>
     <p class="tagline">${esc(reason)}</p>
+    ${pinFlowHTML(action, detail)}
     ${pushPreviewHTML(detail)}
     <label>Votre PIN SituLab</label><div id="pin-input"></div>
-    <small>Le PIN ne quitte jamais SituLab. Si vous n'êtes pas à l'origine de cette demande, cliquez <b>Refuser</b>.</small></div>`, async () => {
+    <small>SituLab <b>constate</b> l'action ci-dessus ; votre PIN seul l'autorise — il ne quitte jamais SituLab. Si vous n'êtes pas à l'origine de cette demande, cliquez <b>Refuser</b>.</small></div>`, async () => {
     try { await App().SubmitPIN(ci ? ci.read() : ""); } catch (e) {}
     closeModal();
   });
   ci = codeInput(el("pin-input"), true, () => modalOk(), true); // validation auto dès 6 chiffres
+  if (isDel && el("modal-ok")) el("modal-ok").classList.add("danger-btn"); // bouton de confirmation rouge pour une suppression
   // Refuser / fond / Échap : prévenir le démon tout de suite (sinon il attend 2 min).
   const refuse = () => { try { App().CancelPIN(); } catch (e) {} closeModal(); };
   modalCancel = refuse;
@@ -4203,7 +4383,7 @@ function pinRequestModal(reason, detail) {
 // Liens externes (vers l'instance Forgejo) : ouverts dans le navigateur du système.
 document.addEventListener("click", (e) => {
   const a = e.target.closest && e.target.closest("[data-ext]");
-  if (a) { e.preventDefault(); try { window.runtime.BrowserOpenURL(a.dataset.ext); } catch (x) {} }
+  if (a) { e.preventDefault(); safeOpenURL(a.dataset.ext); }
 });
 
 // Robustesse focus (WebView2 ne focalise pas toujours l'input au lancement) : dès qu'un

@@ -18,11 +18,13 @@ type fakePrompter struct {
 	timeout bool // simule un délai écoulé (PINTimedOut) plutôt qu'un refus
 	calls   int
 	reason  string
+	action  string
 }
 
-func (f *fakePrompter) PromptPIN(reason string, _ any) (string, PINOutcome) {
+func (f *fakePrompter) PromptPIN(reason string, _ any, action string) (string, PINOutcome) {
 	f.calls++
 	f.reason = reason
+	f.action = action
 	switch {
 	case f.ok:
 		return f.pin, PINConfirmed
@@ -43,6 +45,26 @@ func newDaemon(t *testing.T, p PINPrompter) *Daemon {
 		t.Fatalf("core.New : %v", err)
 	}
 	return New(svc, p)
+}
+
+// TestEnsureUnlockedCtxCarriesAction : quand la session est verrouillée, l'invite UNIQUE de
+// déverrouillage porte le CONTEXTE de l'action (reason + clé d'action), pas un générique (Point 5).
+func TestEnsureUnlockedCtxCarriesAction(t *testing.T) {
+	fp := &fakePrompter{ok: true, pin: "123456"}
+	d := newDaemon(t, fp)
+	if err := d.svc.SetPIN("", "123456"); err != nil {
+		t.Fatalf("SetPIN : %v", err)
+	}
+	d.svc.Lock()
+	if err := d.ensureUnlockedCtx("Autoriser l'envoi de X", nil, "push"); err != nil {
+		t.Fatalf("ensureUnlockedCtx : %v", err)
+	}
+	if fp.reason != "Autoriser l'envoi de X" || fp.action != "push" {
+		t.Errorf("l'invite doit porter le contexte : reason=%q action=%q", fp.reason, fp.action)
+	}
+	if !d.svc.Unlocked() {
+		t.Error("le même PIN doit avoir déverrouillé la session")
+	}
 }
 
 func TestStatusAndPINSetFlow(t *testing.T) {
@@ -115,7 +137,7 @@ func TestWritePIN(t *testing.T) {
 	d := newDaemon(t, p)
 	_ = d.svc.SetPIN("", "123456")
 
-	got, err := d.writePIN("Autoriser X", nil)
+	got, err := d.writePIN("Autoriser X", nil, "admin")
 	if err != nil || got != "999999" {
 		t.Fatalf("writePIN via modale = %q, %v", got, err)
 	}
@@ -128,14 +150,14 @@ func TestWritePIN(t *testing.T) {
 
 	// Modale refusée : ErrPINNeeded (→ code 3).
 	p.ok = false
-	if _, err := d.writePIN("Autoriser Y", nil); !errors.Is(err, core.ErrPINNeeded) {
+	if _, err := d.writePIN("Autoriser Y", nil, "admin"); !errors.Is(err, core.ErrPINNeeded) {
 		t.Fatalf("refus modale : attendu ErrPINNeeded, obtenu %v", err)
 	}
 
 	// Délai écoulé : ErrPINTimeout DISTINCT du refus — l'agent doit savoir « relance et valide »
 	// plutôt que « refusé ».
 	p.ok, p.timeout = false, true
-	if _, err := d.writePIN("Autoriser Z", nil); !errors.Is(err, core.ErrPINTimeout) {
+	if _, err := d.writePIN("Autoriser Z", nil, "admin"); !errors.Is(err, core.ErrPINTimeout) {
 		t.Fatalf("délai modale : attendu ErrPINTimeout, obtenu %v", err)
 	}
 	if errors.Is(core.ErrPINTimeout, core.ErrPINNeeded) {

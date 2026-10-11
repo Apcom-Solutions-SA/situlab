@@ -71,13 +71,14 @@ const (
 
 // Service est le point d'entrée unique du noyau.
 type Service struct {
-	mu        sync.Mutex
-	cfg       *config.Config
-	repoCache map[string]repoCache // dépôts distants par instance (TTL court)
-	ioMu      sync.Mutex           // sérialise les mutations persistantes (keyring + disque)
-	fetchMu   sync.Mutex           // anti-chevauchement de la récupération de fond (FetchAllLocal)
-	repoLocks sync.Map             // map[string]*sync.Mutex : sérialise les opérations git PAR dépôt (lockRepo)
-	version   string
+	mu         sync.Mutex
+	cfg        *config.Config
+	repoCache  map[string]repoCache // dépôts distants par instance (TTL court)
+	ioMu       sync.Mutex           // sérialise les mutations persistantes (keyring + disque)
+	fetchMu    sync.Mutex           // anti-chevauchement de la récupération de fond (FetchAllLocal)
+	pinGuardMu sync.Mutex           // sérialise l'écriture du verrou anti-bruteforce persistant (pinguard.json)
+	repoLocks  sync.Map             // map[string]*sync.Mutex : sérialise les opérations git PAR dépôt (lockRepo)
+	version    string
 
 	// Session : DEK du trousseau tenue en mémoire après déverrouillage par le PIN.
 	// Protégée par s.mu. sessUntil borne l'inactivité ; au-delà, la session est verrouillée.
@@ -112,7 +113,9 @@ func New(version string) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{cfg: cfg, repoCache: map[string]repoCache{}, version: version}, nil
+	s := &Service{cfg: cfg, repoCache: map[string]repoCache{}, version: version}
+	s.loadPINGuard() // restaure le verrou anti-bruteforce persisté (best-effort, fail-safe)
+	return s, nil
 }
 
 // lockedReload relit la config depuis le disque (reflète les modifs d'un autre
@@ -1123,6 +1126,7 @@ func (s *Service) resetPINCounters() {
 	s.pinFails = 0
 	s.pinLockTo = 0
 	s.mu.Unlock()
+	s.savePINGuard() // persiste la remise à zéro (hors s.mu)
 }
 
 // verifyPINGated vérifie un code en tentant de déballer la DEK du trousseau, en RÉSERVANT
@@ -1149,10 +1153,12 @@ func (s *Service) verifyPINGated(code string) ([]byte, bool, error) {
 		s.pinLockTo = time.Now().Add(pinLockFor).Unix()
 		s.pinFails = 0
 		s.mu.Unlock()
+		s.savePINGuard() // le verrou doit survivre à un redémarrage de l'app
 		return nil, false, fmt.Errorf("%w : verrouillé %d s après %d essais", ErrPINLocked, int(pinLockFor.Seconds()), pinMaxFails)
 	}
 	s.pinFails++
 	s.mu.Unlock()
+	s.savePINGuard() // persiste le compteur d'essais (hors s.mu)
 
 	kr, lerr := keyring.Load() // hors verrou
 	if lerr != nil {
