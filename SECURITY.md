@@ -15,6 +15,12 @@ Nous accusons réception sous quelques jours ouvrés et tenons informé jusqu'au
   (Argon2id → KEK → DEK, AES-256-GCM). Le PIN n'est stocké nulle part.
 - **Le PIN ne transite jamais par le socket ni par MCP** : il est saisi uniquement dans une
   fenêtre sur le poste. Un agent (CLI/MCP) ne peut pas autoriser une écriture ni définir le PIN.
+- **Intention d'agent (1.9.8), purement déclarative** : un agent peut joindre une phrase « pourquoi »
+  (`--intent` / argument MCP `intent`) affichée dans la fenêtre PIN, distincte de ce que SituLab
+  **constate**. Elle est bornée en longueur et échappée à l'affichage ; elle **n'autorise rien** et ne
+  modifie aucune décision d'accès — seul le PIN humain autorise. Les gestes git **locaux** (créer/
+  supprimer une branche, fusionner, worktrees) restent sans PIN (aucun accès distant), bloqués en mode
+  lecture seule — modèle inchangé par rapport aux autres opérations locales (reset, discard).
 - **Le jeton d'instance n'est jamais remis au client** ; c'est le démon qui appelle l'API.
   Depuis la 1.2, l'en-tête d'authentification git passe par l'**environnement** (jamais `argv`).
 - **git durci** : hooks/fsmonitor/credential.helper neutralisés, transports ext/file interdits,

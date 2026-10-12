@@ -63,6 +63,21 @@ func MergeAbort(dir string) (string, error) {
 	return run(dir, LocalTimeout, "merge", "--abort")
 }
 
+// DeleteBranch supprime une branche LOCALE. force=false → `git branch -d` : git REFUSE de son propre
+// chef si la branche n'est pas entièrement fusionnée (garde-fou anti-perte de travail). force=true →
+// `git branch -D` : supprime même une branche non fusionnée. Purement local, aucun accès distant. Le
+// nom est validé ; « -- » l'isole des options. (Supprimer la branche courante : git refuse aussi.)
+func DeleteBranch(dir, name string, force bool) (string, error) {
+	if err := safeRef(name); err != nil {
+		return "", err
+	}
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	return run(dir, LocalTimeout, "branch", flag, "--", name)
+}
+
 // Rebase rejoue la branche courante au sommet de upstream (git rebase). Purement local :
 // aucune connexion réseau (on rejoue sur des refs déjà présentes). Conflit éventuel → l'arbre
 // reste en pause, l'appelant guide (résoudre puis RebaseContinue, ou RebaseAbort).

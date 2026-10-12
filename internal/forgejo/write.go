@@ -97,8 +97,9 @@ func (c *Client) SetIssueState(ctx context.Context, owner, repo string, index in
 	return c.reqJSON(ctx, http.MethodPatch, p, map[string]any{"state": state}, nil)
 }
 
-// EditIssue modifie le titre et/ou le corps d'une issue (champs vides ignorés).
-func (c *Client) EditIssue(ctx context.Context, owner, repo string, index int, title, body string) error {
+// editTitleBodyPayload construit le corps PATCH titre/corps (champs vides ignorés), partagé par
+// EditIssue et EditPull. Erreur « rien à modifier » si les deux sont vides.
+func editTitleBodyPayload(title, body string) (map[string]any, error) {
 	payload := map[string]any{}
 	if title != "" {
 		payload["title"] = title
@@ -107,7 +108,16 @@ func (c *Client) EditIssue(ctx context.Context, owner, repo string, index int, t
 		payload["body"] = body
 	}
 	if len(payload) == 0 {
-		return fmt.Errorf("rien à modifier")
+		return nil, fmt.Errorf("rien à modifier")
+	}
+	return payload, nil
+}
+
+// EditIssue modifie le titre et/ou le corps d'une issue (champs vides ignorés).
+func (c *Client) EditIssue(ctx context.Context, owner, repo string, index int, title, body string) error {
+	payload, err := editTitleBodyPayload(title, body)
+	if err != nil {
+		return err
 	}
 	p := fmt.Sprintf("/repos/%s/%s/issues/%d", esc(owner), esc(repo), index)
 	return c.reqJSON(ctx, http.MethodPatch, p, payload, nil)

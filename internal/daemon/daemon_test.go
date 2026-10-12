@@ -19,12 +19,14 @@ type fakePrompter struct {
 	calls   int
 	reason  string
 	action  string
+	intent  string
 }
 
-func (f *fakePrompter) PromptPIN(reason string, _ any, action string) (string, PINOutcome) {
+func (f *fakePrompter) PromptPIN(reason string, _ any, action, intent string) (string, PINOutcome) {
 	f.calls++
 	f.reason = reason
 	f.action = action
+	f.intent = intent
 	switch {
 	case f.ok:
 		return f.pin, PINConfirmed
@@ -56,7 +58,7 @@ func TestEnsureUnlockedCtxCarriesAction(t *testing.T) {
 		t.Fatalf("SetPIN : %v", err)
 	}
 	d.svc.Lock()
-	if err := d.ensureUnlockedCtx("Autoriser l'envoi de X", nil, "push"); err != nil {
+	if err := d.ensureUnlockedCtx("Autoriser l'envoi de X", nil, "push", ""); err != nil {
 		t.Fatalf("ensureUnlockedCtx : %v", err)
 	}
 	if fp.reason != "Autoriser l'envoi de X" || fp.action != "push" {
@@ -64,6 +66,39 @@ func TestEnsureUnlockedCtxCarriesAction(t *testing.T) {
 	}
 	if !d.svc.Unlocked() {
 		t.Error("le même PIN doit avoir déverrouillé la session")
+	}
+}
+
+// TestPromptCarriesAgentIntent (Point 4) : l'intention libre de l'agent est transmise à la fenêtre PIN,
+// distincte des actions constatées par SituLab (reason/action).
+func TestPromptCarriesAgentIntent(t *testing.T) {
+	fp := &fakePrompter{ok: true, pin: "123456"}
+	d := newDaemon(t, fp)
+	if err := d.svc.SetPIN("", "123456"); err != nil {
+		t.Fatalf("SetPIN : %v", err)
+	}
+	d.svc.Lock()
+	const intent = "Je prépare la release 1.9.8 : je pousse dev vers l'atelier."
+	if err := d.ensureUnlockedCtx("Autoriser l'envoi de X", nil, "push", intent); err != nil {
+		t.Fatalf("ensureUnlockedCtx : %v", err)
+	}
+	if fp.intent != intent {
+		t.Errorf("l'intention de l'agent doit arriver telle quelle à la fenêtre : %q", fp.intent)
+	}
+}
+
+// TestClampIntent : l'intention est nettoyée (trim) et bornée en longueur pour la fenêtre.
+func TestClampIntent(t *testing.T) {
+	if got := clampIntent("   bonjour  "); got != "bonjour" {
+		t.Errorf("trim attendu, obtenu %q", got)
+	}
+	long := make([]byte, 600)
+	for i := range long {
+		long[i] = 'a'
+	}
+	got := clampIntent(string(long))
+	if len([]rune(got)) != 401 || got[len(got)-3:] != "…" {
+		t.Errorf("bornage attendu (~400 + …), obtenu longueur %d", len([]rune(got)))
 	}
 }
 
@@ -137,7 +172,7 @@ func TestWritePIN(t *testing.T) {
 	d := newDaemon(t, p)
 	_ = d.svc.SetPIN("", "123456")
 
-	got, err := d.writePIN("Autoriser X", nil, "admin")
+	got, err := d.writePIN("Autoriser X", nil, "admin", "")
 	if err != nil || got != "999999" {
 		t.Fatalf("writePIN via modale = %q, %v", got, err)
 	}
@@ -150,14 +185,14 @@ func TestWritePIN(t *testing.T) {
 
 	// Modale refusée : ErrPINNeeded (→ code 3).
 	p.ok = false
-	if _, err := d.writePIN("Autoriser Y", nil, "admin"); !errors.Is(err, core.ErrPINNeeded) {
+	if _, err := d.writePIN("Autoriser Y", nil, "admin", ""); !errors.Is(err, core.ErrPINNeeded) {
 		t.Fatalf("refus modale : attendu ErrPINNeeded, obtenu %v", err)
 	}
 
 	// Délai écoulé : ErrPINTimeout DISTINCT du refus — l'agent doit savoir « relance et valide »
 	// plutôt que « refusé ».
 	p.ok, p.timeout = false, true
-	if _, err := d.writePIN("Autoriser Z", nil, "admin"); !errors.Is(err, core.ErrPINTimeout) {
+	if _, err := d.writePIN("Autoriser Z", nil, "admin", ""); !errors.Is(err, core.ErrPINTimeout) {
 		t.Fatalf("délai modale : attendu ErrPINTimeout, obtenu %v", err)
 	}
 	if errors.Is(core.ErrPINTimeout, core.ErrPINNeeded) {

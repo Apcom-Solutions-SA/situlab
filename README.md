@@ -93,9 +93,13 @@ frontend/dist     interface (HTML/CSS/JS statique, embarquée)
 
 ## Projets, dépôts, vue « distant ⇄ local »
 
-Le tableau de bord **Projets** (page d'accueil) montre, par projet, l'alignement **Local · Atelier ·
-Vitrine** : ce qui est sur le poste, dans l'atelier (dev) et en vitrine (production). La vitrine ne
-se met à jour que par **promotion** depuis la fenêtre, sous PIN — jamais poussée depuis le local.
+La page **Projets** s'ouvre sur un **accueil « classeurs »** instantané (aucun appel réseau : identité,
+topologie et état du clone **local** lus sur le disque). Un clic ouvre le **détail** d'un projet, qui
+vérifie alors en ligne l'alignement **Local · Atelier · Vitrine** (ce qui est sur le poste, dans
+l'atelier de dev, en vitrine de production) et offre un **panneau git** : branches (basculer, fusionner,
+supprimer — avec alerte si la branche n'a jamais été fusionnée) et **copies de travail** (clones et
+*worktrees* : plusieurs branches en parallèle depuis un seul dépôt). La vitrine ne se met à jour que par
+**promotion** depuis la fenêtre, sous PIN — jamais poussée depuis le local.
 
 L'explorateur **Dépôts** détaille, pour chaque dépôt, son état **distant** (branche par défaut,
 versions/tags, commits commentés, navigation fichiers) et son clone **local** rattaché (branche de

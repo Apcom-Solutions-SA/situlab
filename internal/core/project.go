@@ -251,29 +251,52 @@ func (s *Service) ProjectBoards() ([]ProjectBoard, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			b := ProjectBoard{Name: p.Name, Icon: p.Icon}
-			atelierTags, av, aerr := s.latestTags(p.Atelier)
-			b.Atelier = RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo, Version: av}
-			if aerr != nil {
-				b.Atelier.Error = cleanClientErr(aerr)
-			}
-			if path := s.localCloneForIdx(p.Atelier, localIdx); path != "" {
-				if sum, err := gitx.SummaryOf(path); err == nil && sum.IsRepo {
-					b.Local = &ProjectLocal{
-						Path: path, Branch: sum.Branch, Clean: sum.Clean, Ahead: sum.Ahead, Behind: sum.Behind,
-						Changed: len(sum.Changed), Describe: sum.Describe, LastDate: sum.LastDate,
-					}
-				}
-			}
-			idx := tagIndex(atelierTags)
-			for _, pr := range p.Productions {
-				b.Prods = append(b.Prods, s.prodLine(pr, idx, av, p.Promotions))
-			}
-			out[i] = b
+			out[i] = s.boardFor(p, localIdx)
 		}(i, projs[i])
 	}
 	wg.Wait()
 	return out, nil
+}
+
+// boardFor calcule l'état « 3 colonnes » d'UN projet (atelier + clone local + vitrines). Appel RÉSEAU
+// (tags d'atelier et de chaque vitrine, résolution du clone via ViewRepo). Source unique partagée par
+// ProjectBoards (tous les projets, en parallèle) et ProjectBoardOne (un seul, au clic sur un classeur).
+func (s *Service) boardFor(p config.Project, localIdx map[string]string) ProjectBoard {
+	b := ProjectBoard{Name: p.Name, Icon: p.Icon}
+	atelierTags, av, aerr := s.latestTags(p.Atelier)
+	b.Atelier = RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo, Version: av}
+	if aerr != nil {
+		b.Atelier.Error = cleanClientErr(aerr)
+	}
+	if path := s.localCloneForIdx(p.Atelier, localIdx); path != "" {
+		if sum, err := gitx.SummaryOf(path); err == nil && sum.IsRepo {
+			b.Local = &ProjectLocal{
+				Path: path, Branch: sum.Branch, Clean: sum.Clean, Ahead: sum.Ahead, Behind: sum.Behind,
+				Changed: len(sum.Changed), Describe: sum.Describe, LastDate: sum.LastDate,
+			}
+		}
+	}
+	idx := tagIndex(atelierTags)
+	for _, pr := range p.Productions {
+		b.Prods = append(b.Prods, s.prodLine(pr, idx, av, p.Promotions))
+	}
+	return b
+}
+
+// ProjectBoardOne calcule l'état « 3 colonnes » d'UN SEUL projet (au clic sur son classeur), sans
+// parcourir les autres. Réseau pour ce projet uniquement. Erreur si le projet est introuvable.
+func (s *Service) ProjectBoardOne(name string) (*ProjectBoard, error) {
+	s.mu.Lock()
+	s.lockedReload()
+	p := s.cfg.FindProject(name)
+	if p == nil {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("projet introuvable : %q", name)
+	}
+	proj := *p
+	s.mu.Unlock()
+	b := s.boardFor(proj, s.localRemoteIndex())
+	return &b, nil
 }
 
 // localCloneFor trouve le clone LOCAL suivi dont le distant correspond au dépôt visé (par URL,
@@ -337,6 +360,84 @@ func (s *Service) localCloneForIdx(ref config.RepoRef, idx map[string]string) st
 		return ""
 	}
 	return idx[want]
+}
+
+// ProjectLightView : vue d'ACCUEIL légère d'un projet — AUCUN appel réseau. Identité + topologie
+// (nombre de vitrines) + état du clone local (git status : lecture disque instantanée). La version
+// d'atelier et l'alignement des vitrines (qui exigent le réseau) sont réservés au DÉTAIL du projet.
+// C'est le socle de la page d'accueil « classeurs » (1.9.8) : instantanée, sans la lenteur réseau par carte.
+type ProjectLightView struct {
+	Name     string        `json:"name"`
+	Icon     string        `json:"icon"`
+	Atelier  RepoLine      `json:"atelier"`  // instance/owner/repo ; Version volontairement vide (réseau = détail)
+	Vitrines int           `json:"vitrines"` // nombre de productions configurées
+	Local    *ProjectLocal `json:"local"`    // état du clone local (nil = pas sur ce poste)
+}
+
+// ProjectsLight renvoie l'état d'accueil de TOUS les projets SANS réseau : config + résolution hors-ligne
+// du clone local (index remote→chemin + git status). Conçu pour une page d'accueil instantanée — la
+// lenteur venait des appels réseau par carte (tags, branches distantes) ; ils partent désormais au clic.
+func (s *Service) ProjectsLight() []ProjectLightView {
+	projs := s.Projects()
+	s.mu.Lock()
+	s.lockedReload()
+	paths := append([]string(nil), s.cfg.LocalRepos...)
+	s.mu.Unlock()
+	// UN SEUL balayage local : SummaryOf porte déjà le remote ET l'état complet, donc on bâtit l'index
+	// remote→chemin et l'état du clone en une passe (plus de double `git status` index + SummaryOf).
+	idx := make(map[string]string, len(paths))
+	byPath := make(map[string]*ProjectLocal, len(paths))
+	for _, p := range paths {
+		sum, err := gitx.SummaryOf(p)
+		if err != nil || !sum.IsRepo {
+			continue
+		}
+		k := normURL(sum.Remote)
+		if k == "" {
+			continue
+		}
+		if _, exists := idx[k]; exists {
+			continue
+		}
+		idx[k] = p
+		byPath[p] = &ProjectLocal{
+			Path: p, Branch: sum.Branch, Clean: sum.Clean, Ahead: sum.Ahead, Behind: sum.Behind,
+			Changed: len(sum.Changed), Describe: sum.Describe, LastDate: sum.LastDate,
+		}
+	}
+	out := make([]ProjectLightView, 0, len(projs))
+	for _, p := range projs {
+		v := ProjectLightView{
+			Name:     p.Name,
+			Icon:     p.Icon,
+			Atelier:  RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo},
+			Vitrines: len(p.Productions),
+		}
+		if path := s.localCloneForRefOffline(p.Atelier, idx); path != "" {
+			v.Local = byPath[path]
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// localCloneForRefOffline résout le clone local d'un dépôt SANS réseau : il construit l'URL attendue à
+// partir de l'URL d'instance (config, pas d'appel ViewRepo) et la cherche dans l'index ; à défaut, il
+// retombe sur un appariement par suffixe owner/repo (insensible à la casse). "" si aucun clone.
+func (s *Service) localCloneForRefOffline(ref config.RepoRef, idx map[string]string) string {
+	if base := s.instanceBaseURL(ref.Instance); base != "" {
+		// Instance connue : correspondance EXACTE d'hôte (comme le résolveur réseau faisant foi). Pas de
+		// repli par suffixe — il rattacherait à tort un clone d'un AUTRE hôte de même owner/repo.
+		return idx[normURL(strings.TrimRight(base, "/")+"/"+ref.Owner+"/"+ref.Repo)]
+	}
+	// Instance inconnue (non configurée) : repli best-effort par suffixe owner/repo.
+	suffix := "/" + strings.ToLower(ref.Owner) + "/" + strings.ToLower(ref.Repo)
+	for k, p := range idx {
+		if strings.HasSuffix(k, suffix) {
+			return p
+		}
+	}
+	return ""
 }
 
 // PromoteResult décrit, en clair, ce qu'une promotion a publié.

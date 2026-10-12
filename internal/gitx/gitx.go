@@ -39,7 +39,6 @@ const maxChanged = 100 // plafond de fichiers modifiés listés (au-delà : tron
 // Erreurs typées, testables côté appelant via errors.Is.
 var (
 	ErrGitMissing = errors.New("git n'est pas installé")
-	ErrNotRepo    = errors.New("ce dossier n'est pas un dépôt git")
 	ErrTimeout    = errors.New("l'opération git a expiré")
 	// ErrConflicted : un enregistrement a été refusé parce que des fichiers mis en index portent
 	// des marques de conflit. Le cœur le remappe sur son message guidé (core.ErrConflict).

@@ -332,6 +332,19 @@ func (s *Service) GitSwitchBranch(path, name string) (string, error) {
 	return gitx.SwitchBranch(path, name)
 }
 
+// GitDeleteBranch supprime une branche LOCALE (local, pas de PIN ; bloqué en lecture seule). force=false
+// laisse git REFUSER une branche non fusionnée (garde-fou anti-perte) ; force=true supprime quand même.
+// L'appelant (GUI) prévient d'abord l'humain quand la branche n'est pas fusionnée.
+func (s *Service) GitDeleteBranch(path, name string, force bool) (string, error) {
+	if !gitx.Available() {
+		return "", ErrNoGit
+	}
+	if err := s.assertWritable(); err != nil {
+		return "", err
+	}
+	return gitx.DeleteBranch(path, name, force)
+}
+
 // GitDiscard annule les modifications locales non enregistrées. DESTRUCTIF.
 func (s *Service) GitDiscard(path, file string) (string, error) {
 	if !gitx.Available() {
@@ -375,6 +388,50 @@ func (s *Service) GitStashPop(path string) (string, error) {
 		return "", err
 	}
 	return gitx.StashPop(path)
+}
+
+// --- Worktrees : plusieurs arbres de travail (branches) depuis un seul dépôt (local, pas de PIN) ---
+
+// GitWorktrees liste les arbres de travail d'un dépôt local (lecture).
+func (s *Service) GitWorktrees(path string) ([]gitx.Worktree, error) {
+	if !gitx.Available() {
+		return nil, ErrNoGit
+	}
+	return gitx.WorktreeList(path)
+}
+
+// GitWorktreeAdd crée un arbre de travail dans wtPath. createBranch=true → nouvelle branche `branch` ;
+// sinon extrait la branche/commit `branch` existant. Réécrit le disque → bloqué en lecture seule.
+func (s *Service) GitWorktreeAdd(path, wtPath, branch string, createBranch bool) (string, error) {
+	if !gitx.Available() {
+		return "", ErrNoGit
+	}
+	if err := s.assertWritable(); err != nil {
+		return "", err
+	}
+	return gitx.WorktreeAdd(path, wtPath, branch, createBranch)
+}
+
+// GitWorktreeRemove retire un arbre de travail (supprime son dossier). force=true si modifications.
+func (s *Service) GitWorktreeRemove(path, wtPath string, force bool) (string, error) {
+	if !gitx.Available() {
+		return "", ErrNoGit
+	}
+	if err := s.assertWritable(); err != nil {
+		return "", err
+	}
+	return gitx.WorktreeRemove(path, wtPath, force)
+}
+
+// GitWorktreePrune nettoie les références des worktrees dont le dossier a disparu.
+func (s *Service) GitWorktreePrune(path string) (string, error) {
+	if !gitx.Available() {
+		return "", ErrNoGit
+	}
+	if err := s.assertWritable(); err != nil {
+		return "", err
+	}
+	return gitx.WorktreePrune(path)
 }
 
 // --- Git « complet » (v1.6) : gestes de dev avancés. Exposés en CLI/MCP (l'IA travaille là).

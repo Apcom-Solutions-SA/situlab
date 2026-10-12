@@ -663,6 +663,14 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .pf-atl { color: var(--accent); }
 .pf-prod { color: var(--vitrine); }
 .pf-arrow { color: var(--text-faint); font-weight: 700; font-size: 1.1em; }
+/* Fenetre PIN — Point 4 : l'INTENTION declaree par l'agent (ses mots) vs ce que SituLab CONSTATE. */
+.pin-intent { margin: 10px 0; padding: 9px 12px 9px 13px; background: var(--info-soft); border-left: 3px solid var(--info); border-radius: var(--r-md); }
+.pin-intent-h { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .02em; color: var(--info); margin-bottom: 4px; }
+.pin-intent-q { margin: 0; font-style: italic; color: var(--text); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.pin-constate { margin: 10px 0; padding: 9px 12px; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); }
+.pin-constate-h { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .02em; color: var(--text-soft); margin-bottom: 4px; }
+.pin-constate .tagline { margin: 0; overflow-wrap: anywhere; }
+.pin-constate .pin-flow { margin: 8px 0 0; }
 
 /* Comprendre git (page pedagogique) */
 .git-intro { color: var(--text-soft); margin-bottom: 14px; font-size: var(--fs-sm); line-height: 1.5; }
@@ -755,6 +763,71 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .clone-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .clone-bits { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-sm); margin-left: auto; }
 
+/* --- Panneau git d'un projet (1.9.8) : branches + copies de travail, manipulables --- */
+.gitpanel { display: flex; flex-direction: column; gap: 14px; }
+.gitpanel-empty { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border: 1px dashed var(--border-strong); border-radius: var(--r-lg); background: var(--bg-sunken); }
+.gpe-ico { font-size: 1.6em; line-height: 1; }
+.gp-sec { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-surface); box-shadow: var(--shadow-sm); padding: 12px 14px; }
+.gp-sec-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.gp-sec-t { font-weight: 700; font-size: var(--fs-md); }
+.gp-hint { font-size: var(--fs-sm); color: var(--text-soft); background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 7px 10px; margin-bottom: 8px; line-height: 1.5; }
+.gp-list { display: flex; flex-direction: column; gap: 4px; }
+.gp-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: 7px 9px; border-radius: var(--r-md); border: 1px solid transparent; }
+.gp-row:hover { background: var(--bg-sunken); border-color: var(--border); }
+.gp-row-main { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
+.gp-bname { font-weight: 600; }
+.gp-wfolder { font-weight: 600; }
+.gp-row-bits { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-soft); margin-left: auto; }
+.gp-row-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gp-cur { color: var(--ok); font-weight: 700; font-size: var(--fs-sm); }
+.gp-ahead { color: var(--accent); font-weight: 700; }
+.gp-behind { color: var(--warn); font-weight: 700; }
+.gp-badge { font-size: var(--fs-xs); font-weight: 700; padding: 2px 8px; border-radius: var(--r-full); background: var(--bg-raised); color: var(--text-soft); border: 1px solid var(--border); }
+.gp-merged { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.gp-unmerged { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+/* Alerte VISUELLE de suppression d'une branche jamais fusionnée : une poubelle + un éclat. */
+.danger-hero { position: relative; display: flex; align-items: center; justify-content: center; height: 72px; margin: 2px 0 12px; }
+.dh-ico { font-size: 3em; line-height: 1; filter: drop-shadow(0 4px 10px var(--danger-soft)); }
+.dh-burst { position: absolute; top: 2px; right: 44%; font-size: 1.4em; animation: dh-pulse 1.1s ease-in-out infinite; }
+@keyframes dh-pulse { 0%, 100% { transform: scale(1); opacity: .75; } 50% { transform: scale(1.25); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dh-burst { animation: none; } }
+
+/* --- Accueil « classeurs » (1.9.8) : grille légère, zéro réseau au rendu. Même langage que .pboard. --- */
+.view-sub { font-size: var(--fs-sm); color: var(--text-soft); margin-top: 3px; }
+.classeur-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--sp-4); align-items: start; }
+.classeur { appearance: none; -webkit-appearance: none; font: inherit; color: inherit; text-align: left; background: none; border: none; margin: 0; padding: 0; cursor: pointer; min-width: 0; display: flex; flex-direction: column; transition: transform var(--t-fast); }
+.classeur-tab { align-self: flex-start; max-width: calc(100% - var(--sp-5)); position: relative; z-index: 2; transform: translateY(1px); display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 5px 12px; background: var(--bg-raised); border: 1px solid var(--border); border-bottom: none; border-radius: var(--r-md) var(--r-md) 0 0; }
+.classeur-ico { flex: 0 0 auto; }
+.classeur-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.classeur-body { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 0 var(--r-lg) var(--r-lg) var(--r-lg); box-shadow: var(--shadow-sm); padding: 11px 13px; display: flex; flex-direction: column; gap: 9px; min-width: 0; transition: box-shadow var(--t-fast), border-color var(--t-fast); }
+.classeur:hover { transform: translateY(-2px); }
+.classeur:hover .classeur-body { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+.classeur:active { transform: translateY(0); }
+.classeur:focus-visible { outline: none; }
+.classeur:focus-visible .classeur-body { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.classeur-repo { font-size: var(--fs-sm); color: var(--text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.classeur-k { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); margin-right: 4px; }
+.classeur-repo .org { color: var(--text-faint); }
+.classeur-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.classeur-state { font-size: var(--fs-xs); font-weight: 700; margin-left: auto; }
+.classeur-state[data-tone="ok"] { color: var(--ok); }
+.classeur-state[data-tone="warn"], .classeur-state[data-tone="wip"] { color: var(--warn); }
+.classeur-state[data-tone="accent"] { color: var(--accent); }
+.classeur-state[data-tone="muted"] { color: var(--text-faint); }
+/* Glyphe de santé : triptyque Local·Atelier·Vitrine, statique (dernier état connu, jamais de pulse). */
+.chealth { display: inline-flex; align-items: center; gap: 3px; }
+.chealth-node { width: 11px; height: 11px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid transparent; }
+.chealth-node[data-role="local"][data-state="clean"] { background: var(--ok); }
+.chealth-node[data-role="local"][data-state="dirty"], .chealth-node[data-role="local"][data-state="behind"] { background: var(--warn); }
+.chealth-node[data-role="local"][data-state="ahead"] { background: var(--accent); }
+.chealth-node[data-role="local"][data-state="absent"] { border-color: var(--border-strong); }
+.chealth-node[data-role="atelier"] { background: var(--accent); }
+.chealth-node[data-role="vitrine"][data-state="on"] { background: var(--vitrine); }
+.chealth-node[data-role="vitrine"][data-state="absent"] { border-color: var(--border-strong); }
+.chealth-seg { width: 12px; height: 0; border-top: 1.5px solid var(--border-strong); }
+.chealth-seg[data-on="0"] { border-top-style: dashed; border-top-color: var(--text-faint); }
+.chealth-count { font-size: var(--fs-xs); font-weight: 700; color: var(--vitrine); font-variant-numeric: tabular-nums; margin-left: 2px; }
+.gp-head { font-weight: 700; font-size: var(--fs-md); margin: 18px 0 8px; }
 
 /* --- Onboarding : écran d'accueil + stepper --- */
 .welcome-steps { list-style: none; margin: 18px 0 20px; padding: 0; text-align: left; display: flex; flex-direction: column; gap: 14px; }

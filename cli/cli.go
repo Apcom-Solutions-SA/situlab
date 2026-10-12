@@ -29,6 +29,7 @@ import (
 var (
 	flagOutput   string
 	flagInstance string
+	flagIntent   string // Point 4 : phrase « pourquoi » de l'agent, affichée dans la fenêtre PIN
 	version      = "dev"
 	svc          *remote // client du démon résident (connexion paresseuse)
 )
@@ -98,6 +99,7 @@ func root() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&flagOutput, "output", "text", "format de sortie : text|json")
 	root.PersistentFlags().StringVar(&flagInstance, "instance", "", "instance ciblée (défaut : instance par défaut)")
+	root.PersistentFlags().StringVar(&flagIntent, "intent", "", "phrase expliquant POURQUOI (affichée dans la fenêtre PIN sur le poste, à côté des actions constatées par SituLab)")
 
 	root.AddCommand(cmdVersion(), cmdDoctor(), cmdInstance(), cmdWhoami(), cmdDashboard(),
 		cmdRepo(), cmdIssue(), cmdPull(), cmdRelease(), cmdOrg(), cmdToken(), cmdLocal(), cmdProject(), cmdAttest(), cmdAdmin(), cmdPIN(), cmdMCP(),
@@ -792,13 +794,9 @@ func cmdIssue() *cobra.Command {
 	comment := &cobra.Command{
 		Use: "comment <owner>/<repo> <numero>", Short: "Commente une issue/PR (PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, r, err := splitRepo(args[0])
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
-			}
-			n, err := strconv.Atoi(args[1])
-			if err != nil {
-				return fmt.Errorf("numéro invalide : %s", args[1])
 			}
 			if err := svc.CommentIssue(flagInstance, o, r, n, cmtBody); err != nil {
 				return err
@@ -813,13 +811,9 @@ func cmdIssue() *cobra.Command {
 		return &cobra.Command{
 			Use: use, Short: short, Args: cobra.ExactArgs(2),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				o, r, err := splitRepo(args[0])
+				o, r, n, err := splitRepoNum(args)
 				if err != nil {
 					return err
-				}
-				n, err := strconv.Atoi(args[1])
-				if err != nil {
-					return fmt.Errorf("numéro invalide : %s", args[1])
 				}
 				if err := svc.SetIssueState(flagInstance, o, r, n, st); err != nil {
 					return err
@@ -835,13 +829,9 @@ func cmdIssue() *cobra.Command {
 	edit := &cobra.Command{
 		Use: "edit <owner>/<repo> <numero>", Short: "Modifie titre/corps d'une issue (PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, r, err := splitRepo(args[0])
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
-			}
-			n, err := strconv.Atoi(args[1])
-			if err != nil {
-				return fmt.Errorf("numéro invalide : %s", args[1])
 			}
 			if err := svc.EditIssue(flagInstance, o, r, n, edTitle, edBody); err != nil {
 				return err
@@ -855,13 +845,9 @@ func cmdIssue() *cobra.Command {
 	var lblNames []string
 	labels := &cobra.Command{Use: "labels <owner>/<repo> <numero>", Short: "Remplace les étiquettes (par noms, PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, r, err := splitRepo(args[0])
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
-			}
-			n, err := strconv.Atoi(args[1])
-			if err != nil {
-				return fmt.Errorf("numéro invalide : %s", args[1])
 			}
 			if err := svc.SetIssueLabels(flagInstance, o, r, n, lblNames); err != nil {
 				return err
@@ -872,13 +858,9 @@ func cmdIssue() *cobra.Command {
 	var assignees []string
 	assign := &cobra.Command{Use: "assign <owner>/<repo> <numero>", Short: "Remplace les assignés (par logins, PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, r, err := splitRepo(args[0])
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
-			}
-			n, err := strconv.Atoi(args[1])
-			if err != nil {
-				return fmt.Errorf("numéro invalide : %s", args[1])
 			}
 			if err := svc.SetIssueAssignees(flagInstance, o, r, n, assignees); err != nil {
 				return err
@@ -889,13 +871,9 @@ func cmdIssue() *cobra.Command {
 	var msID int64
 	milestone := &cobra.Command{Use: "milestone <owner>/<repo> <numero>", Short: "Fixe le jalon (--id, 0 = retirer ; PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, r, err := splitRepo(args[0])
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
-			}
-			n, err := strconv.Atoi(args[1])
-			if err != nil {
-				return fmt.Errorf("numéro invalide : %s", args[1])
 			}
 			if err := svc.SetIssueMilestone(flagInstance, o, r, n, msID); err != nil {
 				return err
@@ -990,13 +968,9 @@ func cmdPull() *cobra.Command {
 	merge := &cobra.Command{
 		Use: "merge <owner>/<repo> <numero>", Short: "Fusionne une demande de fusion (PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, r, err := splitRepo(args[0])
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
-			}
-			n, err := strconv.Atoi(args[1])
-			if err != nil {
-				return fmt.Errorf("numéro invalide : %s", args[1])
 			}
 			if err := svc.MergePull(flagInstance, o, r, n, mergeMethod); err != nil {
 				return err
@@ -1006,27 +980,12 @@ func cmdPull() *cobra.Command {
 	}
 	merge.Flags().StringVar(&mergeMethod, "method", "merge", "merge|rebase|squash")
 
-	pr2 := func(cmd *cobra.Command, args []string) (string, int, error) {
-		o, r, err := splitRepo(args[0])
-		if err != nil {
-			return "", 0, err
-		}
-		n, err := strconv.Atoi(args[1])
-		if err != nil {
-			return "", 0, fmt.Errorf("numéro invalide : %s", args[1])
-		}
-		_ = cmd
-		return o + "\x00" + r, n, nil
-	}
-	splitOR := func(s string) (string, string) { p := strings.SplitN(s, "\x00", 2); return p[0], p[1] }
-
 	detail := &cobra.Command{Use: "detail <owner>/<repo> <numero>", Short: "Détail d'une PR", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			or, n, err := pr2(cmd, args)
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
 			}
-			o, r := splitOR(or)
 			pi, err := svc.PullDetail(flagInstance, o, r, n)
 			if err != nil {
 				return err
@@ -1037,11 +996,10 @@ func cmdPull() *cobra.Command {
 		}}
 	diff := &cobra.Command{Use: "diff <owner>/<repo> <numero>", Short: "Diff d'une PR", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			or, n, err := pr2(cmd, args)
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
 			}
-			o, r := splitOR(or)
 			df, err := svc.PullDiff(flagInstance, o, r, n)
 			if err != nil {
 				return err
@@ -1050,11 +1008,10 @@ func cmdPull() *cobra.Command {
 		}}
 	files := &cobra.Command{Use: "files <owner>/<repo> <numero>", Short: "Fichiers modifiés d'une PR", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			or, n, err := pr2(cmd, args)
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
 			}
-			o, r := splitOR(or)
 			fl, err := svc.PullFiles(flagInstance, o, r, n)
 			if err != nil {
 				return err
@@ -1068,11 +1025,10 @@ func cmdPull() *cobra.Command {
 	var reviewEvent, reviewBody string
 	review := &cobra.Command{Use: "review <owner>/<repo> <numero>", Short: "Revue d'une PR (PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			or, n, err := pr2(cmd, args)
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
 			}
-			o, r := splitOR(or)
 			if err := svc.ReviewPull(flagInstance, o, r, n, reviewEvent, reviewBody); err != nil {
 				return err
 			}
@@ -1082,11 +1038,10 @@ func cmdPull() *cobra.Command {
 	review.Flags().StringVar(&reviewBody, "body", "", "commentaire de revue")
 	closePR := &cobra.Command{Use: "close <owner>/<repo> <numero>", Short: "Ferme une PR sans fusionner (PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			or, n, err := pr2(cmd, args)
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
 			}
-			o, r := splitOR(or)
 			if err := svc.SetPullState(flagInstance, o, r, n, "closed"); err != nil {
 				return err
 			}
@@ -1095,11 +1050,10 @@ func cmdPull() *cobra.Command {
 	var pedTitle, pedBody string
 	pullEdit := &cobra.Command{Use: "edit <owner>/<repo> <numero>", Short: "Modifie titre/corps d'une PR (PIN demandé)", Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			or, n, err := pr2(cmd, args)
+			o, r, n, err := splitRepoNum(args)
 			if err != nil {
 				return err
 			}
-			o, r := splitOR(or)
 			if err := svc.EditPull(flagInstance, o, r, n, pedTitle, pedBody); err != nil {
 				return err
 			}
@@ -1524,9 +1478,66 @@ func cmdLocal() *cobra.Command {
 			return emit(cmd, map[string]string{"status": "ok", "output": out}, func() { fmt.Fprintf(cmd.OutOrStdout(), "Tag « %s » publié.\n%s", args[1], out) })
 		}}
 
-	c.AddCommand(add, list, status, remove, branch, switchCmd, discard, logCmd, stashSave, stashList, stashPop,
+	// Suppression de branche locale (v1.9.8) — git refuse une branche non fusionnée sans --force.
+	var brDelForce bool
+	branchDelete := &cobra.Command{Use: "branch-delete <chemin> <branche>", Short: "Supprime une branche locale (git refuse une branche non fusionnée sans --force)", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out, err := svc.GitDeleteBranch(args[0], args[1], brDelForce)
+			if err != nil {
+				return err
+			}
+			return emit(cmd, map[string]string{"status": "ok", "output": out}, func() { fmt.Fprintf(cmd.OutOrStdout(), "Branche « %s » supprimée.\n%s", args[1], out) })
+		}}
+	branchDelete.Flags().BoolVar(&brDelForce, "force", false, "supprimer même une branche non fusionnée (perte de travail possible)")
+
+	// Worktrees (v1.9.8) — plusieurs arbres de travail depuis un seul dépôt (sessions parallèles).
+	wtList := &cobra.Command{Use: "worktree-list <chemin>", Short: "Liste les arbres de travail (worktrees) du dépôt", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			wts, err := svc.GitWorktrees(args[0])
+			if err != nil {
+				return err
+			}
+			return emit(cmd, wts, func() {
+				for _, w := range wts {
+					b := w.Branch
+					if b == "" {
+						b = "(détaché)"
+					}
+					main := ""
+					if w.Main {
+						main = "  [principal]"
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "%s  %s%s\n", w.Path, b, main)
+				}
+			})
+		}}
+	var wtNew bool
+	wtAdd := &cobra.Command{Use: "worktree-add <chemin> <dossier-cible> <branche>", Short: "Ajoute un worktree (--new crée une nouvelle branche ; sinon extrait l'existante)", Args: cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out, err := svc.GitWorktreeAdd(args[0], args[1], args[2], wtNew)
+			if err != nil {
+				return err
+			}
+			return emit(cmd, map[string]string{"status": "ok", "output": out}, func() {
+				fmt.Fprintf(cmd.OutOrStdout(), "Worktree « %s » ajouté dans %s.\n%s", args[2], args[1], out)
+			})
+		}}
+	wtAdd.Flags().BoolVar(&wtNew, "new", false, "créer une NOUVELLE branche (sinon extraire une branche existante)")
+	var wtRmForce bool
+	wtRemove := &cobra.Command{Use: "worktree-remove <chemin> <dossier-cible>", Short: "Retire un worktree (son dossier est supprimé ; --force si modifications)", Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out, err := svc.GitWorktreeRemove(args[0], args[1], wtRmForce)
+			if err != nil {
+				return err
+			}
+			return emit(cmd, map[string]string{"status": "ok", "output": out}, func() { fmt.Fprintf(cmd.OutOrStdout(), "Worktree retiré : %s\n%s", args[1], out) })
+		}}
+	wtRemove.Flags().BoolVar(&wtRmForce, "force", false, "retirer malgré des modifications non enregistrées")
+	wtPrune := out1("worktree-prune <chemin>", "Nettoie les références de worktrees dont le dossier a disparu", svc.GitWorktreePrune)
+
+	c.AddCommand(add, list, status, remove, branch, switchCmd, branchDelete, discard, logCmd, stashSave, stashList, stashPop,
 		merge, mergeAbort, rebase, rebaseCont, rebaseAbort, cherry, cherryCont, cherryAbort, revert, reset,
-		amend, commitPaths, tagLocal, pushForce, pushTag)
+		amend, commitPaths, tagLocal, pushForce, pushTag, wtList, wtAdd, wtRemove, wtPrune)
 	return c
 }
 
@@ -1805,6 +1816,20 @@ func splitRepo(s string) (string, string, error) {
 		return "", "", errors.New("format attendu : owner/repo")
 	}
 	return parts[0], parts[1], nil
+}
+
+// splitRepoNum lit les deux arguments communs « owner/repo numéro » des commandes issue/PR. Factorise
+// le bloc splitRepo + Atoi recopié sur chaque sous-commande ExactArgs(2).
+func splitRepoNum(args []string) (owner, repo string, num int, err error) {
+	owner, repo, err = splitRepo(args[0])
+	if err != nil {
+		return "", "", 0, err
+	}
+	num, err = strconv.Atoi(args[1])
+	if err != nil {
+		return "", "", 0, fmt.Errorf("numéro invalide : %s", args[1])
+	}
+	return owner, repo, num, nil
 }
 
 func promptSecret(label string) (string, error) {

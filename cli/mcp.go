@@ -62,7 +62,8 @@ func cmdMCP() *cobra.Command {
 		Short: "Démarre le serveur MCP (stdio) pour les agents IA — lectures libres, mutations sous PIN",
 		Long: "Serveur MCP local sur stdio. À déclarer dans un client MCP (Cursor, Claude Desktop, …) :\n" +
 			"  commande : situlab   argument : mcp\n" +
-			"Les mutations distantes ouvrent la fenêtre PIN sur le poste (consentement humain).",
+			"Les mutations distantes ouvrent la fenêtre PIN sur le poste (consentement humain).\n" +
+			"Toute mutation accepte un argument facultatif « intent » : une phrase expliquant POURQUOI, affichée dans la fenêtre PIN à côté des actions que SituLab constate.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -140,6 +141,10 @@ func runMCP(in io.Reader, out io.Writer) error {
 			if p.Arguments == nil {
 				p.Arguments = map[string]any{}
 			}
+			// Point 4 : TOUTE mutation accepte un « intent » (le pourquoi), affiché dans la fenêtre PIN à
+			// côté des actions que SituLab constate. On le pose pour CET appel (MCP est séquentiel) via le
+			// même canal que la CLI ; vide si absent → aucune fuite vers l'appel suivant. Pur affichage.
+			flagIntent = argStr(p.Arguments, "intent")
 			res, err := t.Handler(p.Arguments)
 			if err != nil {
 				send(rpcResponse{ID: req.ID, Result: toolError(err.Error())})
@@ -308,6 +313,22 @@ func mcpTools() []mcpTool {
 			func(a map[string]any) (any, error) { return svc.GitCreateBranch(argStr(a, "path"), argStr(a, "name")) }},
 		{"git_switch", "Bascule sur une branche locale existante.", obj(map[string]any{"path": strProp("dossier local"), "name": strProp("branche")}, "path", "name"),
 			func(a map[string]any) (any, error) { return svc.GitSwitchBranch(argStr(a, "path"), argStr(a, "name")) }},
+		{"git_branch_delete", "Supprime une branche LOCALE. Sans force, git REFUSE une branche non fusionnée (anti-perte de travail) ; force=true force la suppression. Local, pas de PIN.", obj(map[string]any{"path": strProp("dossier local"), "name": strProp("branche à supprimer"), "force": boolProp("forcer même si non fusionnée")}, "path", "name"),
+			func(a map[string]any) (any, error) {
+				return svc.GitDeleteBranch(argStr(a, "path"), argStr(a, "name"), argBool(a, "force", false))
+			}},
+		{"git_worktree_list", "Liste les arbres de travail (worktrees) d'un dépôt : travailler sur plusieurs branches en parallèle depuis un seul dépôt (dossiers distincts, même historique).", obj(map[string]any{"path": strProp("dossier local")}, "path"),
+			func(a map[string]any) (any, error) { return svc.GitWorktrees(argStr(a, "path")) }},
+		{"git_worktree_add", "Ajoute un worktree dans un dossier. create=true crée une NOUVELLE branche ; sinon extrait la branche/réf existante (git refuse une branche déjà ouverte ailleurs). Idéal pour une session parallèle. Local.", obj(map[string]any{"path": strProp("dossier du dépôt"), "dir": strProp("dossier cible du worktree (créé)"), "name": strProp("branche"), "create": boolProp("créer une nouvelle branche")}, "path", "dir", "name"),
+			func(a map[string]any) (any, error) {
+				return svc.GitWorktreeAdd(argStr(a, "path"), argStr(a, "dir"), argStr(a, "name"), argBool(a, "create", false))
+			}},
+		{"git_worktree_remove", "Retire un worktree (supprime son dossier). force=true si modifications non enregistrées. Local.", obj(map[string]any{"path": strProp("dossier du dépôt"), "dir": strProp("dossier du worktree à retirer"), "force": boolProp("forcer malgré des modifications")}, "path", "dir"),
+			func(a map[string]any) (any, error) {
+				return svc.GitWorktreeRemove(argStr(a, "path"), argStr(a, "dir"), argBool(a, "force", false))
+			}},
+		{"git_worktree_prune", "Nettoie les références de worktrees dont le dossier a disparu.", obj(map[string]any{"path": strProp("dossier du dépôt")}, "path"),
+			func(a map[string]any) (any, error) { return svc.GitWorktreePrune(argStr(a, "path")) }},
 		{"git_log", "Historique local récent (structuré).", obj(map[string]any{"path": strProp("dossier local"), "limit": intProp("nombre de commits")}, "path"),
 			func(a map[string]any) (any, error) { return svc.GitLog(argStr(a, "path"), argInt(a, "limit")) }},
 		{"git_discard", "Annule les modifications locales non enregistrées (DESTRUCTIF). file vide = tout.", obj(map[string]any{"path": strProp("dossier local"), "file": strProp("fichier précis (vide = tout)")}, "path"),

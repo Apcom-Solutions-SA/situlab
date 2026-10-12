@@ -182,6 +182,18 @@
 
   <!-- Chart.js (vendorisé, hors-ligne) pour l'analyse d'équipe — voir vendor/README.txt -->
   <script src="vendor/chart.umd.min.js"></script>
-  <script src="main.js"></script>
+  <!-- main.js (1.9.9) découpé en modules chargés DANS L'ORDRE (scripts classiques, portée globale
+       partagée ; le bootstrap `boot` ne se déclenche qu'au DOMContentLoaded, donc après ce dernier). -->
+  <script src="app/00-core.js"></script>
+  <script src="app/01-onboarding.js"></script>
+  <script src="app/02-shell.js"></script>
+  <script src="app/03-admin-tokens.js"></script>
+  <script src="app/04-directory-stats.js"></script>
+  <script src="app/05-repos.js"></script>
+  <script src="app/06-detail.js"></script>
+  <script src="app/07-projects.js"></script>
+  <script src="app/07b-settings.js"></script>
+  <script src="app/08-help-git.js"></script>
+  <script src="app/09-modals-utils.js"></script>
 </body>
 </html>

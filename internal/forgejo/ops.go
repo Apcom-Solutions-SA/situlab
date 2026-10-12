@@ -119,15 +119,9 @@ func (c *Client) SetPullState(ctx context.Context, owner, repo string, index int
 
 // EditPull modifie titre/corps d'une PR (champs vides ignorés).
 func (c *Client) EditPull(ctx context.Context, owner, repo string, index int, title, body string) error {
-	payload := map[string]any{}
-	if title != "" {
-		payload["title"] = title
-	}
-	if body != "" {
-		payload["body"] = body
-	}
-	if len(payload) == 0 {
-		return fmt.Errorf("rien à modifier")
+	payload, err := editTitleBodyPayload(title, body)
+	if err != nil {
+		return err
 	}
 	p := fmt.Sprintf("/repos/%s/%s/pulls/%d", esc(owner), esc(repo), index)
 	return c.reqJSON(ctx, http.MethodPatch, p, payload, nil)

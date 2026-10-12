@@ -63,6 +63,11 @@ l'humain de confirmer la fenêtre). En mode texte, un message stderr t'avertit d
 peut s'ouvrir sur le poste (tu n'es pas figé — tu attends un geste humain). Le PIN ne transite jamais
 par le socket/MCP.
 
+**Explique ton intention (1.9.8)** : joins une phrase disant *pourquoi* tu agis — en CLI avec `--intent
+"…"`, en MCP avec l'argument `intent` sur n'importe quelle mutation. La fenêtre PIN l'affiche **à côté**
+de ce que SituLab **constate** réellement (ton message est déclaratif, il n'autorise rien ; seul le PIN
+autorise). C'est un geste de courtoisie qui aide l'humain à valider en connaissance de cause.
+
 ## Configuration
 
 `config.json` (instances, compteur anti-bruteforce du PIN, dépôts locaux suivis) et

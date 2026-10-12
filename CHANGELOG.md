@@ -2,6 +2,48 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.9.9] — 2026-10-11
+
+### Interne — maintenabilité du frontend
+- **`frontend/dist/main.js` (4835 lignes) découpé en 11 modules** `app/NN-*.js` chargés dans l'ordre par
+  `index.html` (plus gros module : ~970 lignes). Découpe **pure** aux frontières de section : aucune
+  édition, aucun réordonnancement — la concaténation des modules dans l'ordre est **identique** au
+  `main.js` d'origine (non-régression prouvée + `node --check` par fichier). Scripts classiques (portée
+  globale partagée, pas de modules ES) ; le bootstrap ne s'exécute qu'au `DOMContentLoaded`, donc après
+  le chargement de tous les scripts. **CSP inchangée** (`script-src 'self'`, chaque module same-origin).
+  Aucun changement fonctionnel ni visuel : préparation du terrain pour la suite.
+
+## [1.9.8] — 2026-10-11
+
+### Projets — page d'accueil « classeurs » (légère) + détail par projet
+- La page Projets est **éclatée** : un **accueil « classeurs »** qui se peint **sans aucun appel réseau**
+  (identité, topologie local/atelier/vitrine, état du **clone local** lu sur le disque) — fini la lenteur
+  due au balayage réseau de chaque carte. Un clic ouvre le **détail d'un seul projet**, qui, lui, vérifie
+  en ligne (tableau 3 colonnes Local · Atelier · Vitrine). Glyphe de santé **statique** et **honnête** :
+  il ne prétend jamais « à jour » (ce qui exigerait le réseau), il montre le dernier état connu localement.
+- Nouveau cœur : `ProjectsLight` (accueil, zéro réseau) et `ProjectBoardOne` (détail d'un projet, réseau ciblé).
+
+### Panneau git dans le détail d'un projet
+- **Branches** : basculer, **fusionner** dans la branche courante (conflit → message guidé + « annuler la
+  fusion »), **supprimer**. Supprimer une branche **jamais fusionnée** déclenche une **alerte visuelle forte**
+  (le travail serait perdu) et n'est forcée qu'après confirmation explicite ; une branche fusionnée se
+  supprime simplement. Un badge « fusionnée / non fusionnée » est calculé localement (git merge-base).
+- **Copies de travail (worktrees)** : lister, **créer** (nouvelle branche ou branche existante, dans un
+  autre dossier) et **retirer** ses worktrees — plusieurs branches ouvertes en parallèle depuis un seul
+  dépôt (idéal pour des sessions IA simultanées), avec un rappel clair **clone vs worktree**.
+- Gestes **locaux** (branche, fusion, worktree) : **sans PIN** (gardés par le mode lecture seule du cœur).
+  Exposés aux trois frontaux (GUI, CLI `git branch-delete` / `worktree-*`, MCP `git_worktree_*`).
+
+### Fenêtre PIN — intention de l'agent (Point 4)
+- Un agent (CLI `--intent`, ou n'importe quel outil MCP via l'argument `intent`) peut joindre **sa phrase
+  d'intention** à une demande. La fenêtre PIN l'affiche **distinctement** (« ce que l'agent dit vouloir
+  faire ») **à côté** de ce que **SituLab constate** réellement. Le message de l'agent est **déclaratif** et
+  n'autorise rien ; seul le PIN autorise, et il ne transite jamais par le socket.
+
+### Page « Comprendre git »
+- Section **Copies de travail** enrichie : visuel **clone vs worktree**, repère « clone ou worktree ? »,
+  et renvoi au panneau git du projet où l'on manipule ses worktrees.
+
 ## [1.9.7] — 2026-10-11
 
 ### Signature « SituLab approved » — IMMUABLE (trailer de commit)

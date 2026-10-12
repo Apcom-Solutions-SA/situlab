@@ -99,6 +99,11 @@ func (r *remote) call(op string, a daemon.Args, out any) error {
 	if daemon.IsWriteOp(op) && flagOutput != "json" {
 		fmt.Fprintln(os.Stderr, "⏳ Action sensible : si un PIN est requis, validez la fenêtre SituLab sur le poste (max 120 s)…")
 	}
+	// Point 4 : l'agent peut joindre son « pourquoi » (--intent) ; la fenêtre PIN le montre, distinct
+	// des actions que SituLab constate. Pur affichage, n'autorise rien.
+	if a.Intent == "" {
+		a.Intent = flagIntent
+	}
 	raw, _ := json.Marshal(a)
 	resp, err := r.cl.Call(ipc.Request{Op: op, Args: raw})
 	if err != nil {
@@ -504,6 +509,22 @@ func (r *remote) GitCreateBranch(path, name string) (string, error) {
 }
 func (r *remote) GitSwitchBranch(path, name string) (string, error) {
 	return r.callStr(daemon.OpGitSwitch, "output", daemon.Args{Path: path, Name: name})
+}
+func (r *remote) GitDeleteBranch(path, name string, force bool) (string, error) {
+	return r.callStr(daemon.OpGitBranchDel, "output", daemon.Args{Path: path, Name: name, Force: force})
+}
+func (r *remote) GitWorktrees(path string) ([]gitx.Worktree, error) {
+	var v []gitx.Worktree
+	return v, r.call(daemon.OpGitWorktreeList, daemon.Args{Path: path}, &v)
+}
+func (r *remote) GitWorktreeAdd(path, wtPath, branch string, createBranch bool) (string, error) {
+	return r.callStr(daemon.OpGitWorktreeAdd, "output", daemon.Args{Path: path, Dir: wtPath, Name: branch, Create: createBranch})
+}
+func (r *remote) GitWorktreeRemove(path, wtPath string, force bool) (string, error) {
+	return r.callStr(daemon.OpGitWorktreeRm, "output", daemon.Args{Path: path, Dir: wtPath, Force: force})
+}
+func (r *remote) GitWorktreePrune(path string) (string, error) {
+	return r.callStr(daemon.OpGitWorktreePrn, "output", daemon.Args{Path: path})
 }
 func (r *remote) GitDiscard(path, file string) (string, error) {
 	return r.callStr(daemon.OpGitDiscard, "output", daemon.Args{Path: path, File: file})

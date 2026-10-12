@@ -511,6 +511,22 @@ func (a *App) ProjectStatus(name string) (*core.ProjectView, error) {
 }
 
 // ProjectBoards : état « 3 colonnes » (local · atelier · production) de tous les projets (v1.8).
+// ProjectsLight : état d'accueil léger (zéro réseau) de tous les projets — pour la page « classeurs ».
+func (a *App) ProjectsLight() ([]core.ProjectLightView, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.ProjectsLight(), nil
+}
+
+// ProjectBoardOne : état 3 colonnes d'UN projet (réseau pour ce projet seul), au clic sur un classeur.
+func (a *App) ProjectBoardOne(name string) (*core.ProjectBoard, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.ProjectBoardOne(name)
+}
+
 func (a *App) ProjectBoards() ([]core.ProjectBoard, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
@@ -693,6 +709,55 @@ func (a *App) GitDiscard(path, file string) (string, error) {
 		return "", err
 	}
 	return a.svc.GitDiscard(path, file)
+}
+
+// GitMerge fusionne ref dans la branche courante (local, pas de PIN). Exposé au panneau git des Projets.
+func (a *App) GitMerge(path, ref string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitMerge(path, ref)
+}
+func (a *App) GitMergeAbort(path string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitMergeAbort(path)
+}
+
+// GitDeleteBranch supprime une branche locale. force=false laisse git refuser une branche non
+// fusionnée (le front prévient alors et re-propose avec force=true).
+func (a *App) GitDeleteBranch(path, name string, force bool) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitDeleteBranch(path, name, force)
+}
+
+// Worktrees : plusieurs arbres de travail (branches) depuis un seul dépôt (local, pas de PIN).
+func (a *App) GitWorktrees(path string) ([]gitx.Worktree, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.GitWorktrees(path)
+}
+func (a *App) GitWorktreeAdd(path, wtPath, branch string, createBranch bool) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitWorktreeAdd(path, wtPath, branch, createBranch)
+}
+func (a *App) GitWorktreeRemove(path, wtPath string, force bool) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitWorktreeRemove(path, wtPath, force)
+}
+func (a *App) GitWorktreePrune(path string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitWorktreePrune(path)
 }
 
 // --- Écritures et lectures API étendues (v1) ---

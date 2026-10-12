@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"situlab/internal/config"
 	"situlab/internal/core"
@@ -89,6 +90,7 @@ const (
 	OpLocalRemove   = "local.remove"
 	OpGitBranchNew  = "git.branch-create"
 	OpGitSwitch     = "git.switch"
+	OpGitBranchDel  = "git.branch-delete" // suppression LOCALE (pas de PIN ; git refuse une branche non fusionnée sans force)
 	OpGitDiscard    = "git.discard"
 	OpGitLog        = "git.log"
 	OpGitStashSave  = "git.stash-save"
@@ -108,6 +110,11 @@ const (
 	OpGitAmend       = "git.amend"
 	OpGitCommitPaths = "git.commit-paths"
 	OpGitTagCreate   = "git.tag-create" // tag LOCAL (publication = OpGitPushTag)
+	// Worktrees (v1.9.8) — plusieurs arbres de travail depuis un dépôt (locaux : pas de PIN).
+	OpGitWorktreeList = "git.worktree-list"
+	OpGitWorktreeAdd  = "git.worktree-add"
+	OpGitWorktreeRm   = "git.worktree-remove"
+	OpGitWorktreePrn  = "git.worktree-prune"
 	// Gestes distants réécrits — PIN requis (même portillon que push/sync).
 	OpGitPushForce = "git.push-force"
 	OpGitPushTag   = "git.push-tag"
@@ -173,6 +180,9 @@ type Args struct {
 	Admin       bool     `json:"admin,omitempty"`
 	AdminScope  bool     `json:"admin_scope,omitempty"` // onboarding : demander la portée admin
 	Remember    bool     `json:"remember,omitempty"`    // onboarding : mémoriser le mot de passe (chiffré par le PIN)
+	Force       bool     `json:"force,omitempty"`       // git.branch-delete / git.worktree-remove : forcer malgré refus git
+	Create      bool     `json:"create,omitempty"`      // git.worktree-add : créer une NOUVELLE branche (sinon extraire l'existante)
+	Intent      string   `json:"intent,omitempty"`      // Point 4 : phrase libre de l'agent (« pourquoi »), AFFICHÉE telle quelle dans la fenêtre PIN, distincte des actions constatées par SituLab. N'autorise rien.
 }
 
 // Status est l'état renvoyé par OpStatus.
@@ -201,7 +211,9 @@ type PINPrompter interface {
 	// d'enrichir le consentement ; nil quand il n'y a rien de plus à montrer que `reason`.
 	// action est une CLÉ de classe d'action (push|promote|delete|create|config|issue|admin|unlock)
 	// pour que la fenêtre adapte son visuel (couleur/icône) — ce n'est jamais une autorisation en soi.
-	PromptPIN(reason string, detail any, action string) (string, PINOutcome)
+	// intent est la phrase LIBRE de l'agent (son « pourquoi »), affichée distinctement des actions que
+	// SituLab constate ; vide quand l'humain agit directement. N'autorise rien non plus : pur affichage.
+	PromptPIN(reason string, detail any, action, intent string) (string, PINOutcome)
 }
 
 // Daemon exécute les opérations sur un noyau partagé, avec consentement humain par modale.
@@ -294,21 +306,21 @@ func kindOf(err error) string {
 // ensureUnlocked garantit une session de lecture : si verrouillée, la modale demande le PIN (invite
 // générique de déverrouillage, pour les lectures).
 func (d *Daemon) ensureUnlocked() error {
-	return d.ensureUnlockedCtx("Déverrouiller SituLab", nil, "unlock")
+	return d.ensureUnlockedCtx("Déverrouiller SituLab", nil, "unlock", "")
 }
 
 // ensureUnlockedCtx est ensureUnlocked AVEC le contexte de l'action en attente. Quand la politique
 // n'exige pas le PIN mais que la session est verrouillée, l'invite UNIQUE montre l'action + aperçu
 // (Point 5 : un seul PIN quand verrouillé, et le BON message) au lieu d'un générique « Déverrouiller ».
 // Le même secret déverrouille ET ouvre la session (core.Unlock→openSession) : une seule saisie.
-func (d *Daemon) ensureUnlockedCtx(reason string, detail any, action string) error {
+func (d *Daemon) ensureUnlockedCtx(reason string, detail any, action, intent string) error {
 	if d.svc.Unlocked() {
 		return nil
 	}
 	if !d.svc.PINSet() {
 		return errors.New("aucun PIN configuré : définissez-en un dans la fenêtre SituLab")
 	}
-	pin, outcome := d.prompter.PromptPIN(reason, detail, action)
+	pin, outcome := d.prompter.PromptPIN(reason, detail, action, intent)
 	switch outcome {
 	case PINConfirmed:
 		return d.svc.Unlock(pin)
@@ -330,6 +342,7 @@ func (d *Daemon) ensureUnlockedCtx(reason string, detail any, action string) err
 func (d *Daemon) gate(op string, a Args, reason string) (string, error) {
 	act := actionOf(op)
 	action := actionLabel(op)
+	intent := clampIntent(a.Intent) // phrase libre de l'agent (Point 4), bornée ; affichage seul
 	needPIN := d.svc.RequiresPIN(a.Instance, act)
 	if act == config.ActionPush { // la politique du push suit le DÉPÔT réel, pas la connexion nommée
 		needPIN = d.svc.RequiresPINForPush(a.Instance, a.Path)
@@ -339,14 +352,25 @@ func (d *Daemon) gate(op string, a Args, reason string) (string, error) {
 		detail = d.svc.PushPreview(a.Path)
 	}
 	if needPIN {
-		return d.writePIN(reason, detail, action)
+		return d.writePIN(reason, detail, action, intent)
 	}
 	// Politique « sans PIN » mais session verrouillée : l'invite UNIQUE de déverrouillage porte le
 	// contexte de l'action (Point 5), pas un générique « Déverrouiller SituLab ».
-	if err := d.ensureUnlockedCtx(reason, detail, action); err != nil {
+	if err := d.ensureUnlockedCtx(reason, detail, action, intent); err != nil {
 		return "", err
 	}
 	return "", nil
+}
+
+// clampIntent borne la phrase d'intention de l'agent (affichée dans la fenêtre PIN). On protège la
+// modale d'un texte démesuré ; l'échappement du contenu (XSS) est fait côté frontend à l'affichage.
+func clampIntent(s string) string {
+	s = strings.TrimSpace(s)
+	const max = 400
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "…"
+	}
+	return s
 }
 
 // actionOf classe une opération d'écriture dans une classe d'action soumise à la politique PIN.
@@ -391,11 +415,11 @@ func actionLabel(op string) string {
 	return "admin"
 }
 
-func (d *Daemon) writePIN(reason string, detail any, action string) (string, error) {
+func (d *Daemon) writePIN(reason string, detail any, action, intent string) (string, error) {
 	if !d.svc.PINSet() {
 		return "", errors.New("aucun PIN configuré : définissez-en un d'abord")
 	}
-	pin, outcome := d.prompter.PromptPIN(reason, detail, action)
+	pin, outcome := d.prompter.PromptPIN(reason, detail, action, intent)
 	switch outcome {
 	case PINConfirmed:
 		return pin, nil
@@ -448,6 +472,9 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 		return mapStrErr("output", out, err)
 	case OpGitSwitch:
 		out, err := d.svc.GitSwitchBranch(a.Path, a.Name)
+		return mapStrErr("output", out, err)
+	case OpGitBranchDel:
+		out, err := d.svc.GitDeleteBranch(a.Path, a.Name, a.Force)
 		return mapStrErr("output", out, err)
 	case OpGitDiscard:
 		out, err := d.svc.GitDiscard(a.Path, a.File)
@@ -503,6 +530,17 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 		return mapStrErr("output", out, err)
 	case OpGitTagCreate:
 		out, err := d.svc.GitTagCreate(a.Path, a.Tag, a.Message)
+		return mapStrErr("output", out, err)
+	case OpGitWorktreeList:
+		return d.svc.GitWorktrees(a.Path)
+	case OpGitWorktreeAdd:
+		out, err := d.svc.GitWorktreeAdd(a.Path, a.Dir, a.Name, a.Create)
+		return mapStrErr("output", out, err)
+	case OpGitWorktreeRm:
+		out, err := d.svc.GitWorktreeRemove(a.Path, a.Dir, a.Force)
+		return mapStrErr("output", out, err)
+	case OpGitWorktreePrn:
+		out, err := d.svc.GitWorktreePrune(a.Path)
 		return mapStrErr("output", out, err)
 	case OpCommit:
 		out, err := d.svc.Commit(a.Path, a.Message)
@@ -618,7 +656,7 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 	case OpProjectPromote:
 		// Publication vers la PRODUCTION : toujours confirmée par le PIN dans la fenêtre (le cœur
 		// réapplique la politique de la connexion prod). L'IA prépare, l'humain promeut.
-		pin, err := d.writePIN("Publier vers la PRODUCTION la version de l'atelier — projet « "+a.Name+" »", nil, "promote")
+		pin, err := d.writePIN("Publier vers la PRODUCTION la version de l'atelier — projet « "+a.Name+" »", nil, "promote", clampIntent(a.Intent))
 		if err != nil {
 			return nil, err
 		}

@@ -30,6 +30,7 @@ type BranchRow struct {
 	Behind        int    `json:"behind"`
 	Author        string `json:"author"`   // auteur du dernier commit de la branche (« qui l'a ouverte »)
 	Upstream      string `json:"upstream"` // branche de suivi (ex. origin/main) — « depuis quoi elle se met à jour »
+	Merged        bool   `json:"merged"`   // pointe locale joignable depuis la branche d'intégration (main/master/courante) → sûre à supprimer
 }
 
 // BranchMatrix est l'union des branches locales et des branches distantes connues
@@ -128,6 +129,26 @@ func MatrixOf(dir string) (*BranchMatrix, error) {
 		}
 	}
 
+	// Statut de fusion : une branche locale est « fusionnée » si sa pointe est joignable depuis la
+	// branche d'intégration (main/master, sinon la branche courante). Sert à prévenir, AVANT une
+	// suppression, qu'une branche jamais fusionnée ferait perdre du travail. UN SEUL `for-each-ref
+	// --merged` (et non un `merge-base` par branche) : coût constant quel que soit le nombre de branches,
+	// et pas de plafond (plus de faux « non fusionnée » au-delà du 60ᵉ). target est fusionnée dans
+	// elle-même, donc présente dans l'ensemble.
+	if target := integrationBranch(order, rows); target != "" && safeRevision(target) == nil {
+		merged := map[string]bool{}
+		if out, err := run(dir, LocalTimeout, "for-each-ref", "--format=%(refname:short)", "--merged="+target, "refs/heads"); err == nil {
+			for _, name := range splitLines(out) {
+				merged[name] = true
+			}
+		}
+		for _, name := range order {
+			if r := rows[name]; r.HasLocal {
+				r.Merged = merged[name]
+			}
+		}
+	}
+
 	// Ordre : branche courante d'abord, puis alphabétique.
 	sort.SliceStable(order, func(i, j int) bool {
 		ri, rj := rows[order[i]], rows[order[j]]
@@ -141,6 +162,35 @@ func MatrixOf(dir string) (*BranchMatrix, error) {
 	}
 	m.FetchedAt = fetchedAt(dir)
 	return m, nil
+}
+
+// integrationBranch choisit la branche d'intégration de référence d'un dépôt pour juger si une branche
+// de travail est « fusionnée » : main, sinon master, sinon la branche courante. "" si rien de local.
+func integrationBranch(order []string, rows map[string]*BranchRow) string {
+	has := func(n string) bool { r, ok := rows[n]; return ok && r.HasLocal }
+	if has("main") {
+		return "main"
+	}
+	if has("master") {
+		return "master"
+	}
+	for _, n := range order {
+		if r := rows[n]; r.HasLocal && r.Current {
+			return n
+		}
+	}
+	return ""
+}
+
+// BranchMergedInto indique si la pointe de `branch` est joignable depuis `into` (git merge-base
+// --is-ancestor) — autrement dit si `branch` est déjà entièrement fusionnée dans `into`. Purement
+// local. Une branche NON fusionnée supprimée perdrait son travail : l'appelant alerte avant.
+func BranchMergedInto(dir, branch, into string) bool {
+	if safeRevision(branch) != nil || safeRevision(into) != nil {
+		return false
+	}
+	_, err := run(dir, LocalTimeout, "merge-base", "--is-ancestor", branch, into)
+	return err == nil
 }
 
 // NearestTagOf expose nearestTag : le tag le plus proche joignable depuis une réf (ex. "origin/dev").
