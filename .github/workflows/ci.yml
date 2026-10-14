@@ -20,7 +20,7 @@ jobs:
   quality:
     runs-on: ubuntu-22.04 # GTK3/WebKit2GTK pour compiler les paquets qui touchent à Wails
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with: { go-version: "${{ env.GO_VERSION }}" }
 
