@@ -15,7 +15,7 @@ async function renderDetail() {
   const d = state.detail; if (!d) return;
   el("view").innerHTML = `
     <div class="detail-head">
-      <button class="btn-back" id="back">‹ Dépôts</button>
+      <button class="btn-back" id="back">‹ Retour</button>
       <div class="detail-title">${repoTitleHTML(d.full_name || d.repo)}</div>
       <div class="detail-actions">
         ${d.has_remote ? `<label class="sr-only" for="ref-sel">Branche ou version</label><select id="ref-sel" class="select ref-sel"></select>` : ""}
@@ -31,13 +31,13 @@ async function renderDetail() {
       ${d.has_remote ? `<button class="tab" data-tab="fichiers">Fichiers</button><button class="tab" data-tab="histo">Historique</button><button class="tab" data-tab="activite">Activité</button>` : ""}
     </div>
     <div id="detail-body"><div class="skeleton"></div></div>`;
-  el("back").onclick = () => navTo("repos");
+  el("back").onclick = () => navTo("organize");
   if (el("open-web")) el("open-web").onclick = () => safeOpenURL(d.html_url || ((state.repos || []).find((x) => x.full_name === d.full_name) || {}).html_url);
   if (el("unfollow")) el("unfollow").onclick = () => {
     // Protection (1.9.2) : « ne plus suivre » demande désormais une confirmation explicite. Le dossier
     // local et son contenu ne sont PAS touchés — seul le suivi dans SituLab est retiré.
     openModal("Ne plus suivre ce dépôt ?", `<div class="field"><div class="callout">SituLab cessera d'afficher le clone local <b>${esc(d.local_path)}</b>. <b>Aucun fichier n'est supprimé</b> : le dossier reste sur votre poste et peut être resuivi plus tard.</div></div>`, async () => {
-      try { await App().RemoveLocalRepo(d.local_path); closeModal(); toast("Dépôt retiré du suivi", "ok"); navTo("repos"); } catch (e) { toast(cleanErr(e), "err"); }
+      try { await App().RemoveLocalRepo(d.local_path); closeModal(); toast("Dépôt retiré du suivi", "ok"); navTo("organize"); } catch (e) { toast(cleanErr(e), "err"); }
     });
     el("modal-ok").textContent = "Ne plus suivre";
   };
@@ -307,7 +307,7 @@ function repoSettingsModal(d) {
     <small>Chaque action est confirmée par votre PIN.</small></div>`, () => closeModal());
   el("modal-ok").textContent = "Fermer"; el("modal-cancel").classList.add("hidden");
   const after = (msg) => { toast(msg, "ok"); closeModal(); state.repoSig = ""; };
-  el("rs-rename-btn").onclick = () => { const v = el("rs-name").value.trim(); if (!v) return; pinConfirm(`Renommer en « ${v} »`, async (pin) => { await App().EditRepoSettings(state.instance, d.owner, d.repo, { name: v }, pin); after("Dépôt renommé"); navTo("repos"); }); };
+  el("rs-rename-btn").onclick = () => { const v = el("rs-name").value.trim(); if (!v) return; pinConfirm(`Renommer en « ${v} »`, async (pin) => { await App().EditRepoSettings(state.instance, d.owner, d.repo, { name: v }, pin); after("Dépôt renommé"); navTo("organize"); }); };
   el("rs-branch-btn").onclick = () => { const v = el("rs-branch").value.trim(); if (!v) return; pinConfirm(`Branche par défaut → ${v}`, async (pin) => { await App().EditRepoSettings(state.instance, d.owner, d.repo, { default_branch: v }, pin); after("Branche par défaut mise à jour"); }); };
   el("rs-private").onclick = () => pinConfirm("Rendre le dépôt privé", async (pin) => { await App().EditRepoSettings(state.instance, d.owner, d.repo, { private: true }, pin); after("Dépôt privé"); });
   el("rs-public").onclick = () => pinConfirm("Rendre le dépôt public", async (pin) => { await App().EditRepoSettings(state.instance, d.owner, d.repo, { private: false }, pin); after("Dépôt public"); });

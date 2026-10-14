@@ -109,7 +109,7 @@ const STATES = {
 
 const state = {
   instance: "",
-  view: "projects", // projects (accueil/tableau de bord) | repos | help | settings | detail
+  view: "kernel", // accueil = KERNEL (mémoire) ; puis projects | repos | corpus | backup | help | settings | detail
   search: "",
   org: "",
   detail: null,

@@ -16,6 +16,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -122,6 +123,152 @@ func defaultRequiresPIN(role string, a PINAction) bool {
 	}
 }
 
+// --- Clouds de fichiers souverains (CORPUS, v1.10) -------------------------------------------
+// SituLab se branche à des clouds de fichiers SOUVERAINS pour porter le CORPUS (contenus denses
+// lus à la demande). SituLab est la PORTE UNIQUE entre l'IA du poste et ces clouds : l'agent
+// (CLI/MCP) ne voit que les dossiers explicitement autorisés par l'humain (AllowedDirs) ; la
+// fenêtre (humain) voit tout pour choisir. Aucun secret ici : le mot de passe WebDAV est chiffré
+// au trousseau, comme un jeton git.
+
+// Types de cloud autorisés — souverains uniquement. Les clouds propriétaires non souverains
+// (OneDrive/Google Drive/Dropbox) sont écartés par principe : ils ne sont pas proposés.
+const (
+	CloudNextcloud = "nextcloud" // Nextcloud auto-hébergé (souverain autonome)
+	CloudKDrive    = "kdrive"    // kDrive Infomaniak (souverain délégué, droit suisse)
+)
+
+// CloudAction : classe d'action cloud soumise à la politique PIN par connexion (v1.10).
+type CloudAction string
+
+const (
+	CloudWrite  CloudAction = "write"  // envoyer/modifier un fichier, créer un dossier
+	CloudDelete CloudAction = "delete" // supprimer un fichier ou un dossier
+)
+
+// CloudPINPolicy : pour chaque classe d'action cloud, exiger le PIN (true) ou l'autoriser en
+// session déverrouillée (false). nil = défaut (voir defaultCloudRequiresPIN). Réglée EN FENÊTRE
+// uniquement, comme la politique PIN git.
+type CloudPINPolicy struct {
+	Write  *bool `json:"write,omitempty"`
+	Delete *bool `json:"delete,omitempty"`
+}
+
+// FileCloud décrit une connexion à un cloud de fichiers souverain (WebDAV). Aucun secret : le mot
+// de passe (ou app-password) est chiffré au trousseau sous l'id « filecloud/<Name> ».
+type FileCloud struct {
+	Name        string          `json:"name"`
+	Kind        string          `json:"kind"` // "nextcloud" | "kdrive"
+	URL         string          `json:"url"`  // base WebDAV (ex. https://host/remote.php/dav/files/user)
+	User        string          `json:"user"`
+	Default     bool            `json:"default,omitempty"`
+	AllowedDirs []string        `json:"allowed_dirs,omitempty"` // chemins AUTORISÉS à l'IA (dossier/fichier) ; vide = aucun
+	DeniedDirs  []string        `json:"denied_dirs,omitempty"`  // chemins RETIRÉS sous un parent autorisé (exclusions fines, v1.11)
+	PINPolicy   *CloudPINPolicy `json:"pin_policy,omitempty"`
+}
+
+// RequiresPINCloud dit si une action cloud exige le PIN pour CETTE connexion. Champ non défini =
+// défaut : write autonome (l'IA dépose souvent des résumés), delete sous PIN (geste destructif).
+func (fc FileCloud) RequiresPINCloud(a CloudAction) bool {
+	def := defaultCloudRequiresPIN(a)
+	if fc.PINPolicy == nil {
+		return def
+	}
+	var p *bool
+	switch a {
+	case CloudWrite:
+		p = fc.PINPolicy.Write
+	case CloudDelete:
+		p = fc.PINPolicy.Delete
+	}
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+func defaultCloudRequiresPIN(a CloudAction) bool {
+	return a == CloudDelete // delete sous PIN ; write autonome par défaut
+}
+
+// PathAllowed dit si un chemin cloud est visible par l'IA, selon un modèle AUTORISATIONS + EXCLUSIONS
+// (v1.11) : le chemin est régi par le préfixe le PLUS SPÉCIFIQUE qui le couvre, parmi les AllowedDirs
+// (autorise) et les DeniedDirs (retire). À spécificité égale, l'EXCLUSION l'emporte (prudence).
+// Fail-closed : aucun préfixe couvrant ⇒ non autorisé. « / » autorisé = tout le CORPUS.
+func (fc FileCloud) PathAllowed(p string) bool {
+	np := CloudCleanPath(p)
+	bestLen, bestAllow, matched := -1, false, false
+	consider := func(d string, allow bool) {
+		nd := CloudCleanPath(d)
+		covers := nd == "/" || np == nd || strings.HasPrefix(np, nd+"/")
+		if !covers {
+			return
+		}
+		l := len(nd)
+		if nd == "/" {
+			l = 0 // la racine est le préfixe le MOINS spécifique
+		}
+		if l > bestLen || (l == bestLen && !allow) { // à égalité, l'exclusion gagne
+			bestLen, bestAllow, matched = l, allow, true
+		}
+	}
+	for _, d := range fc.AllowedDirs {
+		consider(d, true)
+	}
+	for _, d := range fc.DeniedDirs {
+		consider(d, false)
+	}
+	return matched && bestAllow
+}
+
+// CloudCleanPath normalise un chemin cloud : POSIX, slash initial, sans slash final, « .. » résolu.
+func CloudCleanPath(p string) string {
+	p = strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	p = path.Clean(p)
+	if p != "/" {
+		p = strings.TrimRight(p, "/")
+	}
+	return p
+}
+
+// BackupPlan : sauvegarde d'un dépôt git local vers un dossier d'un cloud connecté (v1.10). Le
+// backup est un bundle git (historique complet, un fichier restaurable). Exécution manuelle pour
+// l'instant (planification automatique = étape suivante).
+type BackupPlan struct {
+	Name     string `json:"name"`
+	RepoPath string `json:"repo_path"` // dépôt git local à sauvegarder
+	Cloud    string `json:"cloud"`     // nom de la connexion cloud de destination
+	Dest     string `json:"dest"`      // dossier de destination dans le cloud
+	LastRun  string `json:"last_run,omitempty"`
+}
+
+// Kernel désigne un dépôt git local comme « mémoire » (KERNEL) de l'utilisateur (v1.11) : le dépôt
+// qui EST la mémoire, distingué des dépôts logiciels ordinaires. Plusieurs KERNEL peuvent coexister
+// (plusieurs sphères) ; un seul est « actif » à la fois (Config.ActiveKernel). Aucun secret : le
+// jeton d'accès reste celui de l'instance git (trousseau), comme pour tout dépôt. La DÉSIGNATION
+// (ajout/retrait/actif) est un geste de gouvernance réservé à la FENÊTRE (jamais socket/CLI/MCP).
+type Kernel struct {
+	Name      string `json:"name"`               // libellé humain (« Ma mémoire APCOM »)
+	LocalPath string `json:"local_path"`         // clone local qui porte la mémoire
+	Instance  string `json:"instance,omitempty"` // instance git pour récupérer/enregistrer (vide = défaut)
+	Backup    string `json:"backup,omitempty"`   // nom d'un BackupPlan rattaché (sauvegarde vers un cloud CORPUS)
+	RunFile   string `json:"run_file,omitempty"` // fichier d'ouverture pour l'IA locale (chemin relatif au dépôt)
+}
+
+// Spoke désigne un dépôt local comme PROJECTION d'une mission (SPOKE, v1.11) dérivée d'un KERNEL.
+// Ce qui distingue un spoke d'un dépôt ordinaire : il référence le KERNEL dont il dérive et porte une
+// mission (intention). La DÉSIGNATION est, comme pour le KERNEL, réservée à la FENÊTRE.
+type Spoke struct {
+	Name      string `json:"name"`
+	LocalPath string `json:"local_path"`
+	Kernel    string `json:"kernel,omitempty"`   // nom du KERNEL parent dont ce spoke dérive
+	Mission   string `json:"mission,omitempty"`  // à quoi sert ce spoke (intention)
+	Instance  string `json:"instance,omitempty"` // instance git pour récupérer/enregistrer (vide = défaut)
+	RunFile   string `json:"run_file,omitempty"` // fichier d'ouverture (run) pour l'IA locale (chemin relatif)
+}
+
 // RepoRef désigne un dépôt précis sur une connexion (v1.7) : instance + owner/repo.
 type RepoRef struct {
 	Instance string `json:"instance"`
@@ -144,6 +291,7 @@ type Promo struct {
 type Project struct {
 	Name        string           `json:"name"`
 	Icon        string           `json:"icon,omitempty"` // emoji/picto choisi pour le projet (facultatif)
+	Tag         string           `json:"tag,omitempty"`  // groupe de classement libre (« tag projet »)
 	Atelier     RepoRef          `json:"atelier"`
 	Productions []RepoRef        `json:"productions"` // vitrines (production) ; peut être vide
 	Promotions  map[string]Promo `json:"promotions,omitempty"`
@@ -166,6 +314,58 @@ type Config struct {
 	PromptOverrides map[string]Prompt `json:"prompt_overrides,omitempty"`
 	HiddenPrompts   []string          `json:"hidden_prompts,omitempty"`
 	UserPrompts     []Prompt          `json:"user_prompts,omitempty"`
+	// Clouds de fichiers souverains (CORPUS) et plans de sauvegarde git→cloud (v1.10).
+	FileClouds []FileCloud  `json:"file_clouds,omitempty"`
+	Backups    []BackupPlan `json:"backups,omitempty"`
+	// KERNEL (v1.11) : dépôts-mémoire désignés. ActiveKernel = nom du KERNEL courant.
+	Kernels      []Kernel `json:"kernels,omitempty"`
+	ActiveKernel string   `json:"active_kernel,omitempty"`
+	// SPOKES (v1.11) : projections de mission dérivées d'un KERNEL.
+	Spokes []Spoke `json:"spokes,omitempty"`
+	// Appariements ARCHIVÉS (v1.11) : clés de lignes de la matrice « Organiser mes dépôts » que
+	// l'utilisateur a rangées (suggestion jugée non pertinente). On les masque de « en attente » sans
+	// rien supprimer ; l'utilisateur peut les repasser en appairage depuis l'archive.
+	ArchivedPairings []string `json:"archived_pairings,omitempty"`
+}
+
+// ArchivePairing range une clé d'appariement (idempotent). Renvoie true si elle a été ajoutée.
+func (c *Config) ArchivePairing(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	for _, k := range c.ArchivedPairings {
+		if k == key {
+			return false
+		}
+	}
+	c.ArchivedPairings = append(c.ArchivedPairings, key)
+	return true
+}
+
+// UnarchivePairing retire une clé de l'archive. Renvoie true si elle y était.
+func (c *Config) UnarchivePairing(key string) bool {
+	out := c.ArchivedPairings[:0]
+	found := false
+	for _, k := range c.ArchivedPairings {
+		if k == key {
+			found = true
+			continue
+		}
+		out = append(out, k)
+	}
+	c.ArchivedPairings = out
+	return found
+}
+
+// IsPairingArchived indique si une clé d'appariement est archivée.
+func (c *Config) IsPairingArchived(key string) bool {
+	for _, k := range c.ArchivedPairings {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Prompt : un prompt réutilisable pour l'assistant IA (titre + corps).
@@ -272,6 +472,9 @@ func (c *Config) Save() error {
 // eqName compare deux noms d'instance en repliant la casse (« Prod » == « prod »).
 func eqName(a, b string) bool { return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b)) }
 
+// EqName est la version exportée d'eqName (comparaison de noms insensible à la casse/espaces).
+func EqName(a, b string) bool { return eqName(a, b) }
+
 // Find renvoie l'instance par nom (insensible à la casse), ou nil.
 func (c *Config) Find(name string) *Instance {
 	for i := range c.Instances {
@@ -338,6 +541,192 @@ func (c *Config) Remove(name string) (string, bool) {
 		c.Instances[0].Default = true
 	}
 	return removed, true
+}
+
+// FindCloud renvoie la connexion cloud par nom (insensible à la casse), ou nil.
+func (c *Config) FindCloud(name string) *FileCloud {
+	for i := range c.FileClouds {
+		if eqName(c.FileClouds[i].Name, name) {
+			return &c.FileClouds[i]
+		}
+	}
+	return nil
+}
+
+// DefaultCloud renvoie le cloud par défaut (ou le premier, ou nil).
+func (c *Config) DefaultCloud() *FileCloud {
+	for i := range c.FileClouds {
+		if c.FileClouds[i].Default {
+			return &c.FileClouds[i]
+		}
+	}
+	if len(c.FileClouds) > 0 {
+		return &c.FileClouds[0]
+	}
+	return nil
+}
+
+// ResolveCloud sélectionne un cloud par nom ; nom vide => cloud par défaut.
+func (c *Config) ResolveCloud(name string) *FileCloud {
+	if name == "" {
+		return c.DefaultCloud()
+	}
+	return c.FindCloud(name)
+}
+
+// SetDefaultCloud marque un cloud comme défaut (et démarque les autres).
+func (c *Config) SetDefaultCloud(name string) bool {
+	found := false
+	for i := range c.FileClouds {
+		if eqName(c.FileClouds[i].Name, name) {
+			c.FileClouds[i].Default = true
+			found = true
+		} else {
+			c.FileClouds[i].Default = false
+		}
+	}
+	return found
+}
+
+// RemoveCloud supprime une connexion cloud (insensible à la casse). Renvoie le nom réel supprimé
+// (pour retirer le secret du coffre avec la bonne casse) et un booléen de succès.
+func (c *Config) RemoveCloud(name string) (string, bool) {
+	out := c.FileClouds[:0]
+	removed, wasDefault := "", false
+	for _, fc := range c.FileClouds {
+		if eqName(fc.Name, name) {
+			removed, wasDefault = fc.Name, fc.Default
+			continue
+		}
+		out = append(out, fc)
+	}
+	c.FileClouds = out
+	if removed == "" {
+		return "", false
+	}
+	if wasDefault && len(c.FileClouds) > 0 {
+		c.FileClouds[0].Default = true
+	}
+	return removed, true
+}
+
+// FindBackup renvoie un plan de sauvegarde par nom (insensible à la casse), ou nil.
+func (c *Config) FindBackup(name string) *BackupPlan {
+	for i := range c.Backups {
+		if eqName(c.Backups[i].Name, name) {
+			return &c.Backups[i]
+		}
+	}
+	return nil
+}
+
+// RemoveBackup supprime un plan de sauvegarde par nom. Renvoie vrai si trouvé.
+func (c *Config) RemoveBackup(name string) bool {
+	out := c.Backups[:0]
+	found := false
+	for _, b := range c.Backups {
+		if eqName(b.Name, name) {
+			found = true
+			continue
+		}
+		out = append(out, b)
+	}
+	c.Backups = out
+	return found
+}
+
+// --- KERNEL (v1.11) ---------------------------------------------------------------------------
+
+// FindKernel renvoie le KERNEL par nom (insensible à la casse), ou nil.
+func (c *Config) FindKernel(name string) *Kernel {
+	for i := range c.Kernels {
+		if eqName(c.Kernels[i].Name, name) {
+			return &c.Kernels[i]
+		}
+	}
+	return nil
+}
+
+// ActiveKernelRef renvoie le KERNEL actif (ActiveKernel), à défaut le premier, ou nil.
+func (c *Config) ActiveKernelRef() *Kernel {
+	if c.ActiveKernel != "" {
+		if k := c.FindKernel(c.ActiveKernel); k != nil {
+			return k
+		}
+	}
+	if len(c.Kernels) > 0 {
+		return &c.Kernels[0]
+	}
+	return nil
+}
+
+// ResolveKernel sélectionne un KERNEL par nom ; nom vide => KERNEL actif.
+func (c *Config) ResolveKernel(name string) *Kernel {
+	if name == "" {
+		return c.ActiveKernelRef()
+	}
+	return c.FindKernel(name)
+}
+
+// SetActiveKernel marque un KERNEL comme actif (nom canonique). Renvoie vrai si trouvé.
+func (c *Config) SetActiveKernel(name string) bool {
+	k := c.FindKernel(name)
+	if k == nil {
+		return false
+	}
+	c.ActiveKernel = k.Name
+	return true
+}
+
+// RemoveKernel supprime un KERNEL par nom. Si c'était l'actif, promeut le premier restant.
+func (c *Config) RemoveKernel(name string) bool {
+	out := c.Kernels[:0]
+	removed, wasActive := "", false
+	for _, k := range c.Kernels {
+		if eqName(k.Name, name) {
+			removed, wasActive = k.Name, eqName(c.ActiveKernel, k.Name)
+			continue
+		}
+		out = append(out, k)
+	}
+	c.Kernels = out
+	if removed == "" {
+		return false
+	}
+	if wasActive {
+		c.ActiveKernel = ""
+		if len(c.Kernels) > 0 {
+			c.ActiveKernel = c.Kernels[0].Name
+		}
+	}
+	return true
+}
+
+// --- SPOKES (v1.11) ---------------------------------------------------------------------------
+
+// FindSpoke renvoie le spoke par nom (insensible à la casse), ou nil.
+func (c *Config) FindSpoke(name string) *Spoke {
+	for i := range c.Spokes {
+		if eqName(c.Spokes[i].Name, name) {
+			return &c.Spokes[i]
+		}
+	}
+	return nil
+}
+
+// RemoveSpoke supprime un spoke par nom. Renvoie vrai si trouvé.
+func (c *Config) RemoveSpoke(name string) bool {
+	out := c.Spokes[:0]
+	found := false
+	for _, sp := range c.Spokes {
+		if eqName(sp.Name, name) {
+			found = true
+			continue
+		}
+		out = append(out, sp)
+	}
+	c.Spokes = out
+	return found
 }
 
 // AddLocalRepo enregistre un dépôt local (chemin nettoyé, sans doublon).

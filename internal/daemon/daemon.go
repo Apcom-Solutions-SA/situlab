@@ -126,12 +126,47 @@ const (
 	OpPINSet       = "pin.set"
 	// Projets atelier↔production (v1.7.1) — lecture (la création reste en fenêtre).
 	OpProjectList    = "project.list"
+	OpProjectLight   = "project.light" // carte IA : dépôts + liens local↔atelier↔vitrine + kernel/spoke/tag
 	OpProjectStatus  = "project.status"
 	OpProjectPromote = "project.promote" // publication atelier→prod (PIN)
 	// Signature de garantie « SituLab approved » (lecture libre ; génération/installation sous session).
 	OpAttestStatus = "attest.status"
 	OpAttestGenKey = "attest.genkey"
 	OpAttestCert   = "attest.install-cert"
+	// Clouds de fichiers souverains (CORPUS, v1.10). Connexion + exploration + gestes de fichiers.
+	// L'allowlist de dossiers (que l'IA voit) est appliquée ICI, à la frontière agent ; la fenêtre
+	// (humain, via app.go in-process) n'y est pas soumise. Les réglages allowlist/politique PIN
+	// restent FENÊTRE UNIQUEMENT (aucune Op).
+	OpCloudConns   = "cloud.connections" // liste des connexions cloud (sans secret)
+	OpCloudAdd     = "cloud.add"
+	OpCloudRemove  = "cloud.remove"
+	OpCloudDef     = "cloud.default"
+	OpCloudAllowed = "cloud.allowed" // dossiers autorisés à l'IA pour une connexion
+	OpCloudList    = "cloud.list"    // contenu d'un dossier
+	OpCloudGet     = "cloud.get"     // télécharger (octets)
+	OpCloudRead    = "cloud.read"    // lire le texte d'un fichier
+	OpCloudMkdir   = "cloud.mkdir"
+	OpCloudUpload  = "cloud.upload" // envoyer un fichier local
+	OpCloudWrite   = "cloud.write"  // écrire/remplacer un fichier (contenu fourni)
+	OpCloudDelete  = "cloud.delete"
+	// Sauvegardes git → cloud (v1.10).
+	OpBackupList   = "backup.list"
+	OpBackupAdd    = "backup.add"
+	OpBackupRemove = "backup.remove"
+	OpBackupRun    = "backup.run"
+	// KERNEL (v1.11) : la mémoire, lisible. Lecture (liste, état, carte du contenu) + gestes mémoire
+	// (récupérer, enregistrer). La DÉSIGNATION (ajout/retrait/actif) reste FENÊTRE UNIQUEMENT (aucune Op).
+	OpKernelList     = "kernel.list"
+	OpKernelStatus   = "kernel.status"
+	OpKernelContents = "kernel.contents"
+	OpKernelPull     = "kernel.pull"
+	OpKernelSave     = "kernel.save" // récupérer → enregistrer → envoyer (PIN, même portillon que push)
+	// SPOKES (v1.11) : projections de mission. Désignation réservée à la fenêtre (aucune Op).
+	OpSpokeList     = "spoke.list"
+	OpSpokeStatus   = "spoke.status"
+	OpSpokeContents = "spoke.contents"
+	OpSpokePull     = "spoke.pull"
+	OpSpokeSave     = "spoke.save"
 )
 
 // Args porte les paramètres de toutes les opérations (seuls les champs utiles sont remplis).
@@ -183,6 +218,11 @@ type Args struct {
 	Force       bool     `json:"force,omitempty"`       // git.branch-delete / git.worktree-remove : forcer malgré refus git
 	Create      bool     `json:"create,omitempty"`      // git.worktree-add : créer une NOUVELLE branche (sinon extraire l'existante)
 	Intent      string   `json:"intent,omitempty"`      // Point 4 : phrase libre de l'agent (« pourquoi »), AFFICHÉE telle quelle dans la fenêtre PIN, distincte des actions constatées par SituLab. N'autorise rien.
+	// Clouds de fichiers (v1.10)
+	Cloud   string `json:"cloud,omitempty"`   // nom de la connexion cloud
+	Content string `json:"content,omitempty"` // cloud.write : contenu texte à écrire
+	Local   string `json:"local,omitempty"`   // cloud.upload : chemin local source ; cloud.get/download : destination locale
+	Dest    string `json:"dest,omitempty"`    // backup.add : dossier cloud de destination
 }
 
 // Status est l'état renvoyé par OpStatus.
@@ -277,7 +317,9 @@ func isWriteOp(op string) bool {
 		OpPullCreate, OpPullMerge, OpPullReview, OpPullState, OpPullEdit,
 		OpReleaseNew, OpReleaseDel, OpTagNew, OpTagDel,
 		OpAdminUserNew, OpTokenMgrNew, OpTokenMgrDel,
-		OpGitPushForce, OpGitPushTag, OpProjectPromote:
+		OpGitPushForce, OpGitPushTag, OpProjectPromote,
+		OpCloudMkdir, OpCloudUpload, OpCloudWrite, OpCloudDelete, OpBackupRun,
+		OpKernelSave, OpSpokeSave:
 		return true
 	}
 	return false
@@ -377,7 +419,7 @@ func clampIntent(s string) string {
 // Défaut prudent (op inconnue) : administration utilisateur, toujours sous PIN.
 func actionOf(op string) config.PINAction {
 	switch op {
-	case OpPush, OpSync, OpGitPushForce, OpGitPushTag, OpProjectPromote:
+	case OpPush, OpSync, OpGitPushForce, OpGitPushTag, OpProjectPromote, OpKernelSave, OpSpokeSave:
 		return config.ActionPush
 	case OpIssueCreate, OpIssueComment, OpIssueState, OpIssueEdit,
 		OpIssueLabels, OpIssueAssign, OpIssueMilestn,
@@ -397,7 +439,7 @@ func actionOf(op string) config.PINAction {
 // distingue notamment les suppressions, à montrer en rouge). N'autorise rien : pur habillage.
 func actionLabel(op string) string {
 	switch op {
-	case OpPush, OpSync, OpGitPushForce, OpGitPushTag:
+	case OpPush, OpSync, OpGitPushForce, OpGitPushTag, OpKernelSave, OpSpokeSave:
 		return "push"
 	case OpProjectPromote:
 		return "promote"
@@ -428,6 +470,35 @@ func (d *Daemon) writePIN(reason string, detail any, action, intent string) (str
 	default: // refusé / indisponible
 		return "", core.ErrPINNeeded
 	}
+}
+
+// gateCloud applique la politique PIN de la connexion CLOUD pour une mutation (même modèle que
+// gate() côté git, mais sur la politique cloud write/delete). Le cœur revérifie (fail-closed).
+func (d *Daemon) gateCloud(op string, a Args, reason string) (string, error) {
+	act := config.CloudWrite
+	label := "create"
+	if op == OpCloudDelete {
+		act = config.CloudDelete
+		label = "delete"
+	}
+	intent := clampIntent(a.Intent)
+	if d.svc.RequiresPINCloud(a.Cloud, act) {
+		return d.writePIN(reason, nil, label, intent)
+	}
+	if err := d.ensureUnlockedCtx(reason, nil, label, intent); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+// cloudGuard impose l'allowlist de dossiers À LA FRONTIÈRE AGENT (CLI/MCP passent par le démon).
+// La fenêtre (humain) appelle le cœur en direct (app.go) et n'est donc pas soumise à cette borne :
+// c'est l'humain qui CHOISIT le périmètre, l'agent qui s'y tient. Fail-closed.
+func (d *Daemon) cloudGuard(cloud, p string) error {
+	if !d.svc.CloudPathAllowed(cloud, p) {
+		return core.ErrCloudForbidden
+	}
+	return nil
 }
 
 func (d *Daemon) dispatch(op string, a Args) (any, error) {
@@ -651,6 +722,8 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 		return d.withSession(func() (any, error) { return d.svc.ConsolidatedDirectory() })
 	case OpProjectList:
 		return d.svc.Projects(), nil // config locale, pas de session requise
+	case OpProjectLight:
+		return d.svc.ProjectsLight(), nil // config + git local (liens, kernel/spoke/tag) ; pas de session
 	case OpProjectStatus:
 		return d.withSession(func() (any, error) { return d.svc.ProjectStatus(a.Name) })
 	case OpProjectPromote:
@@ -856,6 +929,157 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 		}
 		out, perr := d.svc.GitPushTag(a.Instance, a.Path, a.Tag, pin)
 		return mapStrErr("output", out, perr)
+
+	// --- Clouds de fichiers souverains (CORPUS, v1.10) ---
+	case OpCloudConns:
+		return d.svc.FileClouds(), nil // noms/types, aucun secret
+	case OpCloudAllowed:
+		return map[string][]string{"dirs": d.svc.CloudAllowedDirs(a.Cloud)}, nil
+	case OpCloudAdd:
+		if err := d.ensureUnlocked(); err != nil {
+			return nil, err
+		}
+		return nil, d.svc.AddFileCloud(a.Name, a.Provider, a.URL, a.User, a.Password)
+	case OpCloudRemove:
+		return nil, d.svc.RemoveFileCloud(a.Name)
+	case OpCloudDef:
+		return nil, d.svc.SetDefaultCloud(a.Name)
+	case OpCloudList:
+		return d.withSession(func() (any, error) {
+			if err := d.cloudGuard(a.Cloud, a.Path); err != nil {
+				return nil, err
+			}
+			return d.svc.CloudList(a.Cloud, a.Path)
+		})
+	case OpCloudGet:
+		return d.withSession(func() (any, error) {
+			if err := d.cloudGuard(a.Cloud, a.Path); err != nil {
+				return nil, err
+			}
+			if a.Local == "" {
+				return nil, errors.New("destination locale requise")
+			}
+			return nil, d.svc.CloudDownload(a.Cloud, a.Path, a.Local)
+		})
+	case OpCloudRead:
+		return d.withSession(func() (any, error) {
+			if err := d.cloudGuard(a.Cloud, a.Path); err != nil {
+				return nil, err
+			}
+			txt, err := d.svc.CloudRead(a.Cloud, a.Path)
+			return map[string]string{"content": txt}, err
+		})
+	case OpCloudMkdir:
+		if err := d.cloudGuard(a.Cloud, a.Path); err != nil {
+			return nil, err
+		}
+		pin, err := d.gateCloud(op, a, "Autoriser la création du dossier « "+a.Path+" »")
+		if err != nil {
+			return nil, err
+		}
+		return nil, d.svc.CloudMkdir(a.Cloud, a.Path, pin)
+	case OpCloudUpload:
+		if err := d.cloudGuard(a.Cloud, a.Path); err != nil { // a.Path = dossier cloud de destination
+			return nil, err
+		}
+		pin, err := d.gateCloud(op, a, "Autoriser l'envoi d'un fichier vers « "+a.Path+" »")
+		if err != nil {
+			return nil, err
+		}
+		return nil, d.svc.CloudUpload(a.Cloud, a.Local, a.Path, pin)
+	case OpCloudWrite:
+		if err := d.cloudGuard(a.Cloud, a.Path); err != nil {
+			return nil, err
+		}
+		pin, err := d.gateCloud(op, a, "Autoriser l'écriture du fichier « "+a.Path+" »")
+		if err != nil {
+			return nil, err
+		}
+		return nil, d.svc.CloudWrite(a.Cloud, a.Path, a.Content, pin)
+	case OpCloudDelete:
+		if err := d.cloudGuard(a.Cloud, a.Path); err != nil {
+			return nil, err
+		}
+		pin, err := d.gateCloud(op, a, "Autoriser la suppression de « "+a.Path+" »")
+		if err != nil {
+			return nil, err
+		}
+		return nil, d.svc.CloudDelete(a.Cloud, a.Path, pin)
+
+	// --- Sauvegardes git → cloud (v1.10) ---
+	case OpBackupList:
+		return d.svc.Backups(), nil
+	case OpBackupAdd:
+		return nil, d.svc.AddBackupPlan(a.Name, a.Path, a.Cloud, a.Dest)
+	case OpBackupRemove:
+		return nil, d.svc.RemoveBackupPlan(a.Name)
+	case OpBackupRun:
+		cloud := ""
+		for _, b := range d.svc.Backups() {
+			if strings.EqualFold(b.Name, a.Name) {
+				cloud = b.Cloud
+				break
+			}
+		}
+		a.Cloud = cloud
+		pin, err := d.gateCloud(OpCloudWrite, a, "Autoriser la sauvegarde « "+a.Name+" » vers le cloud")
+		if err != nil {
+			return nil, err
+		}
+		out, rerr := d.svc.RunBackup(a.Name, pin)
+		return mapStrErr("path", out, rerr)
+
+	// --- KERNEL (v1.11) : la mémoire, lisible ---
+	case OpKernelList:
+		return d.svc.Kernels(), nil // config locale, pas de session requise
+	case OpKernelStatus:
+		return d.svc.KernelStatus(a.Name) // état git LOCAL, sans réseau
+	case OpKernelContents:
+		return d.svc.KernelContents(a.Name) // lecture disque
+	case OpKernelPull:
+		return d.withSession(func() (any, error) {
+			out, err := d.svc.KernelPull(a.Name)
+			return mapStrErr("output", out, err)
+		})
+	case OpKernelSave:
+		// Résout le dépôt réel du KERNEL pour que la politique PIN et l'aperçu d'envoi portent sur LUI
+		// (gate() lit a.Instance/a.Path). Le cœur re-résout ensuite par nom (source de vérité).
+		for _, k := range d.svc.Kernels() {
+			if (a.Name == "" && k.Active) || strings.EqualFold(k.Name, a.Name) {
+				a.Instance, a.Path = k.Instance, k.LocalPath
+				break
+			}
+		}
+		pin, err := d.gate(op, a, "Autoriser l'enregistrement de vos notes dans le KERNEL (récupérer, enregistrer, envoyer)")
+		if err != nil {
+			return nil, err
+		}
+		return d.svc.KernelSave(a.Name, a.Message, pin)
+
+	// --- SPOKES (v1.11) : projections de mission ---
+	case OpSpokeList:
+		return d.svc.Spokes(), nil
+	case OpSpokeStatus:
+		return d.svc.SpokeStatus(a.Name)
+	case OpSpokeContents:
+		return d.svc.SpokeContents(a.Name)
+	case OpSpokePull:
+		return d.withSession(func() (any, error) {
+			out, err := d.svc.SpokePull(a.Name)
+			return mapStrErr("output", out, err)
+		})
+	case OpSpokeSave:
+		for _, sp := range d.svc.Spokes() {
+			if strings.EqualFold(sp.Name, a.Name) {
+				a.Instance, a.Path = sp.Instance, sp.LocalPath
+				break
+			}
+		}
+		pin, err := d.gate(op, a, "Autoriser l'enregistrement du spoke « "+a.Name+" » (récupérer, enregistrer, envoyer)")
+		if err != nil {
+			return nil, err
+		}
+		return d.svc.SpokeSave(a.Name, a.Message, pin)
 
 	default:
 		return nil, errors.New("opération inconnue : " + op)

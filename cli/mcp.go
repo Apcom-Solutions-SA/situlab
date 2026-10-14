@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -520,6 +521,117 @@ func mcpTools() []mcpTool {
 			func(a map[string]any) (any, error) {
 				return ok(), svc.SetIssueMilestone(argStr(a, "instance"), argStr(a, "owner"), argStr(a, "repo"), argInt(a, "index"), int64(argInt(a, "milestone_id")))
 			}},
+
+		// --- CORPUS : clouds de fichiers souverains (v1.10) ---
+		// L'agent ne voit QUE les dossiers autorisés par l'humain (allowlist imposée par le démon).
+		// Lectures = session déverrouillée ; écritures = politique PIN de la connexion.
+		{"cloud_connections", "Liste les connexions cloud (CORPUS) configurées (noms/types, aucun secret).", obj(map[string]any{}),
+			func(a map[string]any) (any, error) { return svc.FileClouds() }},
+		{"cloud_allowed_dirs", "Dossiers que l'humain autorise l'IA à consulter sur une connexion — tes points d'entrée.", obj(map[string]any{"cloud": strProp("connexion cloud (vide = défaut)")}),
+			func(a map[string]any) (any, error) { return svc.CloudAllowedDirs(argStr(a, "cloud")) }},
+		{"cloud_list", "Liste le contenu d'un dossier cloud (dans le périmètre autorisé).", obj(map[string]any{"cloud": strProp("connexion (vide = défaut)"), "dir": strProp("dossier cloud")}, "dir"),
+			func(a map[string]any) (any, error) { return svc.CloudList(argStr(a, "cloud"), argStr(a, "dir")) }},
+		{"cloud_read", "Lit le contenu TEXTE d'un fichier cloud (ex. un document du CORPUS).", obj(map[string]any{"cloud": strProp("connexion (vide = défaut)"), "path": strProp("chemin du fichier")}, "path"),
+			func(a map[string]any) (any, error) { return svc.CloudRead(argStr(a, "cloud"), argStr(a, "path")) }},
+		{"cloud_download", "Télécharge un fichier cloud vers un chemin local du poste.", obj(map[string]any{"cloud": strProp("connexion (vide = défaut)"), "path": strProp("fichier cloud"), "local": strProp("destination locale")}, "path", "local"),
+			func(a map[string]any) (any, error) {
+				return ok(), svc.CloudDownload(argStr(a, "cloud"), argStr(a, "path"), argStr(a, "local"))
+			}},
+		{"cloud_mkdir", "Crée un dossier dans le cloud (dans le périmètre autorisé). PIN selon la connexion.", obj(map[string]any{"cloud": strProp("connexion (vide = défaut)"), "path": strProp("dossier à créer")}, "path"),
+			func(a map[string]any) (any, error) {
+				return ok(), svc.CloudMkdir(argStr(a, "cloud"), argStr(a, "path"))
+			}},
+		{"cloud_write", "Écrit/remplace un fichier cloud à partir d'un contenu texte (ex. déposer un résumé .md). PIN selon la connexion.", obj(map[string]any{"cloud": strProp("connexion (vide = défaut)"), "path": strProp("chemin du fichier"), "content": strProp("contenu texte")}, "path", "content"),
+			func(a map[string]any) (any, error) {
+				return ok(), svc.CloudWrite(argStr(a, "cloud"), argStr(a, "path"), argStr(a, "content"))
+			}},
+		{"cloud_upload", "Envoie un fichier LOCAL du poste vers un dossier cloud (dans le périmètre autorisé). PIN selon la connexion.", obj(map[string]any{"cloud": strProp("connexion (vide = défaut)"), "local": strProp("fichier local source"), "dir": strProp("dossier cloud de destination")}, "local", "dir"),
+			func(a map[string]any) (any, error) {
+				return ok(), svc.CloudUpload(argStr(a, "cloud"), argStr(a, "local"), argStr(a, "dir"))
+			}},
+		{"cloud_delete", "Supprime un fichier ou un dossier cloud (dans le périmètre autorisé). PIN requis par défaut.", obj(map[string]any{"cloud": strProp("connexion (vide = défaut)"), "path": strProp("chemin à supprimer")}, "path"),
+			func(a map[string]any) (any, error) {
+				return ok(), svc.CloudDelete(argStr(a, "cloud"), argStr(a, "path"))
+			}},
+
+		// --- Sauvegardes git → cloud (v1.10) ---
+		{"backup_list", "Liste les plans de sauvegarde git → cloud.", obj(map[string]any{}),
+			func(a map[string]any) (any, error) { return svc.Backups() }},
+		{"backup_run", "Exécute un plan de sauvegarde (bundle de l'historique → cloud). PIN selon la connexion.", obj(map[string]any{"name": strProp("nom du plan")}, "name"),
+			func(a map[string]any) (any, error) { return svc.RunBackup(argStr(a, "name")) }},
+
+		// --- KERNEL : la mémoire, lisible (v1.11) ---
+		// Lecture + gestes mémoire. La DÉSIGNATION (quel dépôt est le KERNEL) reste réservée à l'humain
+		// en fenêtre — volontairement hors de la surface agent.
+		{"kernel_list", "Liste les KERNEL (dépôts-mémoire) désignés ; l'actif est marqué.", obj(map[string]any{}),
+			func(a map[string]any) (any, error) { return svc.Kernels() }},
+		{"kernel_status", "État lisible de la mémoire (à jour / notes à envoyer / notes à récupérer). Nom vide = KERNEL actif.", obj(map[string]any{"name": strProp("nom du KERNEL (vide = actif)")}),
+			func(a map[string]any) (any, error) { return svc.KernelStatus(argStr(a, "name")) }},
+		{"kernel_contents", "Carte du contenu du KERNEL : dossiers/dépôts qu'il englobe. Nom vide = KERNEL actif.", obj(map[string]any{"name": strProp("nom du KERNEL (vide = actif)")}),
+			func(a map[string]any) (any, error) { return svc.KernelContents(argStr(a, "name")) }},
+		{"kernel_pull", "Récupère les dernières notes du KERNEL (fast-forward). Nom vide = KERNEL actif.", obj(map[string]any{"name": strProp("nom du KERNEL (vide = actif)")}),
+			func(a map[string]any) (any, error) {
+				out, err := svc.KernelPull(argStr(a, "name"))
+				if err != nil {
+					return nil, err
+				}
+				return toolText(out), nil
+			}},
+		{"kernel_save", "Enregistre vos notes dans le KERNEL (récupérer → enregistrer → envoyer). PIN sur le poste. Nom vide = actif.", obj(map[string]any{"name": strProp("nom du KERNEL (vide = actif)"), "message": strProp("libellé de l'enregistrement (sinon daté)")}),
+			func(a map[string]any) (any, error) { return svc.KernelSave(argStr(a, "name"), argStr(a, "message")) }},
+		{"kernel_open", "Fichier d'OUVERTURE du KERNEL pour l'IA : à lire en premier pour « ouvrir » la mémoire. Renvoie run_file (relatif) et run_abs (absolu, prêt à lire). Nom vide = KERNEL actif. L'humain définit ce fichier en fenêtre.", obj(map[string]any{"name": strProp("nom du KERNEL (vide = actif)")}),
+			func(a map[string]any) (any, error) {
+				ks, err := svc.Kernels()
+				if err != nil {
+					return nil, err
+				}
+				name := argStr(a, "name")
+				for i := range ks {
+					if (name == "" && ks[i].Active) || (name != "" && strings.EqualFold(ks[i].Name, name)) {
+						return runOpenInfo{Name: ks[i].Name, LocalPath: ks[i].LocalPath, RunFile: ks[i].RunFile, RunAbs: runAbs(ks[i].LocalPath, ks[i].RunFile)}, nil
+					}
+				}
+				if name == "" && len(ks) > 0 {
+					return runOpenInfo{Name: ks[0].Name, LocalPath: ks[0].LocalPath, RunFile: ks[0].RunFile, RunAbs: runAbs(ks[0].LocalPath, ks[0].RunFile)}, nil
+				}
+				return nil, fmt.Errorf("aucun KERNEL désigné")
+			}},
+
+		// --- SPOKES : projections de mission (v1.11) ---
+		{"spoke_list", "Liste les spokes (projections de mission) et leur KERNEL parent.", obj(map[string]any{}),
+			func(a map[string]any) (any, error) { return svc.Spokes() }},
+		{"spoke_status", "État lisible d'un spoke (à jour / à envoyer / à récupérer).", obj(map[string]any{"name": strProp("nom du spoke")}, "name"),
+			func(a map[string]any) (any, error) { return svc.SpokeStatus(argStr(a, "name")) }},
+		{"spoke_contents", "Carte du contenu d'un spoke (dossiers/dépôts qu'il englobe).", obj(map[string]any{"name": strProp("nom du spoke")}, "name"),
+			func(a map[string]any) (any, error) { return svc.SpokeContents(argStr(a, "name")) }},
+		{"spoke_pull", "Récupère les dernières nouveautés d'un spoke (fast-forward).", obj(map[string]any{"name": strProp("nom du spoke")}, "name"),
+			func(a map[string]any) (any, error) {
+				out, err := svc.SpokePull(argStr(a, "name"))
+				if err != nil {
+					return nil, err
+				}
+				return toolText(out), nil
+			}},
+		{"spoke_save", "Enregistre et envoie le travail d'un spoke (récupérer → enregistrer → envoyer). PIN sur le poste.", obj(map[string]any{"name": strProp("nom du spoke"), "message": strProp("libellé (sinon daté)")}, "name"),
+			func(a map[string]any) (any, error) { return svc.SpokeSave(argStr(a, "name"), argStr(a, "message")) }},
+		{"spoke_open", "Fichier RUN du spoke pour l'IA (à lire en premier). Renvoie run_file (relatif) + run_abs (absolu).", obj(map[string]any{"name": strProp("nom du spoke")}, "name"),
+			func(a map[string]any) (any, error) {
+				sp, err := svc.Spokes()
+				if err != nil {
+					return nil, err
+				}
+				name := argStr(a, "name")
+				for _, s := range sp {
+					if strings.EqualFold(s.Name, name) {
+						return runOpenInfo{Name: s.Name, LocalPath: s.LocalPath, RunFile: s.RunFile, RunAbs: runAbs(s.LocalPath, s.RunFile), Kernel: s.Kernel}, nil
+					}
+				}
+				return nil, fmt.Errorf("spoke « %s » introuvable", name)
+			}},
+
+		// --- CARTE pour l'IA : la couche de classement SituLab (v1.11) ---
+		{"situlab_map", "Carte des dépôts : pour chaque dépôt appairé, son rôle (KERNEL/spoke/normal), son tag projet, le clone LOCAL, le dépôt ATELIER et le nombre de VITRINES. Le lien local↔atelier est l'origin (exact) ; la vitrine est une PRODUCTION séparée reliée par promotion. Point d'entrée pour comprendre l'organisation du poste.", obj(map[string]any{}),
+			func(a map[string]any) (any, error) { return svc.ProjectsLight() }},
 	}
 }
 

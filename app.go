@@ -17,6 +17,7 @@ import (
 	"situlab/internal/forgejo"
 	"situlab/internal/gitx"
 	"situlab/internal/ipc"
+	"situlab/internal/webdav"
 
 	wailsrt "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -35,6 +36,14 @@ func (a *App) FocusWindow() {
 // saisie du PIN soit immédiate, sans clic préalable (hook standard Wails).
 func (a *App) domReady(ctx context.Context) {
 	wailsrt.WindowShow(ctx)
+	// Glisser-déposer de fichiers (CORPUS, v1.11) : Wails fournit les CHEMINS ABSOLUS des fichiers
+	// déposés. On les relaie au frontend, qui décide (vue CORPUS active) de les envoyer au cloud, dans
+	// le dossier courant, sous la politique PIN de la connexion.
+	wailsrt.OnFileDrop(ctx, func(x, y int, paths []string) {
+		if len(paths) > 0 {
+			wailsrt.EventsEmit(ctx, "corpus:drop", paths)
+		}
+	})
 }
 
 // PickFolder ouvre le sélecteur de dossier natif et renvoie le chemin choisi (vide si
@@ -532,6 +541,54 @@ func (a *App) ProjectBoards() ([]core.ProjectBoard, error) {
 		return nil, err
 	}
 	return a.svc.ProjectBoards()
+}
+
+// RepoMatrix assemble la matrice des dépôts (ateliers, vitrines, clones locaux) et propose les
+// appariements local↔atelier↔vitrine à transformer en projets. Action de service « Organiser mes
+// dépôts » — lecture réseau, l'humain confirme chaque liaison.
+func (a *App) RepoMatrix() (*core.RepoMatrix, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.RepoMatrix()
+}
+
+// ArchivePairing range une suggestion d'appariement (réversible, sans suppression).
+func (a *App) ArchivePairing(key string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.ArchivePairing(key)
+}
+
+// UnarchivePairing repasse une suggestion archivée en « en attente » d'appairage.
+func (a *App) UnarchivePairing(key string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.UnarchivePairing(key)
+}
+
+// PairingDelete supprime les dépôts d'une ligne (distants : définitif, sous PIN). wipeLocal=false :
+// le clone local est retiré du suivi (fichiers conservés) ; wipeLocal=true : le dossier local est
+// EFFACÉ du disque (irréversible) puis retiré du suivi.
+func (a *App) PairingDelete(localPath string, wipeLocal bool, atelier config.RepoRef, productions []config.RepoRef, pin string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	err := a.svc.PairingDelete(localPath, wipeLocal, atelier, productions, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return err
+}
+
+// SetProjectTag classe un projet dans un « tag projet » (groupe libre) ; tag vide = non classé.
+func (a *App) SetProjectTag(name, tag string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetProjectTag(name, tag)
 }
 
 // AddProject crée un projet (atelier obligatoire, vitrines facultatives). icon = emoji/picto choisi.
@@ -1091,4 +1148,381 @@ func (a *App) SetIssueMilestone(instance, owner, repo string, index int, milesto
 		return err
 	}
 	return a.svc.SetIssueMilestone(instance, owner, repo, index, milestoneID, pin)
+}
+
+// --- Clouds de fichiers souverains (CORPUS, v1.10) ---
+// La fenêtre (humain) a un accès COMPLET : c'est elle qui choisit ce que l'IA pourra voir.
+// L'allowlist n'est imposée qu'aux agents (CLI/MCP, via le démon), jamais ici.
+
+func (a *App) FileClouds() ([]config.FileCloud, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.FileClouds(), nil
+}
+
+// CloudResolveURL valide/normalise une URL de cloud sans connexion (tunnel d'ajout, étape URL).
+func (a *App) CloudResolveURL(kind, url, user string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.CloudResolveURL(kind, url, user)
+}
+
+func (a *App) AddFileCloud(name, kind, url, user, password string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.AddFileCloud(name, kind, url, user, password)
+}
+
+func (a *App) RemoveFileCloud(name string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.RemoveFileCloud(name)
+}
+
+func (a *App) SetDefaultCloud(name string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetDefaultCloud(name)
+}
+
+// SetCloudAllowedDirs — FENÊTRE UNIQUEMENT (non exposé socket/CLI/MCP) : l'humain choisit les
+// dossiers visibles par l'IA.
+func (a *App) SetCloudAllowedDirs(name string, dirs []string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetCloudAllowedDirs(name, dirs)
+}
+
+// SetCloudAccess — FENÊTRE UNIQUEMENT : l'humain règle l'accès de l'IA par ARBRE (autorisations +
+// exclusions fines) en un seul geste.
+func (a *App) SetCloudAccess(name string, allowed, denied []string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetCloudAccess(name, allowed, denied)
+}
+
+// SetCloudPINPolicy — FENÊTRE UNIQUEMENT : l'humain règle l'exigence de PIN par action cloud.
+func (a *App) SetCloudPINPolicy(name string, pol *config.CloudPINPolicy) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetCloudPINPolicy(name, pol)
+}
+
+func (a *App) CloudList(cloud, dir string) ([]webdav.Entry, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.CloudList(cloud, dir)
+}
+
+func (a *App) CloudRead(cloud, path string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.CloudRead(cloud, path)
+}
+
+// CloudSaveAs ouvre le sélecteur « enregistrer sous » et télécharge le fichier cloud. Renvoie le
+// chemin local écrit (vide si l'utilisateur annule).
+func (a *App) CloudSaveAs(cloud, remotePath string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	if a.ctx == nil {
+		return "", nil
+	}
+	def := remotePath
+	if i := strings.LastIndex(remotePath, "/"); i >= 0 {
+		def = remotePath[i+1:]
+	}
+	dest, err := wailsrt.SaveFileDialog(a.ctx, wailsrt.SaveDialogOptions{Title: "Enregistrer sous", DefaultFilename: def})
+	if err != nil || dest == "" {
+		return "", err
+	}
+	if err := a.svc.CloudDownload(cloud, remotePath, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+func (a *App) CloudMkdir(cloud, path, pin string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	err := a.svc.CloudMkdir(cloud, path, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return err
+}
+
+func (a *App) CloudWrite(cloud, remotePath, content, pin string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	err := a.svc.CloudWrite(cloud, remotePath, content, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return err
+}
+
+func (a *App) CloudDelete(cloud, path, pin string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	err := a.svc.CloudDelete(cloud, path, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return err
+}
+
+// CloudPickAndUpload ouvre le sélecteur multi-fichiers natif et envoie chaque fichier choisi vers
+// le dossier cloud. Renvoie la liste des noms envoyés. Un seul PIN couvre le lot (session ouverte).
+func (a *App) CloudPickAndUpload(cloud, remoteDir, pin string) ([]string, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	if a.ctx == nil {
+		return nil, nil
+	}
+	files, err := wailsrt.OpenMultipleFilesDialog(a.ctx, wailsrt.OpenDialogOptions{Title: "Importer des fichiers vers le cloud"})
+	if err != nil {
+		return nil, err
+	}
+	var sent []string
+	for _, f := range files {
+		if err := a.svc.CloudUpload(cloud, f, remoteDir, pin); err != nil {
+			return sent, err
+		}
+		sent = append(sent, filepath.Base(f))
+	}
+	if len(sent) > 0 {
+		a.afterWrite()
+	}
+	return sent, nil
+}
+
+// CloudUpload envoie un fichier local précis (ex. depuis un glisser-déposer qui a fourni le chemin).
+func (a *App) CloudUpload(cloud, localPath, remoteDir, pin string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	err := a.svc.CloudUpload(cloud, localPath, remoteDir, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return err
+}
+
+// --- Sauvegardes git → cloud (v1.10) ---
+
+// CloudHealth teste la joignabilité de chaque connexion cloud (pour la pastille de santé).
+func (a *App) CloudHealth() ([]core.CloudHealthItem, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.CloudHealth()
+}
+
+func (a *App) Backups() ([]config.BackupPlan, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.Backups(), nil
+}
+
+func (a *App) AddBackupPlan(name, repoPath, cloud, dest string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.AddBackupPlan(name, repoPath, cloud, dest)
+}
+
+func (a *App) RemoveBackupPlan(name string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.RemoveBackupPlan(name)
+}
+
+func (a *App) RunBackup(name, pin string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	out, err := a.svc.RunBackup(name, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return out, err
+}
+
+// --- KERNEL (v1.11) : la mémoire, lisible ---
+// La fenêtre (humain) a l'accès complet, DÉSIGNATION comprise : c'est l'humain qui choisit ce qui
+// fait office de mémoire. La désignation (AddKernel/RemoveKernel/SetActiveKernel) n'est PAS exposée
+// au socket/CLI/MCP — un agent ne choisit jamais sa mémoire.
+
+func (a *App) Kernels() ([]core.KernelInfo, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.Kernels(), nil
+}
+
+func (a *App) KernelStatus(name string) (*core.KernelStatus, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.KernelStatus(name)
+}
+
+func (a *App) KernelContents(name string) ([]core.KernelEntry, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.KernelContents(name)
+}
+
+// ScanGitRepos — FENÊTRE : propose les dépôts git déjà présents sur la machine (connus + exploration)
+// pour faciliter la désignation d'un KERNEL ou d'un spoke sans taper de chemin. Lecture pure.
+func (a *App) ScanGitRepos() ([]core.FoundRepo, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.ScanGitRepos()
+}
+
+// RepoFiles liste les fichiers d'un dépôt local (chemins relatifs) pour choisir un « fichier
+// d'ouverture » dans un arbre filtrable.
+func (a *App) RepoFiles(localPath string) ([]string, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.RepoFiles(localPath)
+}
+
+// SetKernelRunFile définit le fichier d'ouverture (IA locale) d'un KERNEL, par son chemin local.
+func (a *App) SetKernelRunFile(localPath, runFile string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetKernelRunFile(localPath, runFile)
+}
+
+// SetSpokeRunFile définit le fichier d'ouverture (run) d'un spoke, par son chemin local.
+func (a *App) SetSpokeRunFile(localPath, runFile string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetSpokeRunFile(localPath, runFile)
+}
+
+// AddKernel — FENÊTRE UNIQUEMENT : désigner un dépôt local comme KERNEL (mémoire).
+func (a *App) AddKernel(name, localPath, instance, backup string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.AddKernel(name, localPath, instance, backup)
+}
+
+// RemoveKernel — FENÊTRE UNIQUEMENT.
+func (a *App) RemoveKernel(name string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.RemoveKernel(name)
+}
+
+// SetActiveKernel — FENÊTRE UNIQUEMENT : choisir le KERNEL courant.
+func (a *App) SetActiveKernel(name string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetActiveKernel(name)
+}
+
+// KernelPull récupère les dernières notes du KERNEL (sans PIN).
+func (a *App) KernelPull(name string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.KernelPull(name)
+}
+
+// KernelSave enregistre vos notes (récupérer → enregistrer → envoyer, un seul PIN).
+func (a *App) KernelSave(name, message, pin string) (*core.SyncResult, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	res, err := a.svc.KernelSave(name, message, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return res, err
+}
+
+// --- SPOKES (v1.11) : projections de mission (sous-menu KERNEL) ---
+
+func (a *App) Spokes() ([]config.Spoke, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.Spokes(), nil
+}
+
+func (a *App) SpokeStatus(name string) (*core.KernelStatus, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.SpokeStatus(name)
+}
+
+func (a *App) SpokeContents(name string) ([]core.KernelEntry, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.SpokeContents(name)
+}
+
+// AddSpoke — FENÊTRE UNIQUEMENT : désigner un dépôt comme spoke (mission dérivée d'un KERNEL).
+func (a *App) AddSpoke(name, localPath, kernel, mission, instance string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.AddSpoke(name, localPath, kernel, mission, instance)
+}
+
+// RemoveSpoke — FENÊTRE UNIQUEMENT.
+func (a *App) RemoveSpoke(name string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.RemoveSpoke(name)
+}
+
+func (a *App) SpokePull(name string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.SpokePull(name)
+}
+
+func (a *App) SpokeSave(name, message, pin string) (*core.SyncResult, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	res, err := a.svc.SpokeSave(name, message, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return res, err
 }

@@ -112,6 +112,36 @@ func eqProjName(a, b string) bool {
 	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
 
+// SetProjectTag classe un projet dans un « tag projet » (groupe libre). tag vide = non classé. Ne
+// touche à aucun dépôt — c'est un rangement de l'affichage.
+func (s *Service) SetProjectTag(name, tag string) error {
+	if err := s.assertWritable(); err != nil {
+		return err
+	}
+	s.ioMu.Lock()
+	defer s.ioMu.Unlock()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	found := false
+	for i := range cfg.Projects {
+		if eqProjName(cfg.Projects[i].Name, name) {
+			cfg.Projects[i].Tag = strings.TrimSpace(tag)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("projet introuvable : %q", name)
+	}
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	s.publish(cfg)
+	return nil
+}
+
 // RemoveProject retire un projet par nom (ne touche à aucun dépôt).
 func (s *Service) RemoveProject(name string) error {
 	if err := s.assertWritable(); err != nil {
@@ -367,11 +397,16 @@ func (s *Service) localCloneForIdx(ref config.RepoRef, idx map[string]string) st
 // d'atelier et l'alignement des vitrines (qui exigent le réseau) sont réservés au DÉTAIL du projet.
 // C'est le socle de la page d'accueil « classeurs » (1.9.8) : instantanée, sans la lenteur réseau par carte.
 type ProjectLightView struct {
-	Name     string        `json:"name"`
-	Icon     string        `json:"icon"`
-	Atelier  RepoLine      `json:"atelier"`  // instance/owner/repo ; Version volontairement vide (réseau = détail)
-	Vitrines int           `json:"vitrines"` // nombre de productions configurées
-	Local    *ProjectLocal `json:"local"`    // état du clone local (nil = pas sur ce poste)
+	Name      string        `json:"name"`
+	Icon      string        `json:"icon"`
+	Atelier   RepoLine      `json:"atelier"`    // instance/owner/repo ; Version volontairement vide (réseau = détail)
+	Vitrines  int           `json:"vitrines"`   // nombre de productions configurées
+	Local     *ProjectLocal `json:"local"`      // état du clone local (nil = pas sur ce poste)
+	Kernel    bool          `json:"kernel"`     // ce dépôt est désigné comme KERNEL (mémoire) sur ce poste
+	Spoke     bool          `json:"spoke"`      // ce dépôt est désigné comme SPOKE (projection de mission)
+	Tag       string        `json:"tag"`        // groupe de classement (« tag projet ») ; "" = non classé
+	KernelRun string        `json:"kernel_run"` // fichier d'ouverture du KERNEL (si désigné), chemin relatif
+	SpokeRun  string        `json:"spoke_run"`  // fichier run du spoke (si désigné), chemin relatif
 }
 
 // ProjectsLight renvoie l'état d'accueil de TOUS les projets SANS réseau : config + résolution hors-ligne
@@ -382,6 +417,25 @@ func (s *Service) ProjectsLight() []ProjectLightView {
 	s.mu.Lock()
 	s.lockedReload()
 	paths := append([]string(nil), s.cfg.LocalRepos...)
+	// Chemins locaux désignés comme KERNEL (pour marquer les classeurs correspondants).
+	kernelPaths := make(map[string]bool, len(s.cfg.Kernels))
+	kernelRun := make(map[string]string, len(s.cfg.Kernels))
+	for _, k := range s.cfg.Kernels {
+		cp := config.CleanPath(k.LocalPath)
+		kernelPaths[cp] = true
+		if k.RunFile != "" {
+			kernelRun[cp] = k.RunFile
+		}
+	}
+	spokePaths := make(map[string]bool, len(s.cfg.Spokes))
+	spokeRun := make(map[string]string, len(s.cfg.Spokes))
+	for _, sp := range s.cfg.Spokes {
+		cp := config.CleanPath(sp.LocalPath)
+		spokePaths[cp] = true
+		if sp.RunFile != "" {
+			spokeRun[cp] = sp.RunFile
+		}
+	}
 	s.mu.Unlock()
 	// UN SEUL balayage local : SummaryOf porte déjà le remote ET l'état complet, donc on bâtit l'index
 	// remote→chemin et l'état du clone en une passe (plus de double `git status` index + SummaryOf).
@@ -410,11 +464,21 @@ func (s *Service) ProjectsLight() []ProjectLightView {
 		v := ProjectLightView{
 			Name:     p.Name,
 			Icon:     p.Icon,
+			Tag:      p.Tag,
 			Atelier:  RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo},
 			Vitrines: len(p.Productions),
 		}
 		if path := s.localCloneForRefOffline(p.Atelier, idx); path != "" {
 			v.Local = byPath[path]
+			cp := config.CleanPath(path)
+			if kernelPaths[cp] {
+				v.Kernel = true
+				v.KernelRun = kernelRun[cp]
+			}
+			if spokePaths[cp] {
+				v.Spoke = true
+				v.SpokeRun = spokeRun[cp]
+			}
 		}
 		out = append(out, v)
 	}

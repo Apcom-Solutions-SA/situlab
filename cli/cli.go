@@ -103,6 +103,7 @@ func root() *cobra.Command {
 
 	root.AddCommand(cmdVersion(), cmdDoctor(), cmdInstance(), cmdWhoami(), cmdDashboard(),
 		cmdRepo(), cmdIssue(), cmdPull(), cmdRelease(), cmdOrg(), cmdToken(), cmdLocal(), cmdProject(), cmdAttest(), cmdAdmin(), cmdPIN(), cmdMCP(),
+		cmdCloud(), cmdBackup(), cmdKernel(), cmdSpoke(), cmdMap(),
 		cmdUnlock(), cmdLock(), cmdStatus(), cmdPurge())
 	return root
 }

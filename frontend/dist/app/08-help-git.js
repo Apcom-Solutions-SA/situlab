@@ -138,7 +138,7 @@ async function renderHelp() {
     try { infoModal("Avis de droits — NOTICE", `<pre class="license-text">${esc(await App().Notice())}</pre>`); }
     catch (e) { infoModal("NOTICE", `<div class="muted">${esc(cleanErr(e))}</div>`); }
   };
-  el("replay-tour").onclick = () => { navTo("repos"); setTimeout(() => startTour(true), 350); };
+  el("replay-tour").onclick = () => { navTo("organize"); setTimeout(() => startTour(true), 350); };
   el("copy-prompt").onclick = () => aiAgentModal();
 }
 

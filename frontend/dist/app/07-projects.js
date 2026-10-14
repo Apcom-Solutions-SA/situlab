@@ -891,12 +891,22 @@ function chealthHTML(p) {
 
 // classeurCardHTML : un projet = un classeur à onglet (même langage visuel que la carte détail .pboard).
 // Onglet = icône + nom ; corps = atelier + glyphe de santé + verdict. Le classeur entier ouvre le détail.
+// NAV_ICO : les pictos SVG identiques au menu principal, pour les titres de chapitres de Dépôts git.
+const NAV_ICO = {
+  kernel: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z"/><path d="M12 12 3 7.5M12 12l9-4.5M12 12v9"/></svg>`,
+  spokes: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.3"/><ellipse cx="12" cy="12" rx="9.2" ry="4.3" transform="rotate(-28 12 12)"/><circle cx="20" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>`,
+  git: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8.5" r="2.2"/><path d="M6 7.2v9.6M18 10.7c0 3.1-2.2 4.9-5.2 4.9H6"/></svg>`,
+};
+// TAG_ICO : étiquette (tag projet) pour les chapitres de classement.
+const TAG_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9Z"/><circle cx="8" cy="8" r="1.4"/></svg>`;
+
 function classeurCardHTML(p) {
   const atl = p.atelier || {};
   const v = classeurVerdict(p);
-  const aria = `${p.name} — atelier ${atl.owner || ""}/${atl.repo || ""}${p.local ? ", cloné sur ce poste" : ", pas de clone local"}, ${p.vitrines || 0} vitrine(s), ${v.label}`;
-  return `<button type="button" class="classeur" data-open-project="${esc(p.name)}" aria-label="${esc(aria)}">
-    <span class="classeur-tab">${iconHTML(p.icon, "classeur-ico")}<span class="classeur-name">${esc(p.name)}</span></span>
+  const aria = `${p.name}${p.kernel ? " (KERNEL)" : ""}${p.spoke ? " (SPOKE)" : ""} — atelier ${atl.owner || ""}/${atl.repo || ""}${p.local ? ", cloné sur ce poste" : ", pas de clone local"}, ${p.vitrines || 0} vitrine(s), ${v.label}`;
+  const kTab = p.kernel ? `<span class="classeur-kbadge" title="Désigné comme KERNEL (mémoire)">💡 KERNEL</span>` : (p.spoke ? `<span class="classeur-sbadge" title="Désigné comme SPOKE (projection de mission)">🛰 SPOKE</span>` : "");
+  return `<button type="button" class="classeur${p.kernel ? " classeur-kernel" : (p.spoke ? " classeur-spoke" : "")}" data-open-project="${esc(p.name)}" aria-label="${esc(aria)}">
+    <span class="classeur-tab">${iconHTML(p.icon, "classeur-ico")}<span class="classeur-name">${esc(p.name)}</span>${kTab}</span>
     <span class="classeur-body">
       <span class="classeur-repo"><span class="classeur-k">atelier</span> <span class="org">${esc(atl.owner || "")}/</span>${esc(atl.repo || "")}</span>
       <span class="classeur-foot">${chealthHTML(p)}<span class="classeur-state" data-tone="${v.tone}">${esc(v.label)}</span></span>
@@ -914,13 +924,54 @@ function openProject(name) {
 // renderProjects(live) : ACCUEIL « classeurs » — LÉGER et INSTANTANÉ (App().ProjectsLight(), zéro réseau).
 // Le graphe lourd (branches, tags) part au clic, dans le détail. live=true recharge en silence sans
 // flicker (signature). C'est la réponse à « la page Projets est lente » : plus d'appel réseau par carte.
+// updateOrganizeBadge : affiche discrètement « (N en attente) » sur le bouton Organiser. Appel
+// réseau NON bloquant (la page Projets reste légère) ; silencieux si hors ligne / verrouillé.
+async function updateOrganizeBadge() {
+  const btn = el("proj-organize");
+  if (!btn) return;
+  try {
+    const m = await App().RepoMatrix();
+    const n = (m && m.pending) || 0;
+    setPendingPairings(n);
+    applyOrganizeBtn(n);
+  } catch (_) { /* hors ligne / verrouillé : on laisse le libellé nu */ }
+}
+
+// applyOrganizeBtn : le bouton sonne comme une ALERTE quand des dépôts attendent d'être appairés.
+function applyOrganizeBtn(n) {
+  const btn = el("proj-organize");
+  if (!btn) return;
+  if (n > 0) {
+    btn.innerHTML = `⚠ ${n} dépôt${n > 1 ? "s" : ""} à appairer`;
+    btn.classList.add("btn-alarm");
+  } else {
+    btn.textContent = "🧩 Organiser mes dépôts";
+    btn.classList.remove("btn-alarm");
+  }
+}
+
+// setPendingPairings : mémorise le nombre d'appariements en attente et rafraîchit la pastille header.
+function setPendingPairings(n) {
+  state.pendingPairings = n;
+  if (typeof updateHealth === "function") updateHealth();
+}
+
+// refreshPairingAlert : calcule (best-effort) le nombre d'appariements en attente pour alimenter la
+// pastille d'alerte du header — même quand on n'est pas sur la page Dépôts git. Silencieux si KO.
+async function refreshPairingAlert() {
+  try { const m = await App().RepoMatrix(); setPendingPairings((m && m.pending) || 0); }
+  catch (_) {}
+}
+
 async function renderProjects(live) {
   if (!live) {
     el("view").innerHTML = `<div class="view-head view-head-row">
-      <div><div class="view-title">Projets</div><div class="view-sub">Vos classeurs — un clic ouvre le détail et vérifie l'état en ligne.</div></div>
-      <button class="btn btn-primary btn-sm" id="proj-add">＋ Nouveau projet</button></div>
+      <div><div class="view-title">Dépôts git</div><div class="view-sub">Vos dépôts appairés (local ↔ atelier ↔ vitrine) — un clic ouvre le détail et vérifie l'état en ligne.</div></div>
+      <div class="view-head-actions"><button class="btn btn-ghost btn-sm" id="proj-organize">🧩 Organiser mes dépôts</button><button class="btn btn-primary btn-sm" id="proj-add">⇄ Appairer les dépôts</button></div></div>
     <div id="proj-home"><div class="skeleton"></div><div class="skeleton" style="margin-top:10px"></div></div>`;
     el("proj-add").onclick = addProjectModal;
+    el("proj-organize").onclick = () => navTo("organize");
+    updateOrganizeBadge();
     state.projSig = "";
   }
   let rows = [];
@@ -933,15 +984,76 @@ async function renderProjects(live) {
   if (!rows.length) {
     home.innerHTML = `<div class="proj-empty">
       <div class="pe-ico">⇄</div>
-      <div class="pe-title">Reliez votre premier projet</div>
+      <div class="pe-title">Appairez vos premiers dépôts</div>
       <p class="pe-txt">Un projet relie un dépôt <b>atelier</b> à sa <b>vitrine</b>, et montre en une vue l'état entre <b>poste</b>, <b>atelier</b> et <b>prod</b>.</p>
-      <button class="btn btn-primary" id="proj-add2">＋ Créer mon premier projet</button>
+      <div class="pe-act"><button class="btn btn-primary" id="proj-organize2">🧩 Organiser mes dépôts</button><button class="btn btn-ghost" id="proj-add2">⇄ Appairer à la main</button></div>
+      <p class="pe-txt muted" style="margin-top:4px">« Organiser » liste vos dépôts locaux, ateliers et vitrines et vous propose les appariements tout faits.</p>
     </div>`;
     if (el("proj-add2")) el("proj-add2").onclick = addProjectModal;
+    if (el("proj-organize2")) el("proj-organize2").onclick = () => navTo("organize");
     return;
   }
-  home.innerHTML = `<div class="classeur-grid">${rows.map(classeurCardHTML).join("")}</div>`;
-  home.onclick = (ev) => { const c = ev.target.closest("[data-open-project]"); if (c) openProject(c.dataset.openProject); };
+  // Chapitres : « Vos KERNEL », « Mes spokes », puis « Dépôts git » (le reste). Un dépôt KERNEL n'est
+  // pas reproposé en spoke (priorité KERNEL).
+  const kernels = rows.filter((p) => p.kernel);
+  const spokes = rows.filter((p) => p.spoke && !p.kernel);
+  const others = rows.filter((p) => !p.kernel && !p.spoke);
+  const kernelSec = `<div class="proj-sec-h"><span class="sec-ico">${NAV_ICO.kernel}</span> Vos KERNEL</div>${
+    kernels.length
+      ? `<div class="classeur-grid">${kernels.map(classeurCardHTML).join("")}</div>`
+      : `<div class="proj-sec-empty">Aucun KERNEL désigné. <button class="lnk" id="proj-desig-kernel">Désigner un KERNEL</button> parmi vos dépôts appairés.</div>`
+  }`;
+  const spokeSec = `<div class="proj-sec-h" style="margin-top:18px"><span class="sec-ico">${NAV_ICO.spokes}</span> Mes spokes</div>${
+    spokes.length
+      ? `<div class="classeur-grid">${spokes.map(classeurCardHTML).join("")}</div>`
+      : `<div class="proj-sec-empty">Aucun spoke désigné. <button class="lnk" id="proj-desig-spoke">Désigner un spoke</button> parmi vos dépôts appairés.</div>`
+  }`;
+  // Les « autres » sont regroupés par TAG PROJET : un chapitre par tag, puis « Dépôts git non classés ».
+  const allTags = [...new Set(rows.map((p) => (p.tag || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const tagged = {}; const untagged = [];
+  others.forEach((p) => { const t = (p.tag || "").trim(); if (t) { (tagged[t] = tagged[t] || []).push(p); } else untagged.push(p); });
+  // carte « classable » : carte + bouton de tag (ouvre le classement).
+  const cardTag = (p) => {
+    const meta = p.tag
+      ? `<span class="tag-pill">🏷 ${esc(p.tag)}</span><button type="button" class="lnk" data-tag="${esc(p.name)}">modifier</button>`
+      : `<button type="button" class="lnk" data-tag="${esc(p.name)}">🏷 Classer</button>`;
+    return `<div class="desig-wrap">${classeurCardHTML(p)}<div class="desig-meta">${meta}</div></div>`;
+  };
+  const tagSecs = Object.keys(tagged).sort((a, b) => a.localeCompare(b)).map((t) =>
+    `<div class="proj-sec-h" style="margin-top:18px"><span class="sec-ico">${TAG_ICO}</span> ${esc(t)}</div><div class="classeur-grid">${tagged[t].map(cardTag).join("")}</div>`).join("");
+  const unclSec = untagged.length
+    ? `<div class="proj-sec-h" style="margin-top:18px"><span class="sec-ico">${NAV_ICO.git}</span> Dépôts git non classés</div><div class="classeur-grid">${untagged.map(cardTag).join("")}</div>`
+    : "";
+  home.innerHTML = kernelSec + spokeSec + tagSecs + unclSec;
+  home.onclick = (ev) => {
+    const tg = ev.target.closest("[data-tag]");
+    if (tg) { ev.stopPropagation(); return tagProjectModal(tg.dataset.tag, (rows.find((p) => p.name === tg.dataset.tag) || {}).tag || "", allTags); }
+    const c = ev.target.closest("[data-open-project]"); if (c) openProject(c.dataset.openProject);
+  };
+  if (el("proj-desig-kernel")) el("proj-desig-kernel").onclick = () => { navTo("kernel"); setTimeout(() => { if (typeof pickKernelRepo === "function") pickKernelRepo(); }, 60); };
+  if (el("proj-desig-spoke")) el("proj-desig-spoke").onclick = () => { navTo("spokes"); setTimeout(() => { if (typeof pickSpokeRepo === "function") pickSpokeRepo(); }, 60); };
+}
+
+// tagProjectModal : classer un dépôt dans un « tag projet » (groupe). Saisie libre avec suggestions
+// des tags existants ; vide = non classé.
+function tagProjectModal(name, current, allTags) {
+  const list = (allTags || []).map((t) => `<button type="button" class="kparent${config_eq(t, current) ? " on" : ""}" data-t="${esc(t)}"><span class="kparent-ico">🏷</span>${esc(t)}</button>`).join("");
+  openModal(`Classer « ${esc(name)} »`, `<div class="field">
+    <p class="sub">Rangez ce dépôt dans un <b>tag projet</b> (groupe). Choisissez-en un, ou créez-en un nouveau.</p>
+    <div class="kparent-list">
+      <button type="button" class="kparent${current ? "" : " on"}" data-t=""><span class="kparent-ico">∅</span>Non classé</button>
+      ${list}
+    </div>
+    <div class="tp-new"><input id="tp-new-in" class="inp" placeholder="Nouveau tag… (ex. E-direkt)" autocomplete="off" /><button type="button" class="btn btn-ghost btn-sm" id="tp-new-go">＋ Créer</button></div>
+    <div class="inline-error hidden" id="tp-e"></div></div>`, null);
+  el("modal-ok").classList.add("hidden");
+  const apply = async (tag) => {
+    try { await App().SetProjectTag(name, (tag || "").trim()); closeModal(); toast(tag ? "Classé dans « " + tag + " »" : "Déclassé", "ok"); renderProjects(); }
+    catch (e) { if (isLocked(e)) return handleLock(); const er = el("tp-e"); if (er) { er.textContent = cleanErr(e); er.classList.remove("hidden"); } }
+  };
+  el("modal-body").querySelectorAll(".kparent").forEach((b) => b.onclick = () => apply(b.dataset.t));
+  el("tp-new-go").onclick = () => { const v = el("tp-new-in").value.trim(); if (!v) { el("tp-new-in").focus(); return; } apply(v); };
+  el("tp-new-in").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); el("tp-new-go").click(); } };
 }
 
 // renderProject(name) : DÉTAIL d'un projet — le tableau 3 colonnes (réseau pour ce projet seul) + le
@@ -950,7 +1062,7 @@ async function renderProject(name) {
   if (!name) { state.view = "projects"; return renderProjects(); }
   state.projSig = "";
   el("view").innerHTML = `<div class="view-head view-head-row">
-      <div><button class="btn btn-ghost btn-sm" id="proj-back">‹ Projets</button>
+      <div><button class="btn btn-ghost btn-sm" id="proj-back">‹ Dépôts git</button>
       <div class="view-title" style="margin-top:6px">${esc(name)}</div></div></div>
     <div id="proj-board"><div class="skeleton"></div></div>
     <div class="gp-head">🔧 Panneau git</div>
@@ -1001,7 +1113,7 @@ function addProjectModal() {
   m.classList.remove("hidden");
   m.onclick = (ev) => { if (ev.target === m) closeModal(); };
 
-  const head = (n, total, t) => `<h3 id="modal-title">Nouveau projet</h3><div class="wiz-head"><span class="wiz-step">Étape ${n}/${total}</span> · ${esc(t)}</div>`;
+  const head = (n, total, t) => `<h3 id="modal-title">Appairer des dépôts</h3><div class="wiz-head"><span class="wiz-step">Étape ${n}/${total}</span> · ${esc(t)}</div>`;
   function screen(html) { el("modal-body").innerHTML = html; }
   function buttons(okText, okFn) {
     okBtn.classList.toggle("hidden", !okText);
@@ -1119,11 +1231,11 @@ function addProjectModal() {
         <ul class="wiz-recap-prods">${prodList || '<li class="muted">aucune — local + atelier</li>'}</ul>
       </div>
       ${prods.length ? `<button type="button" class="btn btn-ghost btn-sm" id="wiz-more">＋ Ajouter une vitrine</button>` : ""}`);
-    buttons("Créer le projet", finish);
+    buttons("Appairer les dépôts", finish);
     const more = el("wiz-more"); if (more) more.onclick = () => go(stepProdConn);
   }
   async function finish() {
-    try { await App().AddProject(W.name, W.icon, W.atelier, W.productions); closeModal(); toast("Projet créé", "ok"); renderProjects(); }
+    try { await App().AddProject(W.name, W.icon, W.atelier, W.productions); closeModal(); toast("Dépôts appairés", "ok"); renderProjects(); }
     catch (e) { toast(cleanErr(e), "err"); }
   }
 

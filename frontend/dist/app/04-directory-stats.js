@@ -402,16 +402,17 @@ async function refreshWhoami() {
     state.login = u.login;
     const gh = curIsGitHub();
     w.innerHTML = `<span class="dot"></span>${esc(u.login)}${gh ? ' · <span class="prov-tag">GitHub</span>' : (u.is_admin ? " · admin" : "")}`;
-    live.classList.remove("off");
-    // Admin, Statistiques et Tokens sont propres à Forgejo (API absente sur GitHub).
-    const na = el("nav-admin"); if (na) na.classList.toggle("hidden", gh || !u.is_admin); // « Gestion des utilisateurs »
+    if (live) live.classList.remove("off");
+    // Admin et Tokens sont propres à Forgejo (API absente sur GitHub) ; leurs accès vivent désormais
+    // dans Réglages → Connexions git (1.11). On garde les toggles best-effort si les éléments existent.
+    const na = el("nav-admin"); if (na) na.classList.toggle("hidden", gh || !u.is_admin);
     const nt = document.querySelector('.nav-item[data-view="tokens"]'); if (nt) nt.classList.toggle("hidden", gh);
   } catch (e) {
     if (isLocked(e)) { handleLock(); return; }
     state.online = false;
     state.offlineReason = isAuthError(e) ? "auth" : "net";
     w.innerHTML = `<span class="dot off"></span>${state.offlineReason === "auth" ? "déconnecté" : "hors ligne"}`;
-    live.classList.add("off");
+    if (live) live.classList.add("off");
   }
   // Bascule d'état (en ligne ⇄ hors ligne) : si l'écran courant est bridé, on le (dé)verrouille
   // aussitôt — la boucle reste cohérente sans attendre une action de l'utilisateur.

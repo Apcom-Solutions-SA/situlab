@@ -17,6 +17,7 @@ import (
 	"situlab/internal/forgejo"
 	"situlab/internal/gitx"
 	"situlab/internal/ipc"
+	"situlab/internal/webdav"
 )
 
 // remote est le client CLI : il relaie chaque appel au DÉMON résident (qui détient la
@@ -603,6 +604,11 @@ func (r *remote) GitPushTag(instance, path, tag string) (string, error) {
 
 // --- Projets atelier↔production (v1.7.1) : lecture ---
 
+func (r *remote) ProjectsLight() ([]core.ProjectLightView, error) {
+	var v []core.ProjectLightView
+	return v, r.call(daemon.OpProjectLight, daemon.Args{}, &v)
+}
+
 func (r *remote) Projects() ([]config.Project, error) {
 	var v []config.Project
 	return v, r.call(daemon.OpProjectList, daemon.Args{}, &v)
@@ -617,6 +623,148 @@ func (r *remote) ProjectStatus(name string) (*core.ProjectView, error) {
 func (r *remote) ProjectPromote(name string, prodIndex int, sourceBranch, version, targetBranch, mode, notes string) (*core.PromoteResult, error) {
 	var x core.PromoteResult
 	if err := r.call(daemon.OpProjectPromote, daemon.Args{Name: name, Index: prodIndex, Head: sourceBranch, Tag: version, Base: targetBranch, Mode: mode, Body: notes}, &x); err != nil {
+		return nil, err
+	}
+	return &x, nil
+}
+
+// --- Clouds de fichiers souverains (CORPUS, v1.10) ---
+
+func (r *remote) FileClouds() ([]config.FileCloud, error) {
+	var x []config.FileCloud
+	err := r.call(daemon.OpCloudConns, daemon.Args{}, &x)
+	return x, err
+}
+
+func (r *remote) CloudAllowedDirs(cloud string) ([]string, error) {
+	var m map[string][]string
+	if err := r.call(daemon.OpCloudAllowed, daemon.Args{Cloud: cloud}, &m); err != nil {
+		return nil, err
+	}
+	return m["dirs"], nil
+}
+
+func (r *remote) AddFileCloud(name, kind, url, user, password string) error {
+	return r.call(daemon.OpCloudAdd, daemon.Args{Name: name, Provider: kind, URL: url, User: user, Password: password}, nil)
+}
+
+func (r *remote) RemoveFileCloud(name string) error {
+	return r.call(daemon.OpCloudRemove, daemon.Args{Name: name}, nil)
+}
+
+func (r *remote) SetDefaultCloud(name string) error {
+	return r.call(daemon.OpCloudDef, daemon.Args{Name: name}, nil)
+}
+
+func (r *remote) CloudList(cloud, dir string) ([]webdav.Entry, error) {
+	var x []webdav.Entry
+	err := r.call(daemon.OpCloudList, daemon.Args{Cloud: cloud, Path: dir}, &x)
+	return x, err
+}
+
+func (r *remote) CloudDownload(cloud, remotePath, localDest string) error {
+	return r.call(daemon.OpCloudGet, daemon.Args{Cloud: cloud, Path: remotePath, Local: localDest}, nil)
+}
+
+func (r *remote) CloudRead(cloud, path string) (string, error) {
+	return r.callStr(daemon.OpCloudRead, "content", daemon.Args{Cloud: cloud, Path: path})
+}
+
+func (r *remote) CloudMkdir(cloud, path string) error {
+	return r.call(daemon.OpCloudMkdir, daemon.Args{Cloud: cloud, Path: path}, nil)
+}
+
+func (r *remote) CloudUpload(cloud, localPath, remoteDir string) error {
+	return r.call(daemon.OpCloudUpload, daemon.Args{Cloud: cloud, Local: localPath, Path: remoteDir}, nil)
+}
+
+func (r *remote) CloudWrite(cloud, remotePath, content string) error {
+	return r.call(daemon.OpCloudWrite, daemon.Args{Cloud: cloud, Path: remotePath, Content: content}, nil)
+}
+
+func (r *remote) CloudDelete(cloud, path string) error {
+	return r.call(daemon.OpCloudDelete, daemon.Args{Cloud: cloud, Path: path}, nil)
+}
+
+// --- Sauvegardes git → cloud (v1.10) ---
+
+func (r *remote) Backups() ([]config.BackupPlan, error) {
+	var x []config.BackupPlan
+	err := r.call(daemon.OpBackupList, daemon.Args{}, &x)
+	return x, err
+}
+
+func (r *remote) AddBackupPlan(name, repoPath, cloud, dest string) error {
+	return r.call(daemon.OpBackupAdd, daemon.Args{Name: name, Path: repoPath, Cloud: cloud, Dest: dest}, nil)
+}
+
+func (r *remote) RemoveBackupPlan(name string) error {
+	return r.call(daemon.OpBackupRemove, daemon.Args{Name: name}, nil)
+}
+
+func (r *remote) RunBackup(name string) (string, error) {
+	return r.callStr(daemon.OpBackupRun, "path", daemon.Args{Name: name})
+}
+
+// --- KERNEL (v1.11) : la mémoire, lisible ---
+
+func (r *remote) Kernels() ([]core.KernelInfo, error) {
+	var v []core.KernelInfo
+	return v, r.call(daemon.OpKernelList, daemon.Args{}, &v)
+}
+
+func (r *remote) KernelStatus(name string) (*core.KernelStatus, error) {
+	var x core.KernelStatus
+	if err := r.call(daemon.OpKernelStatus, daemon.Args{Name: name}, &x); err != nil {
+		return nil, err
+	}
+	return &x, nil
+}
+
+func (r *remote) KernelContents(name string) ([]core.KernelEntry, error) {
+	var v []core.KernelEntry
+	return v, r.call(daemon.OpKernelContents, daemon.Args{Name: name}, &v)
+}
+
+func (r *remote) KernelPull(name string) (string, error) {
+	return r.callStr(daemon.OpKernelPull, "output", daemon.Args{Name: name})
+}
+
+func (r *remote) KernelSave(name, message string) (*core.SyncResult, error) {
+	var x core.SyncResult
+	if err := r.call(daemon.OpKernelSave, daemon.Args{Name: name, Message: message}, &x); err != nil {
+		return nil, err
+	}
+	return &x, nil
+}
+
+// --- SPOKES (v1.11) ---
+
+func (r *remote) Spokes() ([]config.Spoke, error) {
+	var v []config.Spoke
+	return v, r.call(daemon.OpSpokeList, daemon.Args{}, &v)
+}
+
+func (r *remote) SpokeStatus(name string) (*core.KernelStatus, error) {
+	var x core.KernelStatus
+	if err := r.call(daemon.OpSpokeStatus, daemon.Args{Name: name}, &x); err != nil {
+		return nil, err
+	}
+	return &x, nil
+}
+
+func (r *remote) SpokeContents(name string) ([]core.KernelEntry, error) {
+	var v []core.KernelEntry
+	return v, r.call(daemon.OpSpokeContents, daemon.Args{Name: name}, &v)
+}
+
+func (r *remote) SpokePull(name string) (string, error) {
+	return r.callStr(daemon.OpSpokePull, "output", daemon.Args{Name: name})
+}
+
+func (r *remote) SpokeSave(name, message string) (*core.SyncResult, error) {
+	var x core.SyncResult
+	if err := r.call(daemon.OpSpokeSave, daemon.Args{Name: name, Message: message}, &x); err != nil {
 		return nil, err
 	}
 	return &x, nil

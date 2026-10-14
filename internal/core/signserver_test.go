@@ -111,6 +111,8 @@ func TestAttestCommitServerMode(t *testing.T) {
 
 	dir := t.TempDir()
 	gitRun(t, dir, "init")
+	gitRun(t, dir, "config", "user.email", "t@t.t")
+	gitRun(t, dir, "config", "user.name", "T")
 	gitRun(t, dir, "remote", "add", "origin", "https://git.example/o/r.git")
 	if err := os.WriteFile(dir+"/a.txt", []byte("x"), 0o644); err != nil {
 		t.Fatal(err)

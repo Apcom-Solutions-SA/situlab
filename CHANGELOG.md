@@ -2,6 +2,139 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.11.0] — 2026-10-14 — « KERNEL : la mémoire, lisible — et nav simplifiée »
+
+### Dépôts git — appairer, classer, ouvrir (le service, pas le gestionnaire)
+- **Appairer ses dépôts** : SituLab relie *clone local ↔ atelier ↔ vitrine*. L'organiseur propose les
+  appariements (local↔atelier par l'URL d'`origin`, exact ; atelier↔vitrine par le nom, suggéré),
+  l'humain confirme, archive ou appaire à la main. **Alerte** « N à appairer » (bouton + pastille header).
+- **La page Dépôts remplace l'ancienne vue de gestionnaire** : trois chapitres — **Vos KERNEL**,
+  **Mes spokes**, **Dépôts git non classés** — plus des chapitres par **tag projet** (classement libre).
+- **KERNEL & spokes désignés depuis les dépôts appairés** (cartes), marqués d'une **pastille + surbrillance**
+  dans Dépôts git. Un KERNEL est **unique par dépôt** (pas par dossier) ; un spoke référence son **KERNEL parent**.
+- **Fichier d'ouverture (run)** par KERNEL et par spoke, choisi dans un **arbre de fichiers filtrable** :
+  le point d'entrée que l'**IA locale** doit lire.
+
+### La carte SituLab pour les IA (CLI & MCP)
+- `situlab kernel open` / `situlab spoke open <nom>` — donne le **fichier d'ouverture** (chemin absolu
+  prêt à lire) : réflexe « ouverture KERNEL ». MCP : `kernel_open`, `spoke_open`.
+- `situlab map` (MCP `situlab_map`) — la **couche de classement** SituLab : rôle (KERNEL/spoke/normal),
+  **tag**, et liens **local↔atelier↔vitrine** de chaque dépôt, pour qu'un agent comprenne le poste sans deviner.
+- `kernel list` / `spoke list` affichent le fichier d'ouverture ; `AGENTS.md` documente le modèle de liens
+  (origin = atelier ; vitrine = production par promotion) et le réflexe d'ouverture.
+
+### KERNEL — la mémoire, sortie du bruit
+- **Nouveau menu KERNEL** (premier niveau) : le dépôt qui *est* votre mémoire, présenté pour ce
+  qu'il est — le centre — et non comme un dépôt logiciel parmi d'autres.
+- **Désigner son/ses KERNEL** : l'humain choisit quel dépôt local fait office de mémoire. **Plusieurs
+  KERNEL** possibles (plusieurs sphères), un **actif**. La **désignation est un geste de fenêtre**
+  (gouvernance) — jamais exposée au socket/CLI/MCP : un agent ne choisit pas sa mémoire.
+- **État en langage humain** : « Mémoire à jour » / « n note(s) à enregistrer » / « n note(s) à
+  récupérer », avec pastille verte/orange/bleue — sans jargon git.
+- **Deux gestes simples** : *Récupérer les dernières notes* (sans PIN) et *Enregistrer mes notes*
+  (récupérer → enregistrer → envoyer, **un seul PIN**, message pré-rempli daté — Europe/Zurich).
+- **Carte du contenu** : les dossiers/dépôts que le KERNEL englobe, en libellés simples.
+- **Sauvegarde CORPUS rattachable** : relier un plan de sauvegarde (v1.10) au KERNEL et le lancer
+  d'un bouton.
+- **Parité totale** : fenêtre + CLI `situlab kernel list|status|contents|pull|save` + MCP
+  `kernel_list|status|contents|pull|save` (désignation exclue, réservée à la fenêtre).
+
+### SPOKES — projections de mission (3ᵉ pilier)
+- **Nouveau sous-menu KERNEL ▸ Spokes** : un spoke est la projection d'une **mission**, dérivée d'un
+  **KERNEL**. On déclare ses spokes (dépôt local + **KERNEL parent** + **mission**), on voit leur
+  **état lisible** (à jour / à envoyer / à récupérer) et on **récupère/enregistre** leur travail
+  (même portillon PIN que le push). **Désignation réservée à la fenêtre.**
+- **Parité** : CLI `situlab spoke list|status|contents|pull|save` + MCP `spoke_*`.
+
+### Navigation à trois piliers & santé des connexions
+- **Menu principal = KERNEL · CORPUS · BACKUP** (icônes monoline cohérentes : cube, nuage, bouclier,
+  et moyeu-rayons pour Spokes). **Projets**, **Dépôts** et **Spokes** sont des **sous-menus de
+  KERNEL** (la mémoire reste le centre). *Tokens*, *Gestion des utilisateurs* et
+  *Comprendre git* **quittent le menu** et rejoignent **Réglages**. L'accueil s'ouvre sur KERNEL.
+- **CORPUS = board de cartes** (comme Projets) : une **carte par cloud** avec son **logo**
+  (Nextcloud/kDrive), le badge *défaut*, la **joignabilité** (🟢/🔴) et l'**accès IA** (picto robot :
+  tout / partiel / rien). On **entre dans un cloud** pour explorer, importer et régler (Accès IA, PIN).
+- **BACKUP = menu dédié** : on y déclare *quel dépôt git → quel cloud CORPUS → quel dossier*. Sorti
+  de CORPUS pour être clair (plans listés en cartes, « Sauvegarder maintenant »).
+- **Réglages → Connexions git** (renommé) avec accès direct Tokens / Gestion des utilisateurs /
+  Comprendre git ; **nouveau chapitre Réglages → Connexions cloud** (voir, ajouter, régler l'accès
+  IA & PIN, retirer).
+- **Sélecteur de connexion git déplacé** du bandeau global vers la **page Dépôts**, où il a du sens
+  (avec le badge de rôle atelier/vitrine).
+- **Pastilles de santé** (header) à la place de l'indicateur « en direct » : une pour **git**, une
+  pour **cloud** — **vert** (tout OK), **orange** (une partie KO), **rouge** (tout KO) — et un clic
+  vous **emmène vous reconnecter au bon endroit**.
+
+### CORPUS — fiabilité & révision UI
+- **URL WebDAV reconstruite automatiquement** selon le type de cloud : on collait souvent l'adresse
+  du navigateur (page de login, tableau de bord) au lieu de l'endpoint WebDAV. **Nextcloud** : il
+  suffit désormais de coller l'adresse du serveur (ex. `https://cloud.exemple.ch`), SituLab ajoute
+  `/remote.php/dav/files/<identifiant>`. **kDrive** : on peut coller directement l'adresse de l'app
+  web (ex. `https://ksuite.infomaniak.com/…/drive/3869957/`) ou juste l'ID — SituLab en déduit
+  l'endpoint `https://3869957.connect.kdrive.infomaniak.com`. Corrige « connecté mais aucun
+  fichier/dossier visible » et « opération non permise » à la connexion.
+- **Messages de connexion clairs** : l'URL réellement testée est affichée, et un refus WebDAV (405…)
+  dit « cette adresse ne répond pas en WebDAV » au lieu du trompeur « le dossier existe déjà ».
+- **Liens « marche à suivre »** à l'ajout d'un cloud : trouver son adresse WebDAV et créer un
+  **mot de passe d'application** (Nextcloud et kDrive), vers la documentation officielle.
+- **Révision visuelle de la page CORPUS** : en-tête en carte, intro claire, lignes de fichiers plus
+  aérées, formulaire de connexion plus lisible.
+- **Ajout d'un cloud en TUNNEL pas à pas** (comme l'onboarding git) : ① type → ② nom (unicité
+  vérifiée) → ③ adresse **vérifiée/normalisée** (avec lien « où trouver mon adresse ») → ④ jeton
+  avec **liens DYNAMIQUES** qui ouvrent directement la bonne page de création d'un mot de passe
+  d'application, **construite depuis l'URL saisie** (compte Infomaniak pour kDrive, serveur pour
+  Nextcloud) → test. Rappel automatique du mot de passe d'application si la connexion est refusée.
+- **Glisser-déposer de fichiers** dans la fenêtre pour les importer dans le dossier CORPUS courant
+  (Wails fournit les chemins absolus ; un seul PIN couvre le lot).
+- **Accès de l'IA par ARBRE + picto IA coloré** (robot : 🟢 vert = accès complet au dossier et à
+  tout son contenu, 🟠 orange = accès partiel/restreint à certains éléments, gris = aucun accès) ;
+  la couleur est **cohérente** entre l'arbre de réglage ET l'explorateur d'accueil (un dossier
+  autorisé mais restreint plus bas apparaît désormais en orange, plus en vert trompeur) : cocher un dossier ouvre
+  tout son contenu, puis on **retire finement** un sous-dossier ou un fichier (modèle autorisations
+  **+ exclusions**, le plus spécifique gagne). Bouton **« Tout le CORPUS »** pour tout ouvrir d'un
+  clic. Remplace l'ancienne liste de dossiers et les boutons « Autoriser l'IA » éparpillés dans
+  l'explorateur (celui-ci n'affiche plus qu'une pastille de visibilité en lecture seule).
+- Boutons d'en-tête CORPUS séparés et clarifiés : **« + Ajouter un cloud »** (explicitement un
+  **nouveau** cloud — plusieurs Nextcloud et/ou kDrive possibles, avec contrôle d'unicité du nom),
+  **« Accès IA »** (arbre) et **« PIN »** distincts.
+
+### Correctifs
+- **Contraste (mode sombre)** des cartes de choix de cloud à l'ajout : texte désormais lisible.
+
+## [1.10.0] — 2026-10-14 — « CORPUS : clouds souverains sous contrôle d'accès IA »
+
+### Clouds de fichiers souverains (CORPUS)
+- **Nouvelle connexion cloud**, comme pour git : SituLab se branche à un cloud de fichiers
+  **souverain** via WebDAV. Types autorisés : **Nextcloud** (auto-hébergé) et **kDrive Infomaniak**
+  (droit suisse). Les clouds propriétaires non souverains (OneDrive, Google Drive, Dropbox) sont
+  **écartés par principe**. Un utilisateur peut connecter **plusieurs** clouds (plusieurs Nextcloud
+  et/ou kDrive). Le mot de passe (app-password) est **chiffré au trousseau** (PIN), jamais en
+  configuration, **jamais remis à l'agent** — même modèle que les jetons git.
+- **Exploration et gestes de fichiers** dans la fenêtre : parcourir les dossiers, **télécharger**,
+  **créer un dossier**, **importer** un ou plusieurs fichiers.
+- 🔴 **SituLab = porte unique, contrôle d'accès IA par dossier.** L'humain **désigne les dossiers
+  que l'IA peut consulter** (allowlist). L'agent (CLI/MCP) ne peut atteindre le cloud **que** par
+  SituLab et **ne voit que le périmètre autorisé** (borne imposée à la frontière agent, fail-closed) ;
+  dans ce périmètre il peut **consulter, modifier et déposer** des documents (ex. résumés `.md`).
+  La fenêtre (humain) n'est pas soumise à l'allowlist : c'est elle qui choisit.
+- **Politique PIN par connexion cloud**, réglable **en fenêtre uniquement** (comme la politique PIN
+  git) : envoi/modif/création autonome par défaut, suppression sous PIN.
+- **Client WebDAV fait main** (`internal/webdav`, zéro dépendance externe) : TLS ≥ 1.2, timeouts,
+  corps borné, Basic auth dans l'en-tête, http:// refusé hors local/privé.
+
+### Sauvegardes git → cloud
+- **Plan de sauvegarde** « dépôt git local → dossier d'un cloud connecté », **mémorisé** ; exécution
+  **manuelle** (planification automatique = étape suivante). La sauvegarde est un **bundle git** de
+  l'historique complet (un fichier restaurable par `git clone`).
+
+### Parité & surfaces
+- **Parité totale GUI / CLI (`situlab cloud …`, `situlab backup …`) / MCP (`cloud_*`, `backup_*`)**,
+  sur le même cœur. Les réglages allowlist/politique PIN restent **fenêtre uniquement**.
+
+### CI
+- Correctif : `TestAttestCommitServerMode` configure désormais l'identité git du dépôt de test
+  (échouait sur un runner sans `user.name`/`user.email` global, cassant `go test -race`).
+
 ## [1.9.11] — 2026-10-14 — « Catalogue épuré & aide contextuelle »
 
 ### Catalogue de dépôts — une carte par dépôt, lisible d'un coup d'œil

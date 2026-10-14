@@ -2,7 +2,7 @@
 
 > Un seul document, deux lectures. Les humains trouveront en tête un démarrage rapide ; les agents
 > trouveront ensuite la référence complète de la ligne de commande. Il est aussi lisible **dans
-> l'application** (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.9.11**.
+> l'application** (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.11.0**.
 
 ## Pour ton assistant IA — commence ici
 
@@ -16,6 +16,12 @@ Si tu es l'assistant IA de l'utilisateur : ce fichier est à la fois **ton mode 
 
 Tu **peux enrichir** la section « Notre collaboration » de ce fichier au fil de l'eau (préférences,
 conventions, dépôts clés). L'utilisateur peut aussi l'éditer dans SituLab (Réglages → Assistant IA).
+
+**Réflexe « ouverture KERNEL ».** Si l'utilisateur dit *« fais l'ouverture KERNEL SituLab »* (ou ouvre
+un spoke) : ne devine pas quel fichier lire. Demande-le à SituLab —
+`situlab kernel open` (ou `situlab spoke open <nom>`) te donne le **fichier d'ouverture** ; lis-le, puis
+suis ce qu'il indique. Et pour comprendre l'organisation du poste (KERNEL, spokes, tags, liens
+local↔atelier↔vitrine), lance `situlab map`. SituLab **est** la carte : interroge-le plutôt que de supposer.
 
 ## Pour un humain — en 30 secondes
 
@@ -272,6 +278,70 @@ transite jamais par la CLI ni par l'agent.
   privées restent dans des fichiers que l'humain contrôle ; le privé racine ne touche jamais un serveur.
 - La signature est **non bloquante** et apposée automatiquement sur les commits créés par SituLab. Limite T2 : voir `SECURITY.md`.
 
+### CORPUS — clouds de fichiers souverains (v1.10)
+SituLab est la **porte unique** entre toi (l'agent) et les clouds de fichiers de l'utilisateur
+(Nextcloud, kDrive). 🔴 **Tu ne vois QUE les dossiers que l'humain a explicitement autorisés** : tout
+chemin hors de ce périmètre est refusé (« dossier hors du périmètre autorisé pour l'IA »). Commence
+toujours par lire tes points d'entrée.
+- `situlab cloud list` — connexions cloud configurées (noms/types ; aucun secret). Lecture.
+- `situlab cloud allowed <cloud>` — **tes dossiers autorisés** sur cette connexion. Lecture. **À lire en premier.**
+- `situlab cloud ls <dossier> [--cloud <nom>]` — contenu d'un dossier (dans ton périmètre). Lecture.
+- `situlab cloud read <fichier> [--cloud <nom>]` — contenu texte d'un fichier (consulter un document). Lecture.
+- `situlab cloud download <fichier> <dest-locale> [--cloud <nom>]` — télécharger sur le poste. Lecture.
+- `situlab cloud mkdir <dossier> [--cloud <nom>]` — créer un dossier. Écriture (PIN selon la connexion).
+- `situlab cloud upload <fichier-local> <dossier-cloud> [--cloud <nom>]` — envoyer un fichier local. Écriture.
+- `situlab cloud write <fichier-cloud> --content "…" [--cloud <nom>]` — écrire/remplacer un fichier (ex. **déposer un résumé `.md`**). Écriture.
+- `situlab cloud delete <chemin> [--cloud <nom>]` — supprimer (PIN par défaut).
+- Connexion/retrait : `situlab cloud add <nom> --kind nextcloud|kdrive --url <webdav> --user <id>` (mot de passe demandé), `cloud remove <nom>`, `cloud default <nom>`.
+- **Réglages hors de ta portée** (fenêtre uniquement) : le choix des dossiers visibles et la politique PIN se font dans la fenêtre par l'humain. Tu ne peux ni les élargir ni les abaisser.
+
+### Sauvegardes git → cloud (v1.10)
+- `situlab backup list` — plans de sauvegarde.
+- `situlab backup add <nom> --repo <dépôt-git> --cloud <nom> --dest <dossier>` — enregistrer un plan.
+- `situlab backup run <nom>` — exécuter (bundle de l'historique → cloud ; PIN selon la connexion).
+- `situlab backup remove <nom>` — retirer un plan.
+
+### KERNEL — la mémoire, lisible (v1.11)
+Le KERNEL est le dépôt qui *est* la mémoire de l'humain. Tu peux lire son état et ses contenus, et
+l'aider à récupérer/enregistrer ses notes — mais tu ne **désignes** jamais un KERNEL : ce choix
+(ajout/retrait/actif) est réservé à l'humain **dans la fenêtre**. Nom omis = KERNEL **actif**.
+- `situlab kernel list` — KERNEL désignés (l'actif est marqué).
+- `situlab kernel status [nom]` — état lisible (à jour / notes à envoyer / notes à récupérer).
+- `situlab kernel contents [nom]` — carte du contenu (dossiers/dépôts englobés).
+- `situlab kernel pull [nom]` — récupérer les dernières notes (fast-forward ; sans PIN).
+- `situlab kernel save [nom] --message <txt>` — enregistrer : récupérer → enregistrer → envoyer
+  (**PIN** sur le poste ; message daté automatiquement si omis).
+- `situlab kernel open [nom]` — **fichier d'OUVERTURE** du KERNEL : le fichier à lire en premier pour
+  « ouvrir » la mémoire. En texte, imprime le chemin **absolu** (prêt à lire) ; en `--output json`,
+  renvoie `name/local_path/run_file/run_abs`. **Quand l'humain dit « fais l'ouverture KERNEL SituLab » :
+  appelle `situlab kernel open`, lis le fichier renvoyé, puis suis ce qu'il indique.** L'humain définit
+  ce fichier dans la fenêtre (KERNEL ▸ Fichier d'ouverture).
+
+### SPOKES — projections de mission (v1.11)
+Un spoke est un dépôt de mission dérivé d'un KERNEL. Tu peux lire et synchroniser ; la **désignation**
+(ajout/retrait, KERNEL parent, fichier run) reste réservée à la fenêtre.
+- `situlab spoke list` — spokes, leur KERNEL parent et leur fichier run.
+- `situlab spoke status <nom>` · `situlab spoke contents <nom>` — état lisible / carte du contenu.
+- `situlab spoke pull <nom>` — récupérer (fast-forward ; sans PIN).
+- `situlab spoke save <nom> --message <txt>` — enregistrer → envoyer (**PIN**).
+- `situlab spoke open <nom>` — **fichier RUN** du spoke (chemin absolu prêt à lire). Même usage que
+  `kernel open` : c'est le point d'entrée de la mission.
+
+### La CARTE SituLab — classement & liens entre dépôts (v1.11)
+SituLab tient une **couche de classement** au-dessus de git : quels dépôts sont des **KERNEL**, des
+**spokes** (et de quel KERNEL ils dérivent), et comment ils sont **tagués** (groupes projet). Il connaît
+aussi les **liens** entre dépôts. Pour tout comprendre d'un poste en un appel :
+- `situlab map` — pour **chaque dépôt appairé** : rôle (KERNEL / spoke / normal), **tag** projet, clone
+  **LOCAL** sur ce poste, dépôt **ATELIER** (source de vérité), nombre de **VITRINES** (production), et le
+  fichier d'ouverture/run s'il est défini. Utilise `--output json` pour l'exploiter.
+
+**Modèle de liens (à connaître absolument) :**
+- **LOCAL ↔ ATELIER = lien EXACT** : l'`origin` du clone local **est** le dépôt atelier (même URL).
+- **ATELIER ↔ VITRINE = lien de PRODUCTION** : la vitrine est un dépôt **séparé**, relié par **PROMOTION**
+  (version/tag), **pas** par un remote git. On n'y pousse jamais directement.
+Autrement dit : le clone local ne « connaît » que son atelier ; la vitrine se publie par promotion
+(`situlab project promote`), sous **PIN**.
+
 ## Accès MCP (agents sans terminal)
 
 SituLab expose un **serveur MCP** (Model Context Protocol) local sur **stdio**, en plus de la
@@ -306,6 +376,19 @@ Outils exposés (parité CLI) :
   `pull_create`, `pull_merge`, `pull_review`, `pull_close`, `pull_edit`,
   `release_create`, `release_delete`, `tag_create`, `tag_delete`, `project_promote` (publication
   atelier→production, v1.7).
+- **CORPUS — clouds souverains (v1.10)** : `cloud_connections`, `cloud_allowed_dirs` (tes points
+  d'entrée — à lire d'abord), `cloud_list`, `cloud_read`, `cloud_download` (lectures) ;
+  `cloud_mkdir`, `cloud_write` (déposer un résumé), `cloud_upload`, `cloud_delete` (écritures, PIN
+  selon la connexion). Tu **ne vois que les dossiers autorisés** par l'humain.
+- **Sauvegardes (v1.10)** : `backup_list`, `backup_run`.
+- **KERNEL — la mémoire (v1.11)** : `kernel_list`, `kernel_status`, `kernel_contents`, `kernel_pull`
+  (lectures/récupération) ; `kernel_save` (enregistrer → envoyer, **PIN**) ; `kernel_open` (**fichier
+  d'ouverture** à lire en premier pour « ouvrir » la mémoire). La **désignation** d'un KERNEL reste
+  réservée à la fenêtre — volontairement hors de ta portée.
+- **SPOKES — projections de mission (v1.11)** : `spoke_list`, `spoke_status`, `spoke_contents`,
+  `spoke_pull`, `spoke_save` (**PIN**), `spoke_open` (fichier run). Désignation réservée à la fenêtre.
+- **Carte SituLab (v1.11)** : `situlab_map` — rôle (KERNEL/spoke/normal), tag projet et liens
+  local↔atelier↔vitrine de chaque dépôt. À lire pour comprendre l'organisation du poste.
 
 Un outil de mutation renvoie une **erreur « PIN requis / refusé »** si l'humain ne confirme pas
 — jamais contournable par l'agent. Le jeton n'est jamais remis à l'agent (ni par la CLI, ni par

@@ -25,8 +25,7 @@ async function liveTickOnce() {
       if ((await App().Unlocked().catch(() => true)) === false) return handleLock();
     }
     if (liveTick % 3 === 0) await refreshWhoami();
-    if (state.view === "repos") await renderRepos(true);
-    else if (state.view === "projects") await renderProjects(true);
+    if (state.view === "projects") await renderProjects(true);
     else if (state.view === "detail") {
       await refreshDetailLocal();
       if (liveTick % 3 === 0) await refreshDetailRemote();
@@ -89,7 +88,12 @@ async function renderRepos(live) {
     el("view").innerHTML = `
       <div class="view-head">
         <div class="view-title">Dépôts</div>
-        <div class="view-sub">« ${esc(state.instance)} » <span id="checked-at" class="checked"></span></div>
+        <div class="view-sub">
+          <label class="sr-only" for="repo-instance-sel">Connexion git active</label>
+          <select id="repo-instance-sel" class="select" title="Connexion git active">${(state.instances || []).map((i) => `<option value="${esc(i.name)}"${i.name === state.instance ? " selected" : ""}>${esc(i.name)}</option>`).join("")}</select>
+          <span id="role-badge" class="role-badge" title="Rôle de la connexion"></span>
+          <span id="checked-at" class="checked"></span>
+        </div>
       </div>
       <div class="toolbar">
         <input id="repo-search" type="text" placeholder="Rechercher un dépôt…" aria-label="Rechercher" value="${esc(state.search)}" />
@@ -117,6 +121,9 @@ async function renderRepos(live) {
       </div>
       <div id="repo-tabs" class="gp-tabs repo-tabs" role="group" aria-label="Emplacement"></div>
       <div id="repo-list">${state.repos ? "" : skeletons(4)}</div>`;
+    const risel = el("repo-instance-sel");
+    if (risel) risel.onchange = (e) => switchInstance(e.target.value);
+    updateRoleBadge();
     el("repo-search").oninput = (e) => { state.search = e.target.value; paintRepos(); };
     el("repo-org").onchange = (e) => { state.org = e.target.value; paintRepos(); };
     el("repo-state").value = state.repoState || "";
@@ -303,7 +310,11 @@ function repoProjectName(r) {
   return idx.get(state.instance + "/" + r.full_name) || "";
 }
 
-function createRepoModal() {
+// createRepoModal : créer un dépôt distant. preset (facultatif) = { instance, name, owner } pour
+// cibler une connexion précise (ex. depuis l'organiseur : « créer l'atelier/la vitrine »).
+function createRepoModal(preset) {
+  preset = (preset && typeof preset === "object" && !preset.type) ? preset : {};
+  if (preset.instance) state.instance = preset.instance;
   // Propriétaires possibles : moi (espace perso) + les organisations vues dans mes dépôts.
   const orgs = [...new Set((state.repos || []).filter((r) => r.has_remote && r.owner && r.owner !== state.login).map((r) => r.owner))].sort();
   const ownerOpts = `<option value="">Moi (${esc(state.login || "espace personnel")})</option>` +
@@ -311,7 +322,7 @@ function createRepoModal() {
   openModal("Créer un dépôt", `<div class="field">
     <label>Propriétaire<select id="nowner" class="select">${ownerOpts}</select>
       <small>Beaucoup de serveurs interdisent les dépôts personnels : choisissez une organisation si « Moi » est refusé.</small></label>
-    <label>Nom<input id="nr" placeholder="mon-projet" /></label>
+    <label>Nom<input id="nr" placeholder="mon-projet" value="${esc(preset.name || "")}" /></label>
     <label>Description<input id="nd" /></label>
     <label style="flex-direction:row;align-items:center"><input id="npv" type="checkbox" style="width:auto;margin-right:8px" checked />Dépôt privé</label>
     <div class="inline-error hidden" id="nr-error"></div>
@@ -322,11 +333,13 @@ function createRepoModal() {
     const where = owner ? `dans « ${owner} »` : "dans votre espace personnel";
     pinConfirm(`Créer le dépôt « ${nr} » ${where}`, async (pin) => {
       await App().CreateRepo(state.instance, owner, nr, nd, npv, pin);
-      closeModal(); toast("Dépôt créé", "ok"); state.repoSig = ""; renderRepos(false);
+      closeModal(); toast("Dépôt créé", "ok"); afterRepoChange();
     });
   });
-  // Si des organisations existent, on en présélectionne une (l'espace perso est souvent bloqué).
-  if (orgs.length) el("nowner").value = orgs[0];
+  // Présélection du propriétaire : celui demandé (preset) s'il est connu, sinon la 1re organisation
+  // (l'espace perso est souvent bloqué).
+  if (preset.owner && orgs.includes(preset.owner)) el("nowner").value = preset.owner;
+  else if (orgs.length) el("nowner").value = orgs[0];
   el("modal-ok").textContent = "Continuer";
   wireAiInvite(() => promptRepoCreate(el("nowner") ? el("nowner").value : ""));
 }
@@ -344,11 +357,19 @@ function deleteRepoModal(owner, repo) {
     if (el("dr-confirm").value.trim() !== repo) { er.textContent = "Le nom saisi ne correspond pas."; er.classList.remove("hidden"); return; }
     pinConfirm(`Supprimer définitivement « ${slug} »`, async (pin) => {
       await App().DeleteRepo(state.instance, owner, repo, pin);
-      closeModal(); toast("Dépôt supprimé", "ok"); state.repoSig = ""; navTo("repos");
+      closeModal(); toast("Dépôt supprimé", "ok"); state.repoSig = ""; navTo("organize");
     });
   });
   el("modal-ok").textContent = "Continuer";
   wireAiInvite(() => promptRepoDelete(owner, repo));
+}
+
+// afterRepoChange : après un clone / une liaison, rafraîchit la surface vivante. La page « Dépôts »
+// ayant été retirée (1.11), ces gestes sont désormais déclenchés depuis l'organiseur (Projets ▸
+// Organiser mes dépôts) — on le repeint s'il est à l'écran.
+function afterRepoChange() {
+  state.repoSig = "";
+  if (state.view === "organize" && typeof renderOrganize === "function") renderOrganize();
 }
 
 // getRepoHereModal : « Récupérer sur ce poste » — action CONTEXTUELLE posée sur la carte d'un dépôt
@@ -372,7 +393,7 @@ function getRepoHereModal(r) {
     if (!dir) { er.textContent = "Indiquez un dossier de destination."; er.classList.remove("hidden"); return; }
     try {
       await App().Clone(state.instance, owner, repo, dir);
-      closeModal(); toast("Dépôt récupéré sur ce poste", "ok"); state.repoSig = ""; renderRepos(false);
+      closeModal(); toast("Dépôt récupéré sur ce poste", "ok"); afterRepoChange();
     } catch (e) { if (isLocked(e)) return handleLock(); er.textContent = cleanErr(e); er.classList.remove("hidden"); }
   });
   el("modal-ok").textContent = "Cloner ici";
@@ -390,7 +411,7 @@ async function linkLocalPick() {
   try {
     await App().AddLocalRepo(path);
     toast("Dépôt local lié", "ok");
-    state.repoSig = ""; renderRepos(false);
+    afterRepoChange();
   } catch (e) {
     if (isLocked(e)) return handleLock();
     openModal("Impossible de lier ce dossier", `<div class="field"><div class="callout warn">${esc(cleanErr(e))}</div><p class="sub">Choisissez le dossier racine d'un dépôt git (celui qui contient le sous-dossier <b>.git</b>).</p></div>`, () => closeModal());

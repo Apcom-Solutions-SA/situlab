@@ -27,6 +27,101 @@ function openModal(title, bodyHtml, onOk) {
 }
 function closeModal() { el("modal").classList.add("hidden"); modalOk = null; modalCancel = null; }
 
+// openRepoPicker : propose les dépôts git DÉJÀ présents sur la machine (connus + exploration), pour
+// désigner un KERNEL ou un spoke SANS taper de chemin — confort de prise en main pour les novices.
+// On choisit en cliquant une carte ; onChoose(repo) reçoit l'entrée retenue ({path,name,remote,…}).
+function openRepoPicker(onChoose) {
+  openModal("Dépôts déjà sur cette machine", `<div class="field">
+    <p class="sub">Choisissez un dépôt existant plutôt que de taper son chemin. SituLab explore vos dossiers usuels (personnel, Bureau, Documents, C:\\tmp…).</p>
+    <input id="rp-q" class="inp" placeholder="Filtrer par nom ou chemin…" autocomplete="off" />
+    <div id="rp-list" class="rp-list"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div></div>`, null);
+  el("modal-ok").classList.add("hidden"); // pas de « Valider » : on choisit en cliquant une carte
+  let all = [];
+  const list = el("rp-list");
+  App().ScanGitRepos().then((repos) => {
+    all = repos || [];
+    if (!all.length) {
+      list.innerHTML = `<div class="muted" style="padding:10px">Aucun dépôt git trouvé automatiquement. Fermez cette fenêtre et utilisez <b>📁</b> pour choisir un dossier à la main.</div>`;
+      return;
+    }
+    draw(all);
+    const q = el("rp-q"); if (q) q.focus();
+  }).catch((e) => {
+    if (isLocked(e)) return handleLock();
+    list.innerHTML = `<div class="muted" style="padding:10px">${esc(cleanErr(e))}</div>`;
+  });
+  function badge(r) {
+    if (r.role === "kernel") return ` <span class="pill sm">déjà KERNEL</span>`;
+    if (r.role === "spoke") return ` <span class="pill sm">déjà spoke</span>`;
+    if (r.known) return ` <span class="pill sm">connu</span>`;
+    return "";
+  }
+  function draw(items) {
+    if (!items.length) { list.innerHTML = `<div class="muted" style="padding:10px">Aucun dépôt ne correspond.</div>`; return; }
+    list.innerHTML = items.map((r, i) => `<button type="button" class="rp-row" data-i="${i}">
+      <span class="rp-ico">📦</span>
+      <span class="rp-main"><span class="rp-n">${esc(r.name)}${badge(r)}</span>
+        <span class="rp-p">${esc(r.path)}</span>${r.remote ? `<span class="rp-rem">${esc(r.remote)}</span>` : ""}</span></button>`).join("");
+    list.querySelectorAll(".rp-row").forEach((b) => b.onclick = () => { const r = items[+b.dataset.i]; closeModal(); onChoose(r); });
+  }
+  el("rp-q").oninput = (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    draw(!q ? all : all.filter((r) => (r.name + " " + r.path + " " + (r.remote || "")).toLowerCase().includes(q)));
+  };
+}
+
+// runFileModal : choisir le « fichier d'ouverture » (run) d'un dépôt dans un ARBRE filtrable. Un seul
+// fichier. onPick(relPath) reçoit le choix (ou "" pour retirer). title adapte le libellé (KERNEL/spoke).
+function runFileModal(localPath, current, onPick, title) {
+  current = current || "";
+  openModal(title || "Fichier d'ouverture", `<div class="field">
+    <p class="sub">Choisissez le fichier que votre <b>IA locale</b> doit ouvrir en premier. Un seul fichier.</p>
+    <input id="rf-q" class="inp" placeholder="Filtrer / rechercher un fichier…" autocomplete="off" />
+    <div id="rf-tree" class="rf-tree"><div class="skeleton"></div></div>
+    <div class="rf-foot"><span id="rf-cur" class="muted">${current ? "Actuel : " + esc(current) : "Aucun fichier défini"}</span>${current ? `<button type="button" class="lnk danger" id="rf-clear">Retirer le fichier</button>` : ""}</div>
+    <div class="inline-error hidden" id="rf-e"></div></div>`, null);
+  el("modal-ok").classList.add("hidden");
+  if (el("rf-clear")) el("rf-clear").onclick = () => onPick("");
+
+  let files = [];
+  App().RepoFiles(localPath)
+    .then((fs) => { files = fs || []; renderTree(files); const q = el("rf-q"); if (q) q.focus(); })
+    .catch((e) => { if (isLocked(e)) return handleLock(); const t = el("rf-tree"); if (t) t.innerHTML = `<div class="muted" style="padding:10px">${esc(cleanErr(e))}</div>`; });
+
+  function buildTree(paths) {
+    const root = { dirs: {}, files: [] };
+    paths.forEach((p) => {
+      const parts = p.split("/"); let node = root;
+      for (let i = 0; i < parts.length - 1; i++) { const d = parts[i]; node.dirs[d] = node.dirs[d] || { dirs: {}, files: [] }; node = node.dirs[d]; }
+      node.files.push({ name: parts[parts.length - 1], path: p });
+    });
+    return root;
+  }
+  function treeHTML(node, depth) {
+    let h = "";
+    Object.keys(node.dirs).sort((a, b) => a.localeCompare(b)).forEach((d) => {
+      h += `<details class="rf-dir"${depth < 1 ? " open" : ""}><summary><span class="rf-dico">📁</span>${esc(d)}</summary><div class="rf-children">${treeHTML(node.dirs[d], depth + 1)}</div></details>`;
+    });
+    node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach((f) => {
+      h += `<div class="rf-file${f.path === current ? " on" : ""}" data-file="${esc(f.path)}"><span class="rf-fico">📄</span>${esc(f.name)}</div>`;
+    });
+    return h;
+  }
+  function bindFiles() { el("rf-tree").querySelectorAll("[data-file]").forEach((n) => n.onclick = () => onPick(n.dataset.file)); }
+  function renderTree(list) {
+    const box = el("rf-tree"); if (!box) return;
+    if (!list.length) { box.innerHTML = `<div class="muted" style="padding:10px">Aucun fichier.</div>`; return; }
+    box.innerHTML = treeHTML(buildTree(list), 0); bindFiles();
+  }
+  function renderFlat(list) {
+    const box = el("rf-tree"); if (!box) return;
+    if (!list.length) { box.innerHTML = `<div class="muted" style="padding:10px">Aucun fichier ne correspond.</div>`; return; }
+    box.innerHTML = list.slice(0, 600).map((f) => `<div class="rf-file${f === current ? " on" : ""}" data-file="${esc(f)}"><span class="rf-fico">📄</span>${esc(f)}</div>`).join("");
+    bindFiles();
+  }
+  el("rf-q").oninput = (e) => { const q = e.target.value.trim().toLowerCase(); if (!q) renderTree(files); else renderFlat(files.filter((f) => f.toLowerCase().includes(q))); };
+}
+
 // pinConfirm : 2e étape d'une écriture — l'utilisateur a saisi ses données, on lui demande
 // maintenant SON PIN SituLab pour confirmer l'action. onPin(pin) exécute l'action ; en cas
 // d'erreur, la saisie du PIN reste affichée. Validation auto dès les 6 chiffres.
@@ -568,7 +663,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     const m = el("modal");
     if (m && !m.classList.contains("hidden")) { (modalCancel || closeModal)(); return; }
-    if (state.view === "detail") navTo("repos");
+    if (state.view === "detail") navTo("organize");
     else if (state.view === "project") { state.view = "projects"; render(); }
   }
   if (e.key === "Enter" && !el("modal").classList.contains("hidden") && modalOk && e.target.tagName === "INPUT") { e.preventDefault(); modalOk(); }

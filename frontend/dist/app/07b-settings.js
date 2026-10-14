@@ -46,9 +46,11 @@ function promptEditModal(p) {
 async function renderSettings() {
   const theme = readTheme();
   const zoom = readZoom();
-  const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions"], ["app", "🎨 Apparence"], ["ia", "🤖 Assistant IA"], ["diag", "🩺 Diagnostic"], ["ver", "🏷️ Versions"], ["lic", "⚖️ Licence"]];
+  const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions git"], ["cloud", "☁ Connexions cloud"], ["app", "🎨 Apparence"], ["ia", "🤖 Assistant IA"], ["diag", "🩺 Diagnostic"], ["ver", "🏷️ Versions"], ["lic", "⚖️ Licence"]];
   let setTab = "secu";
   try { setTab = localStorage.getItem("situlab.settab") || "secu"; } catch (_) {}
+  // Une pastille de santé (ou un lien) peut demander à ouvrir un onglet précis des Réglages.
+  if (state.settabTarget) { setTab = state.settabTarget; state.settabTarget = null; }
   el("view").innerHTML = `
     <div class="view-head"><div class="view-title">Réglages</div></div>
     <div class="set-layout">
@@ -73,10 +75,19 @@ async function renderSettings() {
       <div class="set-note">Gestion des jetons d'accès : onglet <b>Tokens</b>.</div>
     </section>
 
-    <section class="set-sec set-panel" data-panel="conn"><div class="set-sec-h">🔗 Connexions</div>
-      <div class="set-sec-d">Vos serveurs git (Forgejo/Gitea, GitHub). ★ = connexion par défaut.</div>
+    <section class="set-sec set-panel" data-panel="conn"><div class="set-sec-h">🔗 Connexions git</div>
+      <div class="set-sec-d">Vos serveurs git (Forgejo/Gitea, GitHub). ★ = connexion par défaut. Les <b>jetons</b> et les <b>utilisateurs</b> se gèrent par connexion, directement sur chaque ligne.</div>
       <div id="inst-list"></div>
-      <button class="btn btn-ghost btn-sm" id="add-inst" style="margin-top:10px">＋ Ajouter une connexion</button>
+      <div class="set-actions-row" style="margin-top:10px">
+        <button class="btn btn-ghost btn-sm" id="add-inst">＋ Ajouter une connexion</button>
+        <button class="btn btn-ghost btn-sm" id="go-git">⎇ Comprendre git</button>
+      </div>
+    </section>
+
+    <section class="set-sec set-panel" data-panel="cloud"><div class="set-sec-h">☁ Connexions cloud</div>
+      <div class="set-sec-d">Vos clouds de fichiers souverains (Nextcloud, kDrive) qui portent le <b>CORPUS</b>. Ici vous les ajoutez, réglez l'accès de l'IA et le retirez ; l'exploration des fichiers se fait dans l'onglet CORPUS.</div>
+      <div id="sc-cloud-list"><div class="skeleton"></div></div>
+      <button class="btn btn-ghost btn-sm" id="sc-add-cloud" style="margin-top:10px">＋ Connecter un cloud</button>
     </section>
 
     <section class="set-sec set-panel" data-panel="app"><div class="set-sec-h">🎨 Apparence &amp; affichage</div>
@@ -145,6 +156,12 @@ async function renderSettings() {
   };
   document.querySelectorAll(".set-navbtn").forEach((b) => b.onclick = () => showTab(b.dataset.settab));
   showTab(setTab);
+
+  // « Comprendre git » reste un accès primaire ; jetons et utilisateurs sont PAR connexion (ci-dessous).
+  if (el("go-git")) el("go-git").onclick = () => navTo("git");
+  // Chapitre « Connexions cloud » : liste + admin (réutilise les tunnels CORPUS avec retour Réglages).
+  renderSettingsClouds();
+  if (el("sc-add-cloud")) el("sc-add-cloud").onclick = () => addCloudModal(renderSettings);
   const agv = el("agents-view");
   if (agv) agv.onclick = async () => { try { infoModal("AGENTS.md", `<div class="md-render" style="max-height:60vh;overflow:auto">${mdToHTML(await App().Doc())}</div>`); } catch (_) {} };
   renderPromptLib();
@@ -184,11 +201,17 @@ async function renderSettings() {
       const badge = `<span class="role-badge ${prod ? "role-production" : "role-atelier"}">${prod ? "VITRINE" : "ATELIER"}</span>`;
       const pill = h === "auth" ? `<span class="pill disc-pill">déconnectée</span>` : (h === "net" ? `<span class="pill disc-pill">hors ligne</span>` : "");
       const reconBtn = dc ? `<button class="btn btn-primary btn-sm" data-recon="${esc(i.name)}">Reconnecter</button>` : "";
+      // Jetons : pour toute connexion. Utilisateurs : seulement Forgejo/Gitea (pas GitHub).
+      const usrBtn = i.provider === "github" ? "" : `<button class="lnk" data-usr="${esc(i.name)}">utilisateurs</button>`;
       return `<div class="srow${dc ? " srow-disc" : ""}"><div>${i.default ? "★ " : ""}<b>${esc(i.name)}</b> ${badge} <span class="muted">${esc(i.url)}</span> ${pill}</div>
-      <div class="srow-act">${reconBtn}<button class="lnk" data-pol="${esc(i.name)}">rôle &amp; PIN</button>${i.default ? "" : `<button class="lnk" data-def="${esc(i.name)}">défaut</button>`}<button class="lnk danger" data-del="${esc(i.name)}">supprimer</button></div></div>`;
+      <div class="srow-act">${reconBtn}<button class="lnk" data-tok="${esc(i.name)}">jetons</button>${usrBtn}<button class="lnk" data-pol="${esc(i.name)}">rôle &amp; PIN</button>${i.default ? "" : `<button class="lnk" data-def="${esc(i.name)}">défaut</button>`}<button class="lnk danger" data-del="${esc(i.name)}">supprimer</button></div></div>`;
     }).join("");
     el("inst-list").onclick = async (ev) => {
       const def = ev.target.closest("[data-def]"), del = ev.target.closest("[data-del]"), recon = ev.target.closest("[data-recon]"), pol = ev.target.closest("[data-pol]");
+      const tok = ev.target.closest("[data-tok]"), usr = ev.target.closest("[data-usr]");
+      // Jetons / utilisateurs : on cible la connexion CLIQUÉE (plus de sélecteur global dans l'en-tête).
+      if (tok) { state.instance = tok.dataset.tok; return navTo("tokens"); }
+      if (usr) { state.instance = usr.dataset.usr; return navTo("admin"); }
       if (pol) return connPolicyModal(pol.dataset.pol);
       if (recon) return reconnectModal(recon.dataset.recon);
       if (def) { try { await App().SetDefaultInstance(def.dataset.def); toast("Instance par défaut mise à jour", "ok"); renderSettings(); } catch (e) { toast(cleanErr(e), "err"); } }
@@ -284,6 +307,34 @@ async function renderDiagnostic() {
     ? row("warn", "Autres accès git sur ce poste", `${doc.other_git_creds.map(esc).join(", ")}. Ces identifiants (clé SSH, credential helper) permettent un accès git <b>indépendant</b> de SituLab, hors confirmation PIN. Pour un cloisonnement strict, faites tourner vos agents sous un autre compte / bac à sable.`)
     : row("ok", "Autres accès git", "Aucun identifiant git concurrent détecté — la confirmation PIN protège bien."));
   dc.innerHTML = `<div class="diag-list">${rows.join("")}</div>`;
+}
+
+// renderSettingsClouds : liste et administre les connexions cloud dans les Réglages (1.11). La vue
+// d'exploration des fichiers reste dans CORPUS ; ici on ajoute, règle l'accès IA/PIN et retire.
+async function renderSettingsClouds() {
+  const box = el("sc-cloud-list"); if (!box) return;
+  let clouds = [];
+  try { clouds = (await App().FileClouds()) || []; } catch (e) { box.innerHTML = `<div class="callout warn">${esc(cleanErr(e))}</div>`; return; }
+  state.corpusClouds = clouds;
+  if (!clouds.length) { box.innerHTML = `<div class="muted">Aucun cloud connecté. Branchez un Nextcloud ou un kDrive pour porter votre CORPUS.</div>`; return; }
+  // Santé best-effort (peut être indisponible si session verrouillée).
+  let health = {};
+  try { (await App().CloudHealth() || []).forEach((h) => { health[h.name] = h; }); } catch (_) {}
+  box.innerHTML = clouds.map((fc) => {
+    const h = health[fc.name];
+    const pill = h ? (h.ok ? `<span class="pill ok-pill">joignable</span>` : `<span class="pill disc-pill">injoignable</span>`) : "";
+    const nd = (fc.allowed_dirs || []).length;
+    return `<div class="srow"><div><b>${esc(fc.name)}</b> <span class="muted">${esc(fc.kind)} · ${esc(fc.url)}</span> ${pill} <span class="muted">— ${nd} dossier(s) ouvert(s) à l'IA</span></div>
+    <div class="srow-act"><button class="lnk" data-ai="${esc(fc.name)}">accès IA</button><button class="lnk" data-pin="${esc(fc.name)}">PIN</button><button class="lnk danger" data-del="${esc(fc.name)}">supprimer</button></div></div>`;
+  }).join("");
+  box.onclick = (ev) => {
+    const ai = ev.target.closest("[data-ai]"), pin = ev.target.closest("[data-pin]"), del = ev.target.closest("[data-del]");
+    const fc = clouds.find((c) => c.name === (ai ? ai.dataset.ai : pin ? pin.dataset.pin : del ? del.dataset.del : ""));
+    if (!fc) return;
+    if (ai) return aiAccessTreeModal(fc, renderSettings);
+    if (pin) return cloudPINModal(fc, renderSettings);
+    if (del) return removeCloudFlow(fc, renderSettings);
+  };
 }
 
 // pinForgotModal : explication HONNÊTE (le PIN est irrécupérable) + action « repartir de zéro ».

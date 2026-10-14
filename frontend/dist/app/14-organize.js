@@ -1,0 +1,266 @@
+/* ---------------- ORGANISER MES DÉPÔTS : la matrice alignée (1.11) ----------------
+ * Le service que SituLab rend vraiment : relier et assembler les dépôts — clone LOCAL ↔ dépôt
+ * ATELIER ↔ dépôt VITRINE — au lieu d'une vue de gestionnaire. Présentation plug-and-play pour un
+ * public non-dev : une MATRICE alignée (une ligne par dépôt, trois colonnes qui se font face),
+ * pictos dossier colorés, nom + organisation en petit, zéro URL. Case vide = bouton « créer ».
+ * Appariement proposé = bouton discret « Créer le projet ». Rien n'est imposé.
+ */
+
+// Picto dossier (monoline), colorisé par la classe de colonne (local/atelier/vitrine).
+function orgFolder(kind) {
+  return `<span class="org-folder org-${kind}"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg></span>`;
+}
+
+// Connexions par rôle (pour les actions « créer l'atelier / la vitrine »).
+function connsByRole(role) {
+  return (state.instances || []).filter((i) => (role === "production" ? i.role === "production" : i.role !== "production"));
+}
+
+async function renderOrganize() {
+  const view = el("view");
+  view.innerHTML = `<div class="view-head view-head-row">
+      <div><button class="btn btn-ghost btn-sm" id="org-back">‹ Dépôts git</button>
+      <div class="view-title" style="margin-top:6px">Organiser mes dépôts</div>
+      <div class="view-sub">Chaque ligne = un dépôt. SituLab aligne votre copie <b>locale</b>, son <b>atelier</b> et sa <b>vitrine</b>. Une case vide ? Créez-la d'un clic.</div></div>
+      <button class="btn btn-ghost btn-sm" id="org-refresh">↻ Actualiser</button></div>
+    <div id="org-body"><div class="skeleton"></div><div class="skeleton" style="margin-top:10px"></div></div>`;
+  el("org-back").onclick = () => navTo("projects");
+  el("org-refresh").onclick = () => renderOrganize();
+  loadMatrix();
+}
+
+async function loadMatrix() {
+  const box = el("org-body");
+  if (!box) return;
+  let m;
+  try {
+    m = await App().RepoMatrix();
+  } catch (e) {
+    if (isLocked(e)) return handleLock();
+    box.innerHTML = blankslate("⚠", "Matrice indisponible", cleanErr(e));
+    return;
+  }
+  state.matrix = m;
+  const rows = m.rows || [];
+  const unreach = m.unreachable || [];
+  const pending = m.pending || 0;
+  if (typeof setPendingPairings === "function") setPendingPairings(pending); // alimente la pastille header
+
+  const bannerHTML = pending
+    ? `<div class="org-banner"><span class="org-banner-n">${pending}</span> appariement${pending > 1 ? "s" : ""} en attente de votre approbation — vérifiez la ligne et cliquez <b>Appairer</b>.</div>`
+    : `<div class="org-banner ok">Tout est rangé : chaque atelier connu appartient à un projet. 🎉</div>`;
+  const unreachHTML = unreach.length
+    ? `<div class="callout warn" style="margin:10px 0">Connexion(s) non lues (hors ligne ou à reconnecter) : <b>${unreach.map(esc).join(", ")}</b>.</div>`
+    : "";
+
+  // En-tête de colonnes + lignes alignées.
+  const head = `<div class="mx-head">
+    <div class="mx-h mx-h-local">🖥 Sur mon poste</div>
+    <div class="mx-h mx-h-atl">🛠️ Atelier</div>
+    <div class="mx-h mx-h-vit">🌐 Vitrine</div>
+    <div class="mx-h mx-h-act"></div></div>`;
+
+  const cell = (kind, c, row, idx) => {
+    if (c && c.present) {
+      const sub = kind === "local" ? "sur ce poste" : (c.org || c.instance || "");
+      return `<button type="button" class="mx-cell on" data-open="${kind}:${idx}" title="Ouvrir le détail">
+        ${orgFolder(kind)}<span class="mx-cell-txt"><span class="mx-name">${esc(c.name || "")}</span><span class="mx-org">${esc(sub)}</span></span></button>`;
+    }
+    // Case vide → action « créer », selon la colonne.
+    const label = kind === "local" ? "Créer le clone" : kind === "atelier" ? "Créer l'atelier" : "Créer la vitrine";
+    return `<button type="button" class="mx-cell empty" data-create="${kind}:${idx}"><span class="mx-plus">＋</span><span class="mx-create-t">${label}</span></button>`;
+  };
+
+  const vitCell = (row, idx) => {
+    const vs = row.vitrines || [];
+    if (!vs.length) {
+      // pas de vitrine : proposer la création seulement si un atelier existe (sinon rien à publier).
+      if (!row.atelier || !row.atelier.present) return `<div class="mx-cell void"></div>`;
+      return `<button type="button" class="mx-cell empty" data-create="vitrine:${idx}"><span class="mx-plus">＋</span><span class="mx-create-t">Créer la vitrine</span></button>`;
+    }
+    return vs.map((v, vi) => `<button type="button" class="mx-cell on" data-open="vitrine:${idx}:${vi}" title="Ouvrir le détail">
+      ${orgFolder("vitrine")}<span class="mx-cell-txt"><span class="mx-name">${esc(v.name || "")}</span><span class="mx-org">${esc(v.org || v.instance || "")}</span></span></button>`).join("");
+  };
+
+  const rowHTML = rows.map((row, i) => {
+    // Action de ligne : appairer (si en attente) ou badge projet ; + archiver (ranger) si pas un projet.
+    let act = "";
+    if (row.project) act = `<span class="mx-proj" title="Déjà appairé dans « ${esc(row.project)} »">✓ ${esc(row.project)}</span>`;
+    else if (row.pending) act = `<button type="button" class="mx-make" data-make="${i}" title="Appairer ces dépôts (local ↔ atelier ↔ vitrine)">⇄ Appairer</button>`;
+    const arch = row.project ? "" : `<button type="button" class="mx-arch" data-arch="${i}" title="Ranger ou supprimer cette suggestion"><span class="mx-arch-ico">🗄</span> Archiver</button>`;
+    return `<div class="mx-row${row.pending ? " pending" : ""}">
+      <div class="mx-col">${cell("local", row.local, row, i)}</div>
+      <div class="mx-col">${cell("atelier", row.atelier, row, i)}</div>
+      <div class="mx-col">${vitCell(row, i)}</div>
+      <div class="mx-col mx-col-act">${act}${arch}</div>
+    </div>`;
+  }).join("");
+
+  const body = rows.length
+    ? `<div class="mx-grid">${head}${rowHTML}</div>`
+    : blankslate("🗂", "Aucun dépôt", "Reliez une connexion git et clonez un dépôt pour commencer.");
+
+  // Section ARCHIVE : suggestions rangées, repliable, avec restauration.
+  const archived = m.archived || [];
+  let archHTML = "";
+  if (archived.length) {
+    const arow = (row, j) => `<div class="mx-arch-row">
+      <span class="mx-arch-n">${esc(row.name)}</span>
+      <span class="mx-arch-d muted">${[row.local && row.local.present ? "local" : "", row.atelier && row.atelier.present ? "atelier" : "", (row.vitrines || []).length ? "vitrine" : ""].filter(Boolean).join(" · ")}</span>
+      <button type="button" class="btn btn-ghost btn-sm" data-unarch="${j}">⇄ Repasser en appairage</button></div>`;
+    archHTML = `<details class="org-arch"><summary>🗄 Archive <span class="muted">(${archived.length})</span></summary>
+      <div class="mx-arch-list">${archived.map(arow).join("")}</div></details>`;
+  }
+
+  box.innerHTML = bannerHTML + unreachHTML + body + archHTML;
+
+  // --- Ouverture du détail (le detail distant a besoin de la bonne connexion) ---
+  const openCell = (spec) => {
+    const parts = spec.split(":");
+    const kind = parts[0], i = +parts[1];
+    const row = rows[i]; if (!row) return;
+    if (kind === "local") {
+      openDetail({ has_remote: false, name: row.local.name, local_path: row.local.local_path });
+    } else if (kind === "atelier") {
+      state.instance = row.atelier.instance;
+      openDetail({ has_remote: true, full_name: row.atelier.full_name, local_path: row.atelier.local_path || "" });
+    } else { // vitrine:i:vi
+      const v = (row.vitrines || [])[+parts[2]]; if (!v) return;
+      state.instance = v.instance;
+      openDetail({ has_remote: true, full_name: v.full_name, local_path: v.local_path || "" });
+    }
+  };
+  box.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => openCell(b.dataset.open));
+
+  // --- Actions « créer » dans les cases vides ---
+  box.querySelectorAll("[data-create]").forEach((b) => b.onclick = () => {
+    const [kind, i] = b.dataset.create.split(":");
+    const row = rows[+i]; if (!row) return;
+    if (kind === "local") return createLocalCloneFlow(row);
+    if (kind === "atelier") return createRemoteFlow(row, "atelier");
+    if (kind === "vitrine") return createRemoteFlow(row, "production");
+  });
+
+  // --- Créer le projet depuis un appariement en attente ---
+  box.querySelectorAll("[data-make]").forEach((b) => b.onclick = async () => {
+    const row = rows[+b.dataset.make]; if (!row || !row.atelier || !row.atelier.present) return;
+    b.disabled = true;
+    const atelier = { instance: row.atelier.instance, owner: row.atelier.org, repo: row.atelier.name };
+    const productions = (row.vitrines || []).map((v) => ({ instance: v.instance, owner: v.org, repo: v.name }));
+    try {
+      await App().AddProject(row.name, "", atelier, productions);
+      toast("Dépôts « " + row.name + " » appairés", "ok");
+      renderOrganize();
+    } catch (e) {
+      b.disabled = false;
+      if (isLocked(e)) return handleLock();
+      toast(cleanErr(e), "err");
+    }
+  });
+
+  // --- Archiver (ranger / supprimer) une suggestion ---
+  box.querySelectorAll("[data-arch]").forEach((b) => b.onclick = () => {
+    const row = rows[+b.dataset.arch]; if (row) archivePairingModal(row);
+  });
+  // --- Restaurer depuis l'archive ---
+  box.querySelectorAll("[data-unarch]").forEach((b) => b.onclick = async () => {
+    const row = (m.archived || [])[+b.dataset.unarch]; if (!row) return;
+    try { await App().UnarchivePairing(row.key); toast("Suggestion repassée en appairage", "ok"); renderOrganize(); }
+    catch (e) { if (isLocked(e)) return handleLock(); toast(cleanErr(e), "err"); }
+  });
+}
+
+// archivePairingModal : deux voies claires pour une suggestion non désirée —
+//  • MASQUER (archiver) : réversible, ne touche à rien, range dans l'Archive ;
+//  • SUPPRIMER les dépôts : destructif, liste ce qui existe (local/atelier/vitrine), PIN requis.
+function archivePairingModal(row) {
+  const hasLocal = !!(row.local && row.local.present);
+  const hasAtl = !!(row.atelier && row.atelier.present);
+  const vits = (row.vitrines || []);
+  const existing = [
+    hasLocal ? `<li><span class="org-folder org-local">📁</span> <b>clone local</b> — ${esc(row.local.name)} <span class="muted">(retiré du suivi ; fichiers conservés)</span></li>` : "",
+    hasAtl ? `<li><span class="org-folder org-atelier">📁</span> <b>atelier</b> — ${esc(row.atelier.org ? row.atelier.org + "/" : "")}${esc(row.atelier.name)} <span class="muted">(supprimé définitivement du serveur)</span></li>` : "",
+    ...vits.map((v) => `<li><span class="org-folder org-vitrine">📁</span> <b>vitrine</b> — ${esc(v.org ? v.org + "/" : "")}${esc(v.name)} <span class="muted">(supprimée définitivement du serveur)</span></li>`),
+  ].filter(Boolean).join("");
+
+  openModal(`Ranger « ${esc(row.name)} »`, `<div class="field">
+    <p class="sub">Cette suggestion ne vous est pas utile ? Choisissez :</p>
+    <div class="arch-choices">
+      <button type="button" class="arch-choice" id="arch-hide">
+        <div class="arch-choice-h">🗄 Masquer la suggestion</div>
+        <div class="arch-choice-s">La range dans l'<b>Archive</b> et la retire des « en attente ». <b>Rien n'est supprimé</b> — réversible à tout moment.</div>
+      </button>
+      <button type="button" class="arch-choice danger" id="arch-del">
+        <div class="arch-choice-h">🗑 Supprimer les dépôts</div>
+        <div class="arch-choice-s">Supprime les dépôts existants de cet appariement. <b>Action définitive.</b></div>
+      </button>
+    </div>
+    <div class="inline-error hidden" id="arch-e"></div></div>`, null);
+  el("modal-ok").classList.add("hidden"); // le choix se fait sur les deux cartes
+
+  el("arch-hide").onclick = async () => {
+    try { await App().ArchivePairing(row.key); closeModal(); toast("Suggestion archivée", "ok"); renderOrganize(); }
+    catch (e) { if (isLocked(e)) return handleLock(); const er = el("arch-e"); er.textContent = cleanErr(e); er.classList.remove("hidden"); }
+  };
+  el("arch-del").onclick = () => {
+    if (!hasLocal && !hasAtl && !vits.length) { closeModal(); return; }
+    // 2e écran : récapitulatif + (si clone local) choix du sort des fichiers locaux, puis PIN.
+    const localChoice = hasLocal ? `<div class="pd-local">
+      <div class="pd-local-h">Et le dossier local <b>${esc(row.local.name)}</b> ?</div>
+      <label class="pd-opt"><input type="radio" name="pd-wipe" value="0" checked /> <span>Garder les fichiers — <b>retirer du suivi</b> seulement (sûr, réversible)</span></label>
+      <label class="pd-opt pd-opt-danger"><input type="radio" name="pd-wipe" value="1" /> <span>🗑 <b>Supprimer pour de vrai</b> le dossier du disque — <b>IRRÉVERSIBLE</b></span></label>
+      <div id="pd-guard" class="hidden"><label>Double garde-fou : tapez <b>SUPPRIMER</b> pour confirmer<input id="pd-confirm" class="inp" placeholder="SUPPRIMER" autocomplete="off" /></label></div>
+    </div>` : "";
+    openModal(`Supprimer « ${esc(row.name)} »`, `<div class="field">
+      <div class="callout danger"><b>Action irréversible.</b> Les éléments suivants seront supprimés :</div>
+      <ul class="arch-del-list">${existing}</ul>
+      <p class="sub">Les dépôts <b>distants</b> sont supprimés définitivement du serveur.</p>
+      ${localChoice}
+      <div class="inline-error hidden" id="pd-e"></div></div>`, () => {
+      const wipe = hasLocal && document.querySelector('input[name="pd-wipe"]:checked') && document.querySelector('input[name="pd-wipe"]:checked').value === "1";
+      const er = el("pd-e");
+      if (wipe && (!el("pd-confirm") || el("pd-confirm").value.trim().toUpperCase() !== "SUPPRIMER")) {
+        if (er) { er.textContent = "Tapez SUPPRIMER pour confirmer l'effacement du dossier local."; er.classList.remove("hidden"); }
+        return;
+      }
+      const atelier = hasAtl ? { instance: row.atelier.instance, owner: row.atelier.org, repo: row.atelier.name } : { instance: "", owner: "", repo: "" };
+      const productions = vits.map((v) => ({ instance: v.instance, owner: v.org, repo: v.name }));
+      const localPath = hasLocal ? row.local.local_path : "";
+      pinConfirm(`Supprimer définitivement les dépôts de « ${row.name} »${wipe ? " (dossier local inclus)" : ""}`, async (pin) => {
+        await App().PairingDelete(localPath, !!wipe, atelier, productions, pin);
+        toast(wipe ? "Dépôts et dossier local supprimés" : "Dépôts supprimés", "ok");
+        renderOrganize();
+      });
+    });
+    el("modal-ok").textContent = "Supprimer définitivement";
+    el("modal-ok").classList.add("danger-btn");
+    el("modal-cancel").textContent = "Retour";
+    // Afficher le garde-fou de saisie seulement quand « supprimer pour de vrai » est choisi.
+    document.querySelectorAll('input[name="pd-wipe"]').forEach((r) => r.onchange = () => {
+      const on = document.querySelector('input[name="pd-wipe"]:checked').value === "1";
+      el("pd-guard").classList.toggle("hidden", !on);
+    });
+  };
+}
+
+// createLocalCloneFlow : « Créer le clone » d'une case LOCAL vide — on clone l'atelier (sinon une
+// vitrine) sur ce poste. Réutilise le flux éprouvé getRepoHereModal.
+function createLocalCloneFlow(row) {
+  const src = (row.atelier && row.atelier.present) ? row.atelier : ((row.vitrines || [])[0] || null);
+  if (!src) { toast("Aucun dépôt distant à cloner pour cette ligne", "err"); return; }
+  state.instance = src.instance;
+  getRepoHereModal({ full_name: src.full_name });
+}
+
+// createRemoteFlow : « Créer l'atelier / la vitrine » d'une case distante vide — ouvre la création de
+// dépôt distant, ciblée sur une connexion du bon rôle, nom pré-rempli. (Crée le dépôt distant ; y
+// publier le code local reste une étape manuelle pour l'instant.)
+function createRemoteFlow(row, role) {
+  const conns = connsByRole(role);
+  if (!conns.length) {
+    toast(role === "production" ? "Ajoutez d'abord une connexion de type Vitrine (Réglages ▸ Connexions git)" : "Ajoutez d'abord une connexion de type Atelier", "err");
+    return;
+  }
+  const inst = (conns.find((c) => c.default) || conns[0]).name;
+  createRepoModal({ instance: inst, name: row.name });
+}

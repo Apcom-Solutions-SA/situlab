@@ -1247,3 +1247,381 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 /* Règle (pied de fiche). */
 .help-rule { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--ha); background: var(--ha-soft); border-radius: var(--r-md); padding: 9px 12px; margin-bottom: 4px; }
 .help-rule-ico { flex: 0 0 auto; font-size: 15px; }
+
+/* ============================================================
+   CORPUS — clouds de fichiers souverains (1.10)
+   ============================================================ */
+.cc-center { display: flex; justify-content: center; margin-top: 14px; }
+.cc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.cc-conn { display: flex; align-items: center; gap: 10px; }
+.cc-logo { color: var(--accent); display: inline-flex; }
+.cc-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.cc-allow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 11px; margin-bottom: 12px; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); font-size: var(--fs-sm); }
+.cc-allow-lbl { font-weight: 700; color: var(--text-soft); }
+.cc-allow-none { color: var(--text-faint); }
+.cc-chip { font-size: var(--fs-xs); font-weight: 600; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.cc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.cc-crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: var(--fs-sm); }
+.cc-crumb { appearance: none; background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; padding: 2px 4px; border-radius: var(--r-sm); }
+.cc-crumb:hover { background: var(--bg-sunken); }
+.cc-sep { color: var(--text-faint); }
+.cc-tools { display: flex; gap: 6px; }
+.cc-list { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-surface); overflow: hidden; }
+.cc-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 11px; border-bottom: 1px solid var(--border); }
+.cc-row:last-child { border-bottom: none; }
+.cc-name { appearance: none; background: none; border: none; font: inherit; color: var(--text); cursor: pointer; display: flex; align-items: center; gap: 9px; text-align: left; flex: 1 1 auto; min-width: 0; padding: 2px 0; }
+.cc-name.dir { font-weight: 600; }
+.cc-name:hover { color: var(--accent); }
+.cc-ei { flex: 0 0 auto; }
+.cc-size { color: var(--text-faint); font-size: var(--fs-xs); margin-left: 8px; }
+.cc-rowact { display: flex; gap: 4px; flex: 0 0 auto; }
+.cc-eye.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.cc-del1:hover { color: var(--danger); }
+.cc-backups-sec { margin-top: 20px; }
+.cc-sec-h { font-weight: 700; color: var(--text-soft); margin-bottom: 8px; }
+.cc-bk-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); margin-bottom: 7px; }
+.cc-bk-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cc-bk-main .sub { font-size: var(--fs-xs); color: var(--text-soft); }
+.cc-bk-when { font-size: var(--fs-xs); color: var(--text-faint); }
+.cc-bk-act { display: flex; gap: 6px; flex: 0 0 auto; }
+.cc-bk-add { margin-top: 6px; }
+.cc-pickrow { display: flex; gap: 6px; }
+.cc-pickrow .inp { flex: 1 1 auto; }
+
+/* ============================ v1.11 ============================ */
+
+/* Correctif contraste (dark) : les cartes de choix de cloud héritaient d'une couleur illisible.
+   On fixe explicitement la couleur du texte dans les deux thèmes. */
+.conn-card, .conn-card b { color: var(--text); }
+.conn-card .sub { color: var(--text-soft); }
+
+/* Pastilles de santé des connexions (header) — remplacent l'indicateur « en direct ». */
+.health { display: flex; align-items: center; gap: 8px; }
+.hpill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--r-full); font-size: var(--fs-xs); font-weight: 700; cursor: pointer; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text-soft); transition: filter var(--t-fast), box-shadow var(--t-fast); }
+.hpill:hover { filter: brightness(1.05); box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent); }
+.hpill .hp-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.hpill.green { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.hpill.orange { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.hpill.red { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.hpill.red .hp-dot, .hpill.orange .hp-dot { animation: pulse 1.6s infinite; }
+.hpill.idle { color: var(--text-faint); }
+
+.pill.ok-pill { background: var(--ok); color: #fff; }
+.set-actions-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+
+/* ---- Page KERNEL ---- */
+.kl-center { display: flex; justify-content: center; margin-top: 14px; }
+.kl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.kl-id { display: flex; align-items: center; gap: 10px; }
+.kl-logo { color: var(--accent); display: flex; }
+.kl-actions { display: flex; gap: 6px; }
+.kl-status { margin-bottom: 14px; }
+.kl-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--bg-raised); }
+.kl-card .kl-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; background: var(--text-faint); }
+.kl-card.green { background: var(--ok-soft); border-color: transparent; } .kl-card.green .kl-dot { background: var(--ok); }
+.kl-card.orange { background: var(--warn-soft); border-color: transparent; } .kl-card.orange .kl-dot { background: var(--warn); }
+.kl-card.blue { background: var(--accent-soft); border-color: transparent; } .kl-card.blue .kl-dot { background: var(--accent); }
+.kl-card.red { background: var(--danger-soft); border-color: transparent; } .kl-card.red .kl-dot { background: var(--danger); }
+.kl-sum { font-weight: 700; color: var(--text); }
+.kl-meta { font-size: var(--fs-xs); color: var(--text-soft); margin-top: 2px; }
+.kl-gestes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+@media (max-width: 560px) { .kl-gestes { grid-template-columns: 1fr; } }
+.kl-geste { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 16px; border-radius: var(--r-md); border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--text); cursor: pointer; transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast); }
+.kl-geste:hover { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); transform: translateY(-1px); }
+.kl-geste:disabled { opacity: .5; cursor: progress; }
+.kl-geste.primary { border-color: var(--accent); background: var(--accent-soft); }
+.kl-geste .kl-g-ico { font-size: 20px; }
+.kl-geste .kl-g-t { font-weight: 700; }
+.kl-geste .kl-g-s { font-size: var(--fs-xs); color: var(--text-soft); }
+.kl-sec { margin-top: 16px; }
+.kl-sec-h { font-weight: 700; color: var(--text-soft); margin-bottom: 8px; }
+.kl-contents { display: flex; flex-wrap: wrap; gap: 8px; }
+.kl-item { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--bg-raised); }
+.kl-item .kl-it-ico { font-size: 16px; }
+.kl-item .kl-it-n { font-weight: 600; color: var(--text); }
+.kl-item .kl-it-k { font-size: var(--fs-xs); color: var(--text-faint); }
+.kl-bk-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--bg-raised); }
+.kl-bk-main { display: flex; flex-direction: column; gap: 2px; }
+.kl-bk-when { font-size: var(--fs-xs); color: var(--text-faint); }
+.kl-pickrow { display: flex; gap: 6px; }
+.kl-pickrow .inp { flex: 1 1 auto; }
+.kl-mg-danger { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* CORPUS — passe de révision UI (v1.11) : en-tête en carte, lignes plus aérées, intro claire. */
+.cc-head { padding: 12px 14px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-lg); margin-bottom: 10px; }
+.cc-conn { gap: 12px; }
+.cc-conn .select { font-weight: 600; min-width: 190px; }
+.cc-logo svg { width: 30px; height: 30px; }
+.cc-intro { font-size: var(--fs-sm); color: var(--text-soft); margin: 0 2px 12px; line-height: 1.5; }
+.cc-toolbar { padding: 2px 2px 6px; }
+.cc-list { border-radius: var(--r-lg); }
+.cc-row { padding: 10px 14px; transition: background var(--t-fast); }
+.cc-row:hover { background: var(--bg-raised); }
+.cc-ei { font-size: 17px; }
+.cc-eye { white-space: nowrap; }
+.cc-connform code { font-family: var(--font-mono); font-size: .86em; background: var(--bg-sunken); padding: 0 4px; border-radius: 4px; }
+.cc-connform .sub { line-height: 1.5; }
+.cc-connform .sub .lnk { white-space: nowrap; }
+
+/* Pastille de visibilité IA en lecture seule dans l'explorateur. */
+.cc-vis { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; display: inline-block; }
+.cc-vis.on { background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 25%, transparent); }
+.cc-vis.off { background: var(--border-strong); }
+.cc-chip.deny { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); text-decoration: line-through; }
+
+/* Accès IA par arbre + pastilles (v1.11). */
+.ait-all { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 12px 14px; border-radius: var(--r-md); border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--text); cursor: pointer; margin-bottom: 10px; }
+.ait-all.on { border-color: var(--ok); background: var(--ok-soft); }
+.ait-all.partial { border-color: var(--warn); background: var(--warn-soft); }
+.ait-all b { display: flex; align-items: center; gap: 8px; }
+.ait-all .sub { font-size: var(--fs-xs); color: var(--text-soft); }
+.ait-help { font-size: var(--fs-xs); color: var(--text-soft); margin: 0 0 8px; line-height: 1.5; }
+.ait-tree { max-height: 46vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); padding: 4px 0; }
+.ait-row { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }
+.ait-row:hover { background: var(--bg-raised); }
+.ait-dotbtn, .ait-exp { appearance: none; background: none; border: none; cursor: pointer; color: var(--text-soft); font: inherit; padding: 2px; display: inline-flex; align-items: center; border-radius: var(--r-sm); }
+.ait-exp { width: 20px; justify-content: center; }
+.ait-exp:hover { background: var(--bg-sunken); color: var(--text); }
+.ait-expsp { width: 20px; flex: 0 0 auto; }
+.ait-dot { width: 13px; height: 13px; border-radius: 50%; display: inline-block; flex: 0 0 auto; border: 2px solid transparent; }
+.ait-dot.on { background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 25%, transparent); }
+.ait-dot.off { background: transparent; border-color: var(--border-strong); }
+.ait-dot.partial { background: var(--warn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 25%, transparent); }
+.ait-ic { flex: 0 0 auto; }
+.ait-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ait-loading { color: var(--text-faint); font-size: var(--fs-xs); padding: 4px 10px; }
+
+/* Picto IA (sparkle) coloré selon l'accès — remplace les pastilles rondes. */
+.aiglyph { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; line-height: 0; }
+.aiglyph svg { width: 16px; height: 16px; display: block; }
+.aiglyph.on { color: var(--ok); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--ok) 55%, transparent)); }
+.aiglyph.partial { color: var(--warn); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--warn) 55%, transparent)); }
+.aiglyph.off { color: var(--border-strong); }
+.ait-all b .aiglyph svg { width: 19px; height: 19px; }
+.ait-dotbtn { padding: 2px 4px; }
+
+/* Stepper du tunnel d'ajout d'un cloud (v1.11). */
+.cc-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.cc-stp { font-size: var(--fs-xs); font-weight: 600; color: var(--text-faint); padding: 2px 9px; border-radius: var(--r-full); background: var(--bg-sunken); border: 1px solid var(--border); }
+.cc-stp.on { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.cc-stp.done { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+
+/* Nav : groupe KERNEL avec sous-éléments Projets / Dépôts (v1.11). */
+.nav-group { display: flex; flex-direction: column; border-radius: var(--r-md); }
+.nav-group.in { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.nav-sub { padding-left: 30px; font-size: var(--fs-sm); opacity: .92; }
+.nav-sub .nav-ico { opacity: .8; }
+.nav-group.in .nav-parent { color: var(--text); }
+.nav-ico svg { width: 18px; height: 18px; display: block; }
+.nav-sub .nav-ico svg { width: 16px; height: 16px; }
+
+/* CORPUS : board de cartes de clouds (comme Projets). */
+.cloud-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-top: 12px; }
+.cloud-card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 16px; border-radius: var(--r-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--text); cursor: pointer; transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast); }
+.cloud-card:hover { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); transform: translateY(-2px); }
+.clc-top { display: flex; align-items: center; justify-content: space-between; }
+.clc-logo { color: var(--accent); display: inline-flex; }
+.clc-logo svg { width: 34px; height: 34px; }
+.clc-name { font-weight: 700; font-size: var(--fs-md); }
+.clc-kind { font-size: var(--fs-xs); color: var(--text-faint); text-transform: capitalize; }
+.clc-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.clc-badge { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-soft); padding: 2px 8px; border-radius: var(--r-full); background: var(--bg-raised); border: 1px solid var(--border); }
+.cc-title { font-size: var(--fs-md); }
+
+/* BACKUP : cartes de plans. */
+.bk-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--bg-surface); margin-bottom: 10px; }
+.bk-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bk-flow { font-size: var(--fs-sm); color: var(--text-soft); }
+.bk-flow code { font-family: var(--font-mono); font-size: .86em; background: var(--bg-sunken); padding: 0 4px; border-radius: 4px; }
+.bk-when { font-size: var(--fs-xs); color: var(--text-faint); }
+.bk-act { display: flex; gap: 6px; flex: 0 0 auto; }
+
+/* SPOKES : cartes de projections (v1.11). */
+.spoke-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 12px; }
+.spoke-card { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: var(--r-lg); border: 1px solid var(--border-strong); background: var(--bg-surface); }
+.spk-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spk-name { font-size: var(--fs-md); }
+.spk-mission { font-size: var(--fs-sm); color: var(--text-soft); line-height: 1.45; }
+.spk-mission.muted { color: var(--text-faint); font-style: italic; }
+.spk-status { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--text); }
+.spk-dot { width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; background: var(--text-faint); }
+.spk-dot.green { background: var(--ok); } .spk-dot.orange { background: var(--warn); }
+.spk-dot.blue { background: var(--accent); } .spk-dot.red { background: var(--danger); }
+.spk-act { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+
+/* Sélecteur de dépôts existants (openRepoPicker) — confort de désignation KERNEL / spoke (1.11) */
+.rp-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; margin-top: 6px; }
+.rp-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-sm); cursor: pointer; }
+.rp-row:hover { border-color: var(--accent); background: var(--accent-soft); }
+.rp-ico { flex: 0 0 auto; font-size: 18px; line-height: 1.2; }
+.rp-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rp-n { font-weight: 600; color: var(--text); }
+.rp-p { font-size: var(--fs-xs); color: var(--text-soft); font-family: var(--font-mono); word-break: break-all; }
+.rp-rem { font-size: var(--fs-xs); color: var(--text-faint); word-break: break-all; }
+
+/* Organiser mes dépôts — matrice d'appairage (1.11) */
+.view-head-actions { display: flex; gap: 8px; align-items: center; }
+.pe-act { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.org-sec { margin-bottom: 20px; }
+.org-sec-h { font-weight: 700; font-size: var(--fs-md); margin-bottom: 10px; }
+.org-sugg { display: flex; flex-direction: column; gap: 10px; }
+.org-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; background: var(--bg-raised); }
+.org-card-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.org-note { font-size: var(--fs-xs); color: var(--text-soft); }
+.org-chain { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.org-node { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg); font-size: var(--fs-sm); min-width: 120px; }
+.org-node.off { opacity: .55; border-style: dashed; }
+.org-node-t { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--text-faint); }
+.org-node-t.org-atl { color: var(--accent); }
+.org-node-t.org-vit { color: var(--violet, #8b5cf6); }
+.org-arrow { align-self: center; color: var(--text-faint); font-size: 18px; }
+.org-card-act { margin-top: 10px; }
+.org-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.org-col { border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px; background: var(--bg-raised); min-width: 0; }
+.org-col-h { font-weight: 600; margin-bottom: 8px; }
+.org-row { display: flex; flex-direction: column; gap: 1px; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.org-row:last-child { border-bottom: none; }
+.org-row-n { font-weight: 600; word-break: break-all; }
+.org-row-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.org-row-sub { font-size: var(--fs-xs); word-break: break-all; }
+@media (max-width: 860px) { .org-cols { grid-template-columns: 1fr; } }
+
+/* Lignes de la matrice : cliquables vers le détail + bouton « Récupérer ici » */
+.org-row-click { cursor: pointer; border-radius: var(--r-sm); }
+.org-row-click:hover { background: var(--accent-soft); }
+.org-get { margin-top: 4px; align-self: flex-start; }
+
+/* ===== Organiser mes dépôts : matrice alignée (1.11, refonte) ===== */
+.org-banner { padding: 10px 12px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent); font-weight: 500; margin-bottom: 12px; }
+.org-banner.ok { background: rgba(46,160,67,.12); color: var(--ok); }
+.org-banner-n { font-weight: 800; font-size: 1.15em; }
+
+.mx-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px 12px; align-items: start; }
+.mx-head, .mx-row { display: contents; }
+.mx-h { font-weight: 600; font-size: var(--fs-sm); color: var(--text-soft); padding: 2px 2px 8px; border-bottom: 1px solid var(--border); }
+.mx-col { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mx-col-act { justify-content: center; }
+
+.mx-cell { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-raised); cursor: pointer; min-width: 0; }
+.mx-cell.on:hover { border-color: var(--accent); }
+.mx-cell.empty { border-style: dashed; background: transparent; color: var(--text-soft); justify-content: center; gap: 6px; }
+.mx-cell.empty:hover { border-color: var(--accent); color: var(--accent); }
+.mx-cell.void { border: none; background: transparent; cursor: default; min-height: 8px; }
+.mx-cell-txt { display: flex; flex-direction: column; min-width: 0; }
+.mx-name { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mx-org { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mx-plus { font-size: 16px; line-height: 1; }
+.mx-create-t { font-size: var(--fs-xs); }
+
+.org-folder { flex: 0 0 auto; display: inline-flex; }
+.org-folder.org-local { color: var(--accent); }
+.org-folder.org-atelier { color: #e05a8a; }
+.org-folder.org-vitrine { color: #8b5cf6; }
+
+.mx-make { font-size: var(--fs-xs); padding: 5px 11px; border: 1px solid var(--accent); color: var(--accent); background: var(--accent-soft); border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.mx-make:hover { background: var(--accent); color: #fff; }
+.mx-proj { font-size: var(--fs-xs); color: var(--ok); white-space: nowrap; }
+
+/* Archiver / supprimer un appariement */
+.mx-arch { background: none; border: none; cursor: pointer; font-size: 15px; opacity: .5; padding: 2px 4px; border-radius: var(--r-sm); }
+.mx-arch:hover { opacity: 1; background: var(--bg-raised); }
+.mx-col-act { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.arch-choices { display: flex; flex-direction: column; gap: 10px; margin: 6px 0; }
+.arch-choice { text-align: left; width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-raised); cursor: pointer; }
+.arch-choice:hover { border-color: var(--accent); }
+.arch-choice.danger:hover { border-color: var(--danger); }
+.arch-choice-h { font-weight: 700; margin-bottom: 3px; }
+.arch-choice-s { font-size: var(--fs-sm); color: var(--text-soft); }
+.arch-del-list { margin: 8px 0; padding-left: 4px; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.arch-del-list li { display: flex; align-items: center; gap: 7px; }
+.arch-del-list .org-folder { font-size: 14px; }
+.org-arch { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 10px; }
+.org-arch summary { cursor: pointer; font-weight: 600; color: var(--text-soft); }
+.mx-arch-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.mx-arch-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-raised); }
+.mx-arch-n { font-weight: 600; }
+.mx-arch-d { flex: 1 1 auto; font-size: var(--fs-xs); }
+
+/* Choix du sort du dossier local lors d'une suppression d'appariement */
+.pd-local { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-raised); }
+.pd-local-h { font-weight: 600; margin-bottom: 8px; }
+.pd-opt { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; cursor: pointer; }
+.pd-opt input { width: auto; margin-top: 3px; }
+.pd-opt-danger span { color: var(--danger); }
+#pd-guard { margin-top: 8px; }
+
+/* Correctif disposition colonne d'action (1.11) : en ligne, et bouton Archiver bien visible */
+.mx-col.mx-col-act { flex-direction: row; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.mx-arch { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-raised); color: var(--text-soft); cursor: pointer; opacity: 1; white-space: nowrap; }
+.mx-arch:hover { border-color: var(--danger); color: var(--danger); }
+.mx-arch-ico { font-size: 13px; }
+
+/* Correctif lisibilité modales archivage en thème sombre (les <button> réinitialisaient la couleur) */
+.arch-choice { color: var(--text); }
+.arch-choice-h { color: var(--text); }
+.arch-choice-s { color: var(--text-soft); }
+.arch-choice.danger .arch-choice-h { color: var(--danger); }
+.pd-local, .pd-local-h, .pd-opt span, .arch-del-list li { color: var(--text); }
+
+/* Picker de KERNEL : grille de classeurs appairés sélectionnables */
+.kpick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 8px; max-height: 56vh; overflow-y: auto; }
+.kpick { cursor: pointer; text-align: left; }
+.kpick:hover { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--r-md); }
+.kpick-off { opacity: .55; cursor: not-allowed; }
+.kpick-off:hover { outline: 2px solid var(--warn); }
+
+/* Sections de la page Dépôts git (Vos KERNEL / Dépôts git) */
+.proj-sec-h { font-weight: 700; font-size: var(--fs-md); margin: 4px 0 10px; }
+.proj-sec-empty { color: var(--text-soft); font-size: var(--fs-sm); padding: 4px 0 6px; }
+
+/* Marquage KERNEL sur un classeur : pastille + surbrillance ambre */
+.classeur-kbadge { margin-left: 8px; font-size: 10.5px; font-weight: 700; color: #d99a10; background: rgba(217,154,16,.14); border: 1px solid rgba(217,154,16,.4); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.classeur-kernel { outline: 2px solid rgba(217,154,16,.55); outline-offset: 1px; border-radius: var(--r-md); }
+.classeur-kernel .classeur-tab { background: rgba(217,154,16,.12); }
+
+/* Marquage SPOKE sur un classeur : pastille + surbrillance (bleu orbite) */
+.classeur-sbadge { margin-left: 8px; font-size: 10.5px; font-weight: 700; color: #3b9eff; background: rgba(59,158,255,.14); border: 1px solid rgba(59,158,255,.4); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.classeur-spoke { outline: 2px solid rgba(59,158,255,.5); outline-offset: 1px; border-radius: var(--r-md); }
+.classeur-spoke .classeur-tab { background: rgba(59,158,255,.1); }
+
+/* Picto SVG des titres de chapitres (Dépôts git) — aligné sur les icônes du menu */
+.proj-sec-h { display: flex; align-items: center; gap: 8px; }
+.sec-ico { display: inline-flex; width: 20px; height: 20px; }
+.sec-ico svg { width: 20px; height: 20px; }
+
+/* Cartes désignées (KERNEL / spoke) : carte + méta (rattachement, retrait) */
+.desig-wrap { display: flex; flex-direction: column; gap: 6px; }
+.desig-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 4px; flex-wrap: wrap; }
+.sp-parent { font-size: var(--fs-xs); color: var(--text-soft); display: inline-flex; align-items: center; gap: 4px; }
+.select-sm { font-size: var(--fs-xs); padding: 2px 6px; height: auto; }
+
+/* Bouton « à appairer » en mode alerte (orange) */
+.btn-alarm { color: var(--warn) !important; border-color: var(--warn) !important; background: var(--warn-soft) !important; font-weight: 700; }
+.btn-alarm:hover { filter: brightness(1.05); }
+
+/* Rattachement spoke → KERNEL (pill + picker) */
+.sp-parent-pill { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; font-size: 10.5px; color: #d99a10; background: rgba(217,154,16,.14); border: 1px solid rgba(217,154,16,.4); border-radius: 999px; padding: 1px 8px; }
+.sp-parent-warn { color: var(--warn); }
+.kparent-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.kparent { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text); cursor: pointer; font-weight: 600; }
+.kparent:hover { border-color: var(--accent); }
+.kparent.on { border-color: #d99a10; background: rgba(217,154,16,.1); }
+.kparent-ico { font-size: 15px; }
+
+/* Tag projet : pastille sur les cartes + saisie « nouveau tag » dans le picker */
+.tag-pill { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; font-size: 10.5px; color: #0ea5a4; background: rgba(14,165,164,.14); border: 1px solid rgba(14,165,164,.4); border-radius: 999px; padding: 1px 8px; }
+.tp-new { display: flex; gap: 8px; margin-top: 12px; }
+.tp-new .inp { flex: 1 1 auto; }
+
+/* Fichier d'ouverture (run) : pastille + sélecteur en arbre filtrable */
+.run-pill { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; font-size: 10.5px; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; padding: 1px 8px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rf-tree { max-height: 46vh; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px; margin-top: 8px; }
+.rf-dir > summary { cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); font-weight: 600; list-style: none; }
+.rf-dir > summary::-webkit-details-marker { display: none; }
+.rf-dir > summary:hover { background: var(--bg-raised); }
+.rf-children { margin-left: 14px; border-left: 1px solid var(--border); padding-left: 6px; }
+.rf-file { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: var(--r-sm); cursor: pointer; }
+.rf-file:hover { background: var(--accent-soft); }
+.rf-file.on { background: var(--accent-soft); outline: 1px solid var(--accent); font-weight: 600; }
+.rf-fico, .rf-dico { flex: 0 0 auto; }
+.rf-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
