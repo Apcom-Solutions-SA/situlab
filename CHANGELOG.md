@@ -2,6 +2,14 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.11.1] — 2026-10-14 — « Correctif CI : test multiplateforme »
+
+### Corrigé
+- **`TestBaseName` échouait sur Linux** (CI `go test -race`) : `baseName` s'appuyait sur `filepath.Base`,
+  qui ne reconnaît pas « \ » comme séparateur hors Windows — un chemin Windows n'y était donc pas
+  découpé. Le dernier segment est désormais extrait en coupant sur « \ » **et** « / », quel que soit l'OS.
+  Aucun changement fonctionnel de l'application ; correctif de la **porte qualité** de la CI.
+
 ## [1.11.0] — 2026-10-14 — « KERNEL : la mémoire, lisible — et nav simplifiée »
 
 ### Dépôts git — appairer, classer, ouvrir (le service, pas le gestionnaire)

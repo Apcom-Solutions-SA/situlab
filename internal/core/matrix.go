@@ -311,9 +311,13 @@ func splitFull(full, name string) (owner, repo string) {
 	return "", name
 }
 
-// baseName : dernier segment d'un chemin (nom du dossier), séparateurs \ et / confondus.
+// baseName : dernier segment d'un chemin (nom du dossier), séparateurs \ et / confondus — quel que
+// soit l'OS. On NE passe PAS par filepath.Base : sous Linux, « \ » n'y est pas un séparateur, donc un
+// chemin Windows (C:\tmp\KERNEL) n'y serait pas découpé. On coupe donc sur \ ET / nous-mêmes.
 func baseName(p string) string {
 	p = strings.TrimRight(p, `\/`)
-	p = filepath.ToSlash(p)
-	return filepath.Base(p)
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
