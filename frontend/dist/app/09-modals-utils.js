@@ -2,6 +2,9 @@
 let modalOk = null, modalCancel = null;
 function openModal(title, bodyHtml, onOk) {
   const m = el("modal");
+  // Repart d'une carte « propre » : un appelant précédent (ex. une aide « montée en force ») a pu
+  // lui ajouter des classes d'accent — on les efface pour ne pas les traîner d'une modale à l'autre.
+  const card0 = m.querySelector(".modal-card"); if (card0) card0.className = "modal-card";
   el("modal-body").innerHTML = `<h3 id="modal-title">${esc(title)}</h3>${bodyHtml}`;
   m.classList.remove("hidden");
   // Réinitialise le bouton Valider (un appelant précédent a pu le renommer / le colorer).
@@ -376,7 +379,15 @@ function pinFlowHTML(action, detail) {
 }
 
 function pinRequestModal(reason, detail, action, intent) {
+  // Le démon ré-émet "situlab:pin-request" jusqu'à réponse (fiabilité au démarrage à froid) : si la
+  // fenêtre est déjà ouverte, on ignore la ré-émission (ne pas rouvrir ni vider la saisie en cours).
+  if (pinModalOpen) return;
   let ci;
+  pinModalOpen = true; // le poll d'arrière-plan ne doit pas empiler un second écran de déverrouillage
+  // Au démarrage à froid, cette fenêtre peut s'ouvrir alors que le splash d'ouverture est encore
+  // affiché (init() a rendu la main à la demande d'agent) : on masque le splash, sinon la modale
+  // resterait cachée DERRIÈRE lui (z-index) et l'utilisateur ne verrait rien à saisir.
+  try { hideBoot(); } catch (e) {}
   const st = PIN_ACTION_STYLE[action] || null;
   const isDel = action === "delete";
   const chip = st ? `<div class="pin-action ${st.cls}"><span class="pin-ico">${st.ico}</span><span>${esc(st.label)}</span></div>` : "";
@@ -398,18 +409,131 @@ function pinRequestModal(reason, detail, action, intent) {
       ${pushPreviewHTML(detail)}</div>
     <label>Votre PIN SituLab</label><div id="pin-input"></div>
     <small>SituLab <b>constate</b> l'action réelle ci-dessus ; le message de l'agent est <b>déclaratif</b>. Votre PIN seul autorise — il ne quitte jamais SituLab. Si vous n'êtes pas à l'origine de cette demande, cliquez <b>Refuser</b>.</small></div>`, async () => {
-    try { await App().SubmitPIN(ci ? ci.read() : ""); } catch (e) {}
+    let ok = false;
+    try { await App().SubmitPIN(ci ? ci.read() : ""); ok = true; } catch (e) {}
+    pinModalOpen = false;
     closeModal();
+    // Si l'écran de déverrouillage du frontend était affiché EN PARALLÈLE (le poll avait constaté le
+    // verrou avant l'arrivée de la demande du démon), la saisie ci-dessus a déverrouillé la session :
+    // on rejoue l'app au lieu de laisser l'utilisateur ressaisir son PIN dans cet écran (double demande).
+    if (ok && el("app") && el("app").classList.contains("hidden")) {
+      for (let i = 0; i < 12; i++) {
+        await sleep(150);
+        try { if (await App().Unlocked()) { location.reload(); return; } } catch (e) {}
+      }
+    }
   });
   ci = codeInput(el("pin-input"), true, () => modalOk(), true); // validation auto dès 6 chiffres
   if (isDel && el("modal-ok")) el("modal-ok").classList.add("danger-btn"); // bouton de confirmation rouge pour une suppression
   // Refuser / fond / Échap : prévenir le démon tout de suite (sinon il attend 2 min).
-  const refuse = () => { try { App().CancelPIN(); } catch (e) {} closeModal(); };
+  const refuse = () => { pinModalOpen = false; try { App().CancelPIN(); } catch (e) {} closeModal(); };
   modalCancel = refuse;
   el("modal-cancel").textContent = "Refuser";
   el("modal-cancel").onclick = refuse;
   el("modal").onclick = (ev) => { if (ev.target === el("modal")) refuse(); };
 }
+
+/* ---------------- Aide contextuelle (1.9.11) ---------------- */
+// Tout le contenu pédagogique de l'interface est sorti des pages fonctionnelles et rassemblé ICI,
+// une fiche par sujet. Une pastille ⓘ (helpDot) posée près d'un titre ouvre la fiche en modale
+// « montée en force » (en-tête coloré, cartes, légendes, tableaux geste → effet). Les espaces
+// dédiés « Comprendre git » et « Aide » gardent leur contenu propre : ce registre ne les double pas.
+// Le texte des fiches est du contenu MAISON (statique) : les <b>/<i> y sont intentionnels, non échappés.
+const HELP = {
+  "git-local": {
+    ico: "🖥", accent: "local", title: "Vos branches — sur ce poste",
+    lead: "Ces gestes agissent sur <b>votre clone local</b>. Ils ne touchent <b>ni l'atelier ni la vitrine</b> — ceux-ci se mettent à jour par « Synchroniser » et « Promouvoir ».",
+    legendTitle: "Le code couleur des emplacements",
+    legendNote: "Chaque branche porte ces trois pastilles, dans cet ordre. <b>Pleine</b> = présente · <b>éteinte</b> = absente · <b>?</b> = serveur non joignable.",
+    legend: [
+      { sw: `<span class="help-sw sw-local"></span>`, t: "🩵 <b>Local</b> — votre clone, sur ce poste." },
+      { sw: `<span class="help-sw sw-atelier"></span>`, t: "🩷 <b>Atelier</b> — la source de vérité partagée." },
+      { sw: `<span class="help-sw sw-vitrine"></span>`, t: "🟣 <b>Vitrine</b> — la production publique." },
+    ],
+    tableTitle: "Les gestes",
+    table: { head: ["Geste", "Ce qu'il fait"], rows: [
+      ["🔀 basculer", "venir travailler sur cette branche"],
+      ["⬇ fusionner ici", "rapporter son travail dans la branche courante"],
+      ["🗑 supprimer", "retirer la copie <b>locale</b> — l'atelier n'est pas touché"],
+    ] },
+  },
+  "git-worktree": {
+    ico: "🗂", accent: "local", title: "Les copies de travail (worktrees)",
+    lead: "Un <b>worktree</b> ouvre une autre branche dans un <b>autre dossier</b>, en partageant le même historique que ce dépôt.",
+    cards: [
+      { ico: "🧩", title: "À quoi ça sert", text: "Travailler sur deux branches en parallèle sans re-cloner ni jongler avec « basculer »." },
+      { ico: "🤖", title: "Idéal pour l'IA", text: "Lancer une session d'agent sur une branche pendant que vous gardez la vôtre ouverte." },
+    ],
+  },
+  "git-atelier": {
+    ico: "⎇", accent: "atelier", title: "L'atelier — la source partagée",
+    lead: "Les branches de l'<b>atelier</b> sont la <b>source de vérité partagée</b> de l'équipe. C'est là qu'on rassemble le travail.",
+    cards: [
+      { ico: "🔐", title: "Suppression protégée", text: "Supprimer une branche distante <b>demande votre PIN</b>." },
+      { ico: "🛡️", title: "Branche par défaut", text: "La branche principale est protégée : pas de suppression possible ici." },
+    ],
+  },
+  "git-vitrine": {
+    ico: "🌐", accent: "vitrine", title: "La vitrine — votre production",
+    lead: "La vitrine est votre <b>production publique</b>. Ici, c'est <b>lecture seule</b> : aucun geste destructif.",
+    cards: [
+      { ico: "🚀", title: "Publier = Promouvoir", text: "On n'y publie qu'une version choisie, sous PIN — jamais une modification directe." },
+    ],
+    rule: "Règle 24 — séparation stricte entre le terrain de travail et la production.",
+  },
+};
+
+// helpDot : la pastille ⓘ à poser près d'un titre de section. Un seul composant, partout.
+function helpDot(key) {
+  return `<button type="button" class="help-dot" data-help="${esc(key)}" aria-label="En savoir plus" title="En savoir plus">ⓘ</button>`;
+}
+
+// helpBodyHTML : rend une fiche d'aide (lead → cartes → légende → tableau → règle).
+function helpBodyHTML(h) {
+  let b = "";
+  if (h.lead) b += `<p class="help-lead">${h.lead}</p>`;
+  if (h.cards && h.cards.length) {
+    b += `<div class="help-cards">` + h.cards.map((c) =>
+      `<div class="help-card"><span class="help-card-ico">${c.ico}</span><div class="help-card-body"><div class="help-card-t">${esc(c.title)}</div><div class="help-card-x">${c.text}</div></div></div>`).join("") + `</div>`;
+  }
+  if (h.legend && h.legend.length) {
+    b += `<div class="help-block"><div class="help-block-t">${esc(h.legendTitle || "Légende")}</div>`;
+    b += `<div class="help-legend">` + h.legend.map((l) => `<div class="help-leg-row">${l.sw}<span>${l.t}</span></div>`).join("") + `</div>`;
+    if (h.legendNote) b += `<p class="help-note">${h.legendNote}</p>`;
+    b += `</div>`;
+  }
+  if (h.table) {
+    b += `<div class="help-block">`;
+    if (h.tableTitle) b += `<div class="help-block-t">${esc(h.tableTitle)}</div>`;
+    b += `<table class="help-table"><thead><tr>` + h.table.head.map((x) => `<th>${esc(x)}</th>`).join("") + `</tr></thead><tbody>`;
+    b += h.table.rows.map((r) => `<tr>` + r.map((c) => `<td>${c}</td>`).join("") + `</tr>`).join("") + `</tbody></table></div>`;
+  }
+  if (h.rule) b += `<div class="help-rule"><span class="help-rule-ico">⚖</span> ${esc(h.rule)}</div>`;
+  return b;
+}
+
+// helpModal : ouvre la fiche d'aide « montée en force » pour une clé du registre HELP.
+// S'appuie sur openModal (bouton unique « Fermer », à la manière d'infoModal) + un en-tête coloré.
+function helpModal(key) {
+  const h = HELP[key];
+  if (!h) return;
+  openModal("", `<div class="help-body">
+      <div class="help-hd"><span class="help-hd-ico">${h.ico || "ⓘ"}</span><span class="help-hd-t">${esc(h.title)}</span></div>
+      ${helpBodyHTML(h)}
+    </div>`, () => closeModal());
+  // Titre accessible (aria-labelledby pointe #modal-title) sans doubler l'en-tête visuel coloré.
+  const t = el("modal-title"); if (t) { t.textContent = h.title; t.classList.add("sr-only"); }
+  el("modal-ok").textContent = "Fermer";
+  el("modal-cancel").classList.add("hidden");
+  const card = el("modal").querySelector(".modal-card");
+  if (card) card.classList.add("help-modal", "help-" + (h.accent || "local"));
+}
+
+// Clic sur une pastille ⓘ (délégation globale) → ouvre la fiche d'aide correspondante.
+document.addEventListener("click", (e) => {
+  const d = e.target.closest && e.target.closest("[data-help]");
+  if (d) { e.preventDefault(); helpModal(d.dataset.help); }
+});
 
 // Liens externes (vers l'instance Forgejo) : ouverts dans le navigateur du système.
 document.addEventListener("click", (e) => {
@@ -507,6 +631,13 @@ function addRevealToggle(root) {
 function readTheme() { try { return localStorage.getItem("situlab-theme") || "auto"; } catch (e) { return "auto"; } }
 function writeTheme(v) { try { localStorage.setItem("situlab-theme", v); } catch (e) {} }
 function applyTheme(v) { if (v === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v; }
+
+// Densité / zoom global (1.9.10) : agrandit UNIFORMÉMENT toute l'interface via --ui-zoom (body { zoom }).
+// Réglable depuis Réglages → Apparence. Confort local (localStorage), appliqué au démarrage.
+const ZOOM_FACTORS = { compact: "1", normal: "1.12", grand: "1.25" };
+function readZoom() { try { return localStorage.getItem("situlab-zoom") || "normal"; } catch (e) { return "normal"; } }
+function writeZoom(v) { try { localStorage.setItem("situlab-zoom", v); } catch (e) {} }
+function applyZoom(v) { document.documentElement.style.setProperty("--ui-zoom", ZOOM_FACTORS[v] || ZOOM_FACTORS.normal); }
 
 /* ---------------- Markdown léger ---------------- */
 function mdToHtml(md) {

@@ -14,6 +14,16 @@ async function liveTickOnce() {
   if (liveBusy) return;
   liveBusy = true; liveTick++;
   try {
+    // Détection PROACTIVE du verrouillage auto (inactivité) : le noyau peut verrouiller la session
+    // tout seul (minuterie). Si la vue courante n'appelle aucune lecture nécessitant la session, on ne
+    // le « verrait » pas et l'app resterait faussement utilisable sur des données périmées. On constate
+    // donc l'état à chaque tick (appel local, très bon marché) et on gèle l'app (page friendly) dès que
+    // c'est verrouillé. Garde-fous : ne rien faire si un écran de (dé)verrouillage est déjà en place
+    // (app masquée) ou si une demande d'agent / une grâce est en cours. Erreur de pont → on suppose
+    // déverrouillé (true) pour ne jamais geler l'app à tort sur un hoquet transitoire.
+    if (!relocking && !pinModalOpen && !lockGrace && !el("app").classList.contains("hidden")) {
+      if ((await App().Unlocked().catch(() => true)) === false) return handleLock();
+    }
     if (liveTick % 3 === 0) await refreshWhoami();
     if (state.view === "repos") await renderRepos(true);
     else if (state.view === "projects") await renderProjects(true);
@@ -84,32 +94,47 @@ async function renderRepos(live) {
       <div class="toolbar">
         <input id="repo-search" type="text" placeholder="Rechercher un dépôt…" aria-label="Rechercher" value="${esc(state.search)}" />
         <select id="repo-org" class="select" aria-label="Filtrer par organisation"></select>
+        <select id="repo-state" class="select" aria-label="Filtrer par état">
+          <option value="">Tous les états</option>
+          <option value="dirty">Modifications en cours</option>
+          <option value="ahead">À envoyer</option>
+          <option value="behind">Nouveautés en ligne</option>
+          <option value="diverged">À réunir</option>
+          <option value="attention">À vérifier</option>
+          <option value="uptodate">À jour</option>
+          <option value="nolocal">Pas sur ce poste</option>
+        </select>
+        <select id="repo-project" class="select" aria-label="Filtrer par projet">
+          <option value="">Projet : tous</option>
+          <option value="in">Dans un projet</option>
+          <option value="out">Hors projet</option>
+        </select>
         <div class="seg sm" id="repo-view" role="group" aria-label="Présentation">
           <button data-v="grid" title="Grille"${state.repoView === "grid" ? ' class="on"' : ""}>▦ Grille</button>
           <button data-v="list" title="Liste"${state.repoView === "list" ? ' class="on"' : ""}>☰ Liste</button>
         </div>
-        <button type="button" id="hide-nolocal" class="chip${state.hideNolocal ? " on" : ""}" aria-pressed="${state.hideNolocal ? "true" : "false"}" title="N'afficher que les dépôts copiés sur ce poste">Sur ce poste</button>
-        <button class="btn btn-ghost btn-sm" id="link-local">📁 Lier un dépôt local</button>
         <button class="btn btn-primary btn-sm" id="new-repo">＋ Créer un dépôt</button>
       </div>
+      <div id="repo-tabs" class="gp-tabs repo-tabs" role="group" aria-label="Emplacement"></div>
       <div id="repo-list">${state.repos ? "" : skeletons(4)}</div>`;
     el("repo-search").oninput = (e) => { state.search = e.target.value; paintRepos(); };
     el("repo-org").onchange = (e) => { state.org = e.target.value; paintRepos(); };
+    el("repo-state").value = state.repoState || "";
+    el("repo-state").onchange = (e) => { state.repoState = e.target.value; paintRepos(); };
+    el("repo-project").value = state.repoProject || "";
+    el("repo-project").onchange = (e) => { state.repoProject = e.target.value; paintRepos(); };
     el("new-repo").onclick = createRepoModal;
-    el("link-local").onclick = linkLocalRepo;
+    el("repo-tabs").onclick = (ev) => {
+      const b = ev.target.closest("[data-tab]"); if (!b || b.disabled) return;
+      state.repoTab = b.dataset.tab; paintRepos();
+    };
     document.querySelectorAll("#repo-view button").forEach((b) => b.onclick = () => {
       state.repoView = b.dataset.v;
       try { localStorage.setItem("situlab.repoView", state.repoView); } catch (e) {}
       document.querySelectorAll("#repo-view button").forEach((x) => x.classList.toggle("on", x === b));
       paintRepos();
     });
-    el("hide-nolocal").onclick = (e) => {
-      state.hideNolocal = !state.hideNolocal;
-      e.currentTarget.classList.toggle("on", state.hideNolocal);
-      e.currentTarget.setAttribute("aria-pressed", state.hideNolocal ? "true" : "false");
-      try { localStorage.setItem("situlab.hideNolocal", state.hideNolocal ? "1" : "0"); } catch (err) {}
-      paintRepos();
-    };
+    await loadProjectsIndex(); // index atelier+vitrines (zéro réseau) : allume le bouton « Fiche projet »
     if (state.repos) paintRepos();
   }
   const liveEl = el("live"); if (liveEl) liveEl.classList.add("syncing"); // indicateur « synchro en cours »
@@ -147,24 +172,17 @@ function paintRepos() {
   }
 
   const q = state.search.trim().toLowerCase();
-  const shown = repos.filter((r) => {
+  // 1) Pré-filtre sur le dépôt BRUT : organisation + recherche texte.
+  const pre = repos.filter((r) => {
     if (state.org && r.owner !== state.org) return false;
-    if (state.hideNolocal && (r.state || "nolocal") === "nolocal") return false;
     if (q && !(r.full_name + " " + r.name + " " + (r.local_path || "")).toLowerCase().includes(q)) return false;
     return true;
   });
 
-  if (shown.length === 0) {
-    list.innerHTML = repos.length === 0
-      ? blankslate("◍", "Aucun dépôt", "Votre token ne donne accès à aucun dépôt sur cette instance.")
-      : blankslate("⌕", "Aucun résultat", state.hideNolocal && repos.length ? "Aucun dépôt n'est copié sur ce poste. Désactivez le filtre « Sur ce poste » pour voir les autres." : "Aucun dépôt ne correspond à votre recherche.");
-    return;
-  }
-
-  // Regroupement par DÉPÔT DISTANT : un dépôt = UNE carte, ses clones locaux listés dedans (plus de
-  // carte par clone). Les dépôts purement locaux (hors instance) restent individuels.
+  // 2) Regroupement par DÉPÔT DISTANT : un dépôt = UNE carte (ses clones locaux listés dedans).
+  // Les dépôts purement locaux (hors instance) restent individuels.
   const byRepo = new Map(), order = [];
-  shown.forEach((r) => {
+  pre.forEach((r) => {
     const key = r.has_remote ? "R:" + r.full_name : "L:" + r.name + "@" + (r.local_path || "");
     let g = byRepo.get(key);
     if (!g) { g = []; byRepo.set(key, g); order.push(key); }
@@ -181,50 +199,108 @@ function paintRepos() {
     return rep;
   });
 
-  // Regroupement logique : l'actionnable d'abord, « à jour » ensuite, « pas sur ce poste » en fin.
-  const GROUPS = [
-    ["dirty", "Modifications en cours", ["dirty"]],
-    ["ahead", "En avance — à envoyer", ["ahead"]],
-    ["behind", "En retard — nouveautés en ligne", ["behind"]],
-    ["diverged", "À réunir (changements croisés)", ["diverged"]],
-    ["attention", "À vérifier", ["detached", "unreadable"]],
-    ["uptodate", "À jour", ["uptodate"]],
-    ["nolocal", "Pas sur ce poste", ["nolocal"]],
-  ];
+  // 3) Filtres État + Projet appliqués au dépôt représentatif.
+  const base = aggregated.filter((r) => matchRepoState(r, state.repoState) && matchRepoProject(r, state.repoProject));
+
+  // 4) Onglets d'EMPLACEMENT : Ce poste / Atelier / Vitrine. On n'affiche que les onglets qui ont
+  //    du contenu (le rôle de la connexion courante décide atelier↔vitrine) + un onglet « Tous ».
+  renderRepoTabs(base);
+  const shown = base.filter((r) => matchRepoTab(r, state.repoTab));
+
+  if (shown.length === 0) {
+    list.innerHTML = repos.length === 0
+      ? blankslate("◍", "Aucun dépôt", "Votre token ne donne accès à aucun dépôt sur cette instance.")
+      : blankslate("⌕", "Aucun résultat", "Aucun dépôt ne correspond à vos filtres. Élargissez la recherche ou réinitialisez les filtres.");
+    return;
+  }
+
   const gridClass = state.repoView === "list" ? "repo-grid list" : "repo-grid";
   const content = document.querySelector(".content");
   const scroll = content ? content.scrollTop : 0;
   let html = state.truncated ? `<div class="offline-banner">Beaucoup de dépôts : la liste affichée est partielle.</div>` : "";
-  GROUPS.forEach(([k, title, states]) => {
-    const items = aggregated.map((r, i) => [r, i]).filter(([r]) => states.includes(r.state || "nolocal"));
-    if (!items.length) return;
-    html += `<div class="repo-group"><div class="repo-group-h">${esc(title)} <span class="rg-count">${items.length}</span></div>` +
-      `<div class="${gridClass}">` + items.map(([r, i]) => repoCard(r, i)).join("") + `</div></div>`;
-  });
+  html += `<div class="${gridClass}">` + shown.map((r, i) => repoCard(r, i)).join("") + `</div>`;
   list.innerHTML = html;
   // Délégation sur le conteneur STABLE #repo-list (survit aux repaints « en direct »), lecture via
-  // state._shown (jamais de closure périmée) : « Ouvrir le détail » et le dépliage restent fiables.
-  state._shown = aggregated;
-  const openClone = (val) => { const [gi, ci] = String(val).split(":").map(Number); const g = state._shown[gi]; const c = g && g._clones && g._clones[ci]; if (c) openDetail(c); };
+  // state._shown (jamais de closure périmée) : « Voir détail », « Fiche projet » et l'ouverture d'un clone.
+  state._shown = shown;
   list.onclick = (ev) => {
-    const oc = ev.target.closest("[data-openc]");
-    if (oc) { openClone(oc.dataset.openc); return; }
+    const p = ev.target.closest("[data-proj]");
+    if (p) { openProject(p.dataset.proj); return; }
+    const g = ev.target.closest("[data-get]");
+    if (g) { const r = state._shown[+g.dataset.get]; if (r) getRepoHereModal(r); return; }
     const o = ev.target.closest("[data-open]");
     if (o) { const r = state._shown[+o.dataset.i]; if (r) openDetail(r); return; }
-    const h = ev.target.closest(".repo-head[data-head]");
-    if (h) { const i = +h.dataset.i, r = state._shown[i]; if (r) toggleRepoCard(r, i); }
   };
-  list.onkeydown = (ev) => {
-    if (ev.key !== "Enter" && ev.key !== " ") return;
-    const oc = ev.target.closest("[data-openc]");
-    if (oc) { ev.preventDefault(); openClone(oc.dataset.openc); return; }
-    const h = ev.target.closest(".repo-head[data-head]");
-    if (h) { ev.preventDefault(); const i = +h.dataset.i, r = state._shown[i]; if (r) toggleRepoCard(r, i); }
-  };
-  // Cartes mono-clone restées dépliées : rafraîchissement SILENCIEUX (le contenu caché reste affiché,
-  // pas de skeleton) — la carte ne « se referme » plus au tick « en direct ».
-  aggregated.forEach((r, i) => { if (!(r._clones && r._clones.length > 1) && state.expanded[repoKey(r)]) loadBranches(r, i, true); });
   if (content) content.scrollTop = scroll;
+}
+
+// matchRepoState : filtre « État » du catalogue. "attention" couvre detached + unreadable.
+function matchRepoState(r, f) {
+  if (!f) return true;
+  const s = r.state || "nolocal";
+  if (f === "attention") return s === "detached" || s === "unreadable";
+  return s === f;
+}
+
+// matchRepoProject : filtre « Projet » — "in" = appartient à un projet, "out" = n'y appartient pas.
+function matchRepoProject(r, f) {
+  if (!f) return true;
+  const inProj = !!repoProjectName(r);
+  return f === "in" ? inProj : !inProj;
+}
+
+// repoHasLocal : ce dépôt est-il présent sur CE poste (cloné / worktree) ?
+function repoHasLocal(r) { return !!(r._clones && r._clones.length) || !!r.local_path; }
+
+// matchRepoTab : onglets de PRÉSENCE (modèle honnête : une connexion = un seul rôle, inutile de
+// prétendre deux onglets distants). "ici" = présent sur ce poste ; "online" = en ligne mais pas
+// encore ici. Le monde (atelier/vitrine) est dit par la COULEUR de l'onglet, pas par un onglet mort.
+function matchRepoTab(r, tab) {
+  if (!tab) return true;
+  if (tab === "ici") return repoHasLocal(r);
+  if (tab === "online") return !!r.has_remote && !repoHasLocal(r);
+  return true;
+}
+
+// renderRepoTabs : barre d'onglets de présence avec compteurs. L'onglet « En ligne » prend la couleur
+// et l'icône du rôle de la connexion courante (atelier=rose/forgejo · vitrine=violet/github). Un onglet
+// vidé par les filtres se désactive ; l'onglet actif alors devenu vide retombe sur « Tous ».
+function renderRepoTabs(base) {
+  const bar = el("repo-tabs"); if (!bar) return;
+  const count = (tab) => base.filter((r) => matchRepoTab(r, tab)).length;
+  const prod = roleOf(state.instance) === "production";
+  const tabs = [
+    { key: "", label: "Tous", cls: "", ico: "", n: base.length, tip: "Tous les dépôts" },
+    { key: "ici", label: "Sur ce poste", cls: "gp-tab-local", ico: ZICON.desktop, n: count("ici"), tip: "Dépôts copiés sur ce poste" },
+    { key: "online", label: "En ligne", cls: prod ? "gp-tab-vitrine" : "gp-tab-atelier", ico: prod ? ZICON.github : ZICON.forgejo, n: count("online"), tip: (prod ? "En vitrine" : "Dans l'atelier") + ", pas encore sur ce poste" },
+  ];
+  const active = tabs.find((t) => t.key === state.repoTab);
+  if (!active || (state.repoTab && active.n === 0)) state.repoTab = "";
+  bar.innerHTML = tabs.map((t) => {
+    const dis = t.key && t.n === 0;
+    const on = t.key === state.repoTab;
+    return `<button type="button" class="gp-tab ${t.cls}${on ? " on" : ""}" data-tab="${t.key}"${dis ? " disabled" : ""} aria-pressed="${on}" title="${esc(t.tip)}">${t.ico}${esc(t.label)}<span class="repo-tab-n">${t.n}</span></button>`;
+  }).join("");
+}
+
+// loadProjectsIndex : construit l'index « instance/owner/repo → nom de projet » (atelier ET vitrines),
+// en lecture de config pure (zéro réseau). Sert à allumer le bouton « Fiche projet » d'un dépôt.
+async function loadProjectsIndex() {
+  try {
+    const projs = (await App().Projects()) || [];
+    const idx = new Map();
+    const add = (ref, name) => { if (ref && ref.instance && ref.owner && ref.repo) idx.set(ref.instance + "/" + ref.owner + "/" + ref.repo, name); };
+    for (const p of projs) { add(p.atelier, p.name); (p.productions || []).forEach((pr) => add(pr, p.name)); }
+    state.projectsIndex = idx;
+  } catch (e) { /* non bloquant : simplement pas de bouton « Fiche projet » */ }
+}
+
+// repoProjectName : nom du projet auquel ce dépôt appartient (via l'index), "" sinon. Un dépôt du
+// catalogue est sur l'instance courante ; sa clé est « instance courante / owner-repo ».
+function repoProjectName(r) {
+  const idx = state.projectsIndex;
+  if (!idx || !r.has_remote || !r.full_name) return "";
+  return idx.get(state.instance + "/" + r.full_name) || "";
 }
 
 function createRepoModal() {
@@ -275,23 +351,33 @@ function deleteRepoModal(owner, repo) {
   wireAiInvite(() => promptRepoDelete(owner, repo));
 }
 
-// linkLocalRepo : assistant « lier un dépôt local ». Deux voies : manuelle (sélecteur de
-// dossier natif) ou déléguée à l'IA (prompt prêt à coller). L'humain choisit.
-function linkLocalRepo() {
-  infoModal("Lier un dépôt local", `<div class="field">
-    <p class="sub">Rattachez un dossier git de ce poste à son dépôt en ligne.</p>
+// getRepoHereModal : « Récupérer sur ce poste » — action CONTEXTUELLE posée sur la carte d'un dépôt
+// présent en ligne mais pas encore copié ici (1.9.11). Trois voies : cloner ici (par défaut), lier
+// un dossier déjà présent, ou déléguer à l'IA. Après l'action, le catalogue se resynchronise.
+function getRepoHereModal(r) {
+  const { owner, repo } = splitFull(r.full_name);
+  openModal("Récupérer « " + repo + " » sur ce poste", `<div class="field">
+    <p class="sub">Copier le dépôt <b>${esc(r.full_name)}</b> dans un dossier de ce poste (il sera créé). SituLab le relie et le synchronise aussitôt.</p>
+    <label>Dossier de destination<input id="gr-dir" class="inp" placeholder="C:\\work\\${esc(repo)}" autocomplete="off" /></label>
+    <div class="inline-error hidden" id="gr-err"></div>
     <div class="link-opt">
-      <div class="link-opt-h">À la main</div>
-      <p class="sub">Choisissez le dossier (celui qui contient le sous-dossier <b>.git</b>).</p>
-      <button class="btn btn-primary btn-sm" type="button" id="ll-pick">📁 Choisir un dossier…</button>
+      <div class="link-opt-h">Déjà présent ailleurs sur ce poste ?</div>
+      <button class="btn btn-ghost btn-sm" type="button" id="gr-link">📁 Lier un dossier existant…</button>
     </div>
     <div class="link-opt">
       <div class="link-opt-h">🤖 Ou laissez votre IA le faire</div>
-      <p class="sub">Votre agent est là pour ça : il trouve vos dépôts et les relie tout seul. Copiez ce prompt et collez-le dans votre IA.</p>
-      <button class="btn btn-ghost btn-sm" type="button" id="ll-prompt">Copier le prompt pour mon IA</button>
-    </div></div>`);
-  el("ll-pick").onclick = () => { closeModal(); linkLocalPick(); };
-  el("ll-prompt").onclick = () => copyLinkLocalPrompt();
+      <button class="btn btn-ghost btn-sm" type="button" id="gr-prompt">Copier le prompt pour mon IA</button>
+    </div></div>`, async () => {
+    const dir = el("gr-dir").value.trim(), er = el("gr-err");
+    if (!dir) { er.textContent = "Indiquez un dossier de destination."; er.classList.remove("hidden"); return; }
+    try {
+      await App().Clone(state.instance, owner, repo, dir);
+      closeModal(); toast("Dépôt récupéré sur ce poste", "ok"); state.repoSig = ""; renderRepos(false);
+    } catch (e) { if (isLocked(e)) return handleLock(); er.textContent = cleanErr(e); er.classList.remove("hidden"); }
+  });
+  el("modal-ok").textContent = "Cloner ici";
+  el("gr-link").onclick = () => { closeModal(); linkLocalPick(); };
+  el("gr-prompt").onclick = () => copyLinkLocalPrompt();
 }
 
 // linkLocalPick : sélecteur de dossier natif puis enregistrement (SituLab vérifie que c'est
@@ -353,76 +439,65 @@ function folderOf(p) { return p ? p.split(/[\\/]/).filter(Boolean).pop() : ""; }
 const STATE_ORDER = ["dirty", "diverged", "ahead", "behind", "detached", "unreadable", "uptodate", "nolocal"];
 function stateRank(s) { const i = STATE_ORDER.indexOf(s || "nolocal"); return i < 0 ? 99 : i; }
 
-// repoCardGrouped : carte d'un dépôt distant ayant PLUSIEURS clones locaux. En-tête = identité
-// distante ; dessous, une ligne par clone (dossier, type worktree/clone, branche, écart, état).
-// Chaque ligne ouvre le détail de SON clone. Pas de dépliage de branches ici (via le détail).
-function repoCardGrouped(r, i) {
-  const vis = `<span class="pill">${r.private ? "privé" : "public"}</span>`;
-  const n = r._clones.length;
-  const rows = r._clones.map((c, ci) => {
-    const kind = c.local_kind === "worktree" ? `<span class="pill sm" title="rattaché au dépôt principal (git worktree)">worktree</span>`
-      : c.local_kind === "clone" ? `<span class="pill sm" title="clone autonome">clone</span>` : "";
-    const bits = [];
-    if (c.local_error) { bits.push(`<span class="muted">${esc(c.local_error)}</span>`); }
-    else {
-      bits.push(`<span class="pill" title="version de travail (branche git)">⎇ ${esc(c.local_branch || "?")}</span>`);
-      if (c.ahead) bits.push(`<span class="s-ahead" title="à envoyer">↑${c.ahead}</span>`);
-      if (c.behind) bits.push(`<span class="s-behind" title="à récupérer">↓${c.behind}</span>`);
-      if (c.changed_count) bits.push(`<span class="hint">${c.changed_count} modif.</span>`);
-      if (c.last_date) bits.push(`<span class="repo-when">maj ${esc(fmtWhen(c.last_date))}</span>`);
-    }
-    return `<div class="clone-row" data-openc="${i}:${ci}" role="button" tabindex="0" title="Ouvrir : ${esc(c.local_path)}">
-      <div class="clone-main"><span class="pill pill-folder">📁 ${esc(folderOf(c.local_path))}</span>${kind ? " " + kind : ""}</div>
-      <div class="clone-bits">${bits.join(" ")} ${stateBadge(c.state)}</div>
-    </div>`;
-  }).join("");
-  return `<div class="repo-card grouped ${(STATES[r.state] || STATES.nolocal).cls}" data-key="${esc("R:" + r.full_name)}" data-i="${i}">
-    <div class="repo-head repo-head-static">
-      <div class="repo-title">${repoTitleHTML(r.full_name)} ${vis} <span class="pill sm clone-count" title="Ce même dépôt est copié ${n} fois sur ce poste (dossiers ou branches différents)">📁 ${n} copies</span></div>
-      ${stateBadge(r.state)}
-    </div>
-    <div class="repo-sub muted">Plusieurs copies locales du même dépôt — un dossier par ligne (branche / état propres).</div>
-    <div class="clone-list">${rows}</div>
-  </div>`;
+// projBtnHTML : bouton « Fiche projet » si le dépôt appartient à un projet, "" sinon.
+function projBtnHTML(r) {
+  const name = repoProjectName(r);
+  return name ? `<button class="btn btn-ghost btn-sm repo-proj-btn" data-proj="${esc(name)}" title="Ouvrir la fiche du projet « ${esc(name)} »">🗂 Fiche projet</button>` : "";
 }
 
-// repoCard : carte épurée. En-tête = nom + état d'un coup d'œil. Clic sur l'en-tête =
-// déplie l'état par branche (chargé à la demande). « Ouvrir » = vue détaillée complète.
+// repoPresenceHTML : pastilles d'EMPLACEMENT du dépôt — 🖥 ce poste + le distant, coloré selon le
+// RÔLE de la connexion courante (atelier=rose · vitrine=violet). Pip éteint = absent. Dit d'un coup
+// d'œil « sur ce poste et dans l'atelier », « que dans l'atelier », « que dans la vitrine », etc.
+function repoPresenceHTML(r) {
+  const kind = roleOf(state.instance) === "production" ? "vitrine" : "atelier";
+  const remoteIco = kind === "vitrine" ? ZICON.github : ZICON.forgejo;
+  const remoteLbl = kind === "vitrine" ? "la vitrine" : "l'atelier";
+  const pip = (cls, ico, on, label) => `<span class="gp-pip ${cls} ${on ? "on" : "off"}" title="${esc(label)}">${ico}</span>`;
+  return `<span class="gp-scope" aria-hidden="true">${
+    pip("gp-pip-local", ZICON.desktop, !!r.local_path, r.local_path ? "présent sur ce poste" : "pas sur ce poste")
+  }${
+    pip("gp-pip-" + kind, remoteIco, !!r.has_remote, r.has_remote ? ("présent sur " + remoteLbl) : ("absent de " + remoteLbl))
+  }</span>`;
+}
+
+// États LOCAUX réellement actionnables : on n'affiche une pastille d'état que pour ceux-là. « À jour »
+// et « pas sur ce poste » ne sont plus des badges — les pastilles d'emplacement les disent déjà.
+const ACTION_STATES = ["dirty", "ahead", "behind", "diverged", "detached", "unreadable"];
+function actionStateHTML(r) { return ACTION_STATES.includes(r.state) ? stateBadge(r.state) : ""; }
+
+// repoCard : carte ÉPURÉE du catalogue (1.9.11). Identité du dépôt + état d'un coup d'œil + dossier
+// s'il est copié ici. Deux portes seulement : « Fiche projet » (si applicable) et « Voir détail ».
+// Tout le reste (branches, envois, versions) vit dans le détail ou dans Projets.
 function repoCard(r, i) {
-  if (r._clones && r._clones.length > 1) return repoCardGrouped(r, i);
   const title = r.has_remote ? r.full_name : r.name;
-  const key = repoKey(r);
-  const open = !!state.expanded[key];
   const vis = r.has_remote
     ? `<span class="pill">${r.private ? "privé" : "public"}</span>`
     : `<span class="pill">local</span>`;
-
-  // Résumé instantané (sans calcul git) : branche + version (tag seul, jamais de n° de commit) +
-  // écart + date de dernière mise à jour.
-  const sum = [];
-  if (r.local_path) {
-    sum.push(`<span class="pill pill-folder" title="dossier local : ${esc(r.local_path)}">📁 ${esc(folderOf(r.local_path))}</span>`);
-    sum.push(`<span class="pill" title="version de travail (branche git)">⎇ ${esc(r.local_branch || "?")}</span>`);
-    const tag = cleanTag(r.describe);
-    if (tag) sum.push(`<span class="pill ver" title="version publiée">${esc(tag)}</span>`);
-    if (r.ahead) sum.push(`<span class="s-ahead" title="à envoyer">↑${r.ahead}</span>`);
-    if (r.behind) sum.push(`<span class="s-behind" title="à récupérer">↓${r.behind}</span>`);
-    if (r.changed_count) sum.push(`<span class="hint">${r.changed_count} modif.</span>`);
-    if (r.last_date) sum.push(`<span class="repo-when">maj ${esc(fmtWhen(r.last_date))}</span>`);
-  } else if (r.local_error) {
-    sum.push(`<span class="muted">${esc(r.local_error)}</span>`);
-  } else {
-    sum.push(`<span class="muted">pas copié sur ce poste</span>`);
-  }
-
-  return `<div class="repo-card ${(STATES[r.state] || STATES.nolocal).cls}" data-key="${esc(key)}" data-i="${i}">
-    <div class="repo-head" data-head data-i="${i}" role="button" tabindex="0" aria-expanded="${open}" title="Cliquez pour voir les branches">
-      <div class="repo-title"><span class="chev">${open ? "▾" : "▸"}</span> ${r.has_remote ? repoTitleHTML(title) : `<span class="nm">${esc(title)}</span>`} ${vis}</div>
-      ${stateBadge(r.state)}
+  const st = actionStateHTML(r);
+  // Un dépôt = UNE carte. S'il est copié plusieurs fois sur ce poste, on l'indique d'un compteur
+  // discret (les copies et worktrees se gèrent dans le détail) — jamais une liste sur le catalogue.
+  const nClones = (r._clones && r._clones.length) || 0;
+  const viaAtl = r.via_atelier ? `<span class="pill sm via-atelier" title="Vous l'avez déjà sur ce poste via le clone d'atelier du projet — rien à récupérer">⇄ via l'atelier</span>` : "";
+  const copies = nClones > 1
+    ? `<span class="pill pill-folder" title="Ce dépôt est copié ${nClones} fois sur ce poste">📁 ${nClones} copies</span>${viaAtl}`
+    : r.local_path
+      ? `<span class="pill pill-folder" title="dossier local : ${esc(r.local_path)}">📁 ${esc(folderOf(r.local_path))}</span>${viaAtl}`
+      : "";
+  const ident = copies
+    ? `<div class="repo-ident">${copies}${st}</div>`
+    : r.local_error
+      ? `<div class="repo-ident muted">${esc(r.local_error)}${st}</div>`
+      : (st ? `<div class="repo-ident">${st}</div>` : "");
+  // Dépôt en ligne pas encore sur ce poste → action contextuelle « Récupérer ici » (clone + synchro).
+  const getBtn = (r.has_remote && !r.local_path)
+    ? `<button class="btn btn-ghost btn-sm repo-get-btn" data-get="${i}" title="Cloner / lier ce dépôt sur ce poste">📁 Récupérer ici</button>` : "";
+  return `<div class="repo-card ${(STATES[r.state] || STATES.nolocal).cls}" data-key="${esc(repoKey(r))}" data-i="${i}">
+    <div class="repo-head repo-head-static">
+      <div class="repo-title">${r.has_remote ? repoTitleHTML(title) : `<span class="nm">${esc(title)}</span>`} ${vis}</div>
+      ${repoPresenceHTML(r)}
     </div>
-    <div class="repo-summary">${sum.join(" ")}</div>
-    <div class="repo-branches ${open ? "" : "hidden"}" id="rbody-${i}">${open ? (state.branchCache[key] || `<div class="skeleton"></div>`) : ""}</div>
-    <div class="repo-foot"><span class="repo-hint">${open ? "branches ci-dessus" : "▸ branches"}</span><button class="btn btn-ghost btn-sm" data-open data-i="${i}">Ouvrir le détail ›</button></div>
+    ${ident}
+    <div class="repo-foot">${projBtnHTML(r)}${getBtn}<button class="btn btn-ghost btn-sm" data-open data-i="${i}">Voir détail ›</button></div>
   </div>`;
 }
 
@@ -434,48 +509,6 @@ function cleanTag(desc) {
   if (m) return m[1];
   if (/^[0-9a-f]{7,40}$/i.test(desc)) return "";
   return desc;
-}
-
-// toggleRepoCard : ouvre/ferme l'état par branche d'une carte, en le chargeant la 1re fois.
-function toggleRepoCard(r, i) {
-  const key = repoKey(r), body = el("rbody-" + i);
-  const card = body && body.closest(".repo-card");
-  const chev = card && card.querySelector(".chev");
-  const head = card && card.querySelector("[data-head]");
-  if (!body) return;
-  const nowOpen = body.classList.contains("hidden");
-  body.classList.toggle("hidden", !nowOpen);
-  if (chev) chev.textContent = nowOpen ? "▾" : "▸";
-  if (head) head.setAttribute("aria-expanded", String(nowOpen));
-  if (nowOpen) { state.expanded[key] = true; loadBranches(r, i); }
-  else { delete state.expanded[key]; body.dataset.loaded = ""; }
-}
-
-// loadBranches charge (ou rafraîchit) le graphe de branches d'une carte. silent=true : rafraîchit
-// SANS repasser par un skeleton (refresh de fond du « en direct ») — on garde le contenu affiché à
-// l'écran et on le remplace seulement une fois les données prêtes. Le résultat est mis en cache
-// (state.branchCache) pour que le prochain repaint réaffiche la carte dépliée sans flicker.
-async function loadBranches(r, i, silent) {
-  const body = el("rbody-" + i); if (!body) return;
-  const key = repoKey(r);
-  if (body.dataset.loading === "1") return; // évite deux chargements concurrents
-  body.dataset.loading = "1";
-  if (!silent && !state.branchCache[key]) body.innerHTML = `<div class="skeleton"></div>`;
-  const put = (htmlStr) => { state.branchCache[key] = htmlStr; const b = el("rbody-" + i); if (b) { b.innerHTML = htmlStr; b.dataset.loaded = "1"; b.dataset.loading = ""; } };
-  try {
-    if (r.local_path) {
-      put(branchMatrixHTML(await App().BranchMatrix(r.local_path)));
-    } else if (r.has_remote) {
-      const { owner, repo } = splitFull(r.full_name);
-      put(remoteOnlyHTML(await App().RepoBranches(state.instance, owner, repo)));
-    } else {
-      put(`<div class="muted" style="padding:6px 0">Aucune information de branche.</div>`);
-    }
-  } catch (e) {
-    body.dataset.loading = "";
-    if (isLocked(e)) return handleLock();
-    if (!state.branchCache[key]) body.innerHTML = `<div class="muted" style="padding:6px 0">${esc(cleanErr(e))}</div>`;
-  }
 }
 
 // branchMatrixHTML : graphe visuel « à voies ». Une ligne par branche ; deux nœuds
@@ -507,14 +540,6 @@ function branchMatrixHTML(m) {
   return html + foot;
 }
 
-// remoteOnlyHTML : dépôt pas copié ici — graphe des branches distantes (nœud « En ligne » seul).
-function remoteOnlyHTML(branches) {
-  if (!(branches || []).length) return `<div class="muted" style="padding:6px 0">Aucune branche distante.</div>`;
-  const lanes = branches.map((b) => branchLane({
-    name: b.name, hasLocal: false, hasRemote: true, remoteDate: b.commit_date,
-  })).join("");
-  return `<div class="branch-graph">${lanes}</div><div class="bg-foot">Ce dépôt n'est pas copié sur ce poste. Ouvrez le détail pour le récupérer.</div>`;
-}
 
 // branchLane : une voie du graphe. b = {name, current, hasLocal, hasRemote, ahead, behind,
 // remoteVer, remoteDate, localVer, localDate}. Rendu HTML/CSS (responsive, zéro dépendance).

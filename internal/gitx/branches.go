@@ -18,19 +18,21 @@ const maxBranchDescribe = 60
 // BranchRow est l'état d'une branche vu des deux côtés : ce poste et en ligne.
 // Les versions sont le nom du tag le plus proche (ex. v1.2.0), vide si aucun.
 type BranchRow struct {
-	Name          string `json:"name"`
-	Current       bool   `json:"current"`
-	HasLocal      bool   `json:"has_local"`
-	HasRemote     bool   `json:"has_remote"`
-	LocalVersion  string `json:"local_version"`
-	LocalDate     string `json:"local_date"`
-	RemoteVersion string `json:"remote_version"`
-	RemoteDate    string `json:"remote_date"`
-	Ahead         int    `json:"ahead"`
-	Behind        int    `json:"behind"`
-	Author        string `json:"author"`   // auteur du dernier commit de la branche (« qui l'a ouverte »)
-	Upstream      string `json:"upstream"` // branche de suivi (ex. origin/main) — « depuis quoi elle se met à jour »
-	Merged        bool   `json:"merged"`   // pointe locale joignable depuis la branche d'intégration (main/master/courante) → sûre à supprimer
+	Name           string `json:"name"`
+	Current        bool   `json:"current"`
+	HasLocal       bool   `json:"has_local"`
+	HasRemote      bool   `json:"has_remote"`
+	LocalVersion   string `json:"local_version"`
+	LocalVerAhead  int    `json:"local_ver_ahead"` // commits depuis LocalVersion (0 = pointe PILE sur le tag)
+	LocalDate      string `json:"local_date"`
+	RemoteVersion  string `json:"remote_version"`
+	RemoteVerAhead int    `json:"remote_ver_ahead"` // commits depuis RemoteVersion (0 = pointe PILE sur le tag)
+	RemoteDate     string `json:"remote_date"`
+	Ahead          int    `json:"ahead"`
+	Behind         int    `json:"behind"`
+	Author         string `json:"author"`   // auteur du dernier commit de la branche (« qui l'a ouverte »)
+	Upstream       string `json:"upstream"` // branche de suivi (ex. origin/main) — « depuis quoi elle se met à jour »
+	Merged         bool   `json:"merged"`   // pointe locale joignable depuis la branche d'intégration (main/master/courante) → sûre à supprimer
 }
 
 // BranchMatrix est l'union des branches locales et des branches distantes connues
@@ -120,11 +122,11 @@ func MatrixOf(dir string) (*BranchMatrix, error) {
 			break
 		}
 		if r.HasLocal {
-			r.LocalVersion = nearestTag(dir, name)
+			r.LocalVersion, r.LocalVerAhead = nearestTagAhead(dir, name)
 			n++
 		}
 		if r.HasRemote && n < maxBranchDescribe {
-			r.RemoteVersion = nearestTag(dir, "origin/"+name)
+			r.RemoteVersion, r.RemoteVerAhead = nearestTagAhead(dir, "origin/"+name)
 			n++
 		}
 	}
@@ -212,6 +214,29 @@ func TagsFor(dir, ref string) []string {
 		return nil
 	}
 	return splitLines(out)
+}
+
+// nearestTagAhead renvoie le tag le plus proche d'une réf ET le nombre de commits depuis ce tag
+// (0 = la pointe est EXACTEMENT sur le tag). `describe --tags --long` a toujours le format
+// "<tag>-<N>-g<abbrev>", ce qui donne l'écart même quand la pointe est pile sur le tag (--abbrev=0
+// le perdrait). Le nom de tag peut contenir des tirets → on découpe par la DROITE. "" , 0 si aucun tag.
+func nearestTagAhead(dir, ref string) (string, int) {
+	out, err := run(dir, LocalTimeout, "describe", "--tags", "--long", ref)
+	if err != nil {
+		return "", 0
+	}
+	s := strings.TrimSpace(out)
+	iG := strings.LastIndex(s, "-g") // début du suffixe "-g<abbrev>"
+	if iG < 0 {
+		return s, 0
+	}
+	left := s[:iG] // "<tag>-<N>"
+	iN := strings.LastIndex(left, "-")
+	if iN < 0 {
+		return left, 0
+	}
+	ahead, _ := strconv.Atoi(left[iN+1:])
+	return left[:iN], ahead
 }
 
 // nearestTag renvoie le nom du tag le plus proche d'une réf (ex. v1.2.0), ou "" si

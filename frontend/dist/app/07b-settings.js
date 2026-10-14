@@ -45,6 +45,7 @@ function promptEditModal(p) {
 
 async function renderSettings() {
   const theme = readTheme();
+  const zoom = readZoom();
   const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions"], ["app", "🎨 Apparence"], ["ia", "🤖 Assistant IA"], ["diag", "🩺 Diagnostic"], ["ver", "🏷️ Versions"], ["lic", "⚖️ Licence"]];
   let setTab = "secu";
   try { setTab = localStorage.getItem("situlab.settab") || "secu"; } catch (_) {}
@@ -84,6 +85,12 @@ async function renderSettings() {
           <button data-th="auto" class="${theme === "auto" ? "on" : ""}">Auto</button>
           <button data-th="light" class="${theme === "light" ? "on" : ""}">Clair</button>
           <button data-th="dark" class="${theme === "dark" ? "on" : ""}">Sombre</button>
+        </div></div></div>
+      <div class="set-row"><div class="set-row-l">Densité <small>agrandit tout le logiciel d'un coup — texte, marges, boutons, icônes</small></div>
+        <div class="set-row-c"><div class="seg" role="group" aria-label="Densité">
+          <button data-zoom="compact" class="${zoom === "compact" ? "on" : ""}">Compact</button>
+          <button data-zoom="normal" class="${zoom === "normal" ? "on" : ""}">Normal</button>
+          <button data-zoom="grand" class="${zoom === "grand" ? "on" : ""}">Grand</button>
         </div></div></div>
       <label class="set-row toggle"><div class="set-row-l">Mode avancé <small>révèle les étapes git séparées, la matrice des branches, les outils git locaux et les réglages de dépôt</small></div>
         <span class="switch"><input id="adv-mode" type="checkbox" /><span class="track"></span></span></label>
@@ -144,6 +151,7 @@ async function renderSettings() {
   if (el("prompt-add")) el("prompt-add").onclick = () => promptEditModal(null);
 
   document.querySelectorAll("[data-th]").forEach((b) => b.onclick = () => { writeTheme(b.dataset.th); applyTheme(b.dataset.th); renderSettings(); });
+  document.querySelectorAll("[data-zoom]").forEach((b) => b.onclick = () => { writeZoom(b.dataset.zoom); applyZoom(b.dataset.zoom); renderSettings(); });
   const adv = el("adv-mode");
   if (adv) {
     adv.checked = !!state.advanced;

@@ -2,7 +2,7 @@
 
 > Un seul document, deux lectures. Les humains trouveront en tête un démarrage rapide ; les agents
 > trouveront ensuite la référence complète de la ligne de commande. Il est aussi lisible **dans
-> l'application** (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.9.0**.
+> l'application** (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.9.10**.
 
 ## Pour ton assistant IA — commence ici
 

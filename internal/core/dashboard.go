@@ -80,6 +80,7 @@ type RepoView struct {
 	LastDate     string `json:"last_date"`   // date ISO du dernier commit local
 	LocalError   string `json:"local_error"` // non vide = clone local illisible
 	LocalKind    string `json:"local_kind"`  // "clone" | "worktree" | "" (indéterminé)
+	ViaAtelier   bool   `json:"via_atelier"` // vitrine présente localement VIA le clone d'atelier du projet (1.9.11)
 	// État synthétique pour l'UI (source unique de vérité)
 	State string `json:"state"` // uptodate|ahead|behind|diverged|dirty|detached|unreadable|nolocal
 }
@@ -113,6 +114,8 @@ func (s *Service) Dashboard(instance string) (*DashboardData, error) {
 	s.mu.Lock()
 	s.lockedReload()
 	raw := append([]string(nil), s.cfg.LocalRepos...)
+	projects := append([]config.Project(nil), s.cfg.Projects...)
+	instances := append([]config.Instance(nil), s.cfg.Instances...)
 	s.mu.Unlock()
 	// Dédoublonnage défensif : un même chemin présent deux fois (ajouté sous deux formes) ne
 	// doit JAMAIS produire deux cartes du même dépôt.
@@ -171,6 +174,31 @@ func (s *Service) Dashboard(instance string) (*DashboardData, error) {
 		return nil, err
 	}
 
+	// Appariement PAR PROJET (1.9.11) : sur une vitrine, une production dont l'atelier est cloné ici
+	// n'a pas à être « récupérée » — on l'a déjà, via le clone d'atelier. Le lien atelier↔vitrine est
+	// déclaré par le projet (hôtes et propriétaires diffèrent, l'URL seule ne peut pas les rapprocher).
+	instHost := map[string]string{}
+	for _, in := range instances {
+		instHost[in.Name] = hostOf(in.URL)
+	}
+	prodClone := map[string]string{}      // lower(owner/repo) de la vitrine → chemin du clone d'atelier
+	prodAtelierKey := map[string]string{} // lower(owner/repo) de la vitrine → clé URL de l'atelier (pour marquer « utilisé »)
+	for _, p := range projects {
+		ak := strings.ToLower(instHost[p.Atelier.Instance] + "/" + p.Atelier.Owner + "/" + p.Atelier.Repo)
+		locals, ok := byURL[ak]
+		if !ok || len(locals) == 0 {
+			continue // atelier du projet non cloné ici : rien à rapprocher
+		}
+		for _, pr := range p.Productions {
+			if !strings.EqualFold(pr.Instance, inst.Name) {
+				continue // production sur une AUTRE connexion que celle affichée
+			}
+			k := strings.ToLower(pr.Owner + "/" + pr.Repo)
+			prodClone[k] = locals[0].path
+			prodAtelierKey[k] = ak
+		}
+	}
+
 	used := map[string]bool{}
 	views := make([]RepoView, 0, len(repos)+len(orphans))
 	for _, r := range repos {
@@ -195,6 +223,19 @@ func (s *Service) Dashboard(instance string) (*DashboardData, error) {
 			locals, used[normURL(r.SSHURL)] = l, true
 		}
 		if len(locals) == 0 {
+			// Pas de clone direct de CETTE URL ? Dernière chance : c'est une vitrine dont l'atelier
+			// (même projet) est cloné ici → on la marque « présente via l'atelier » et on ne proposera
+			// pas de la récupérer. On marque aussi le clone d'atelier « utilisé » pour éviter qu'il
+			// réapparaisse en double comme carte locale isolée (étape 3).
+			if path, ok := prodClone[strings.ToLower(r.FullName)]; ok {
+				v.LocalPath = path
+				v.LocalKind = detectLocalKind(path)
+				v.ViaAtelier = true
+				v.State = "uptodate"
+				used[prodAtelierKey[strings.ToLower(r.FullName)]] = true
+				views = append(views, v)
+				continue
+			}
 			v.State = computeState(&v)
 			views = append(views, v)
 			continue

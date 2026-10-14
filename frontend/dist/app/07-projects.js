@@ -129,7 +129,7 @@ function projectGraphCard(b, idx) {
   const ico = iconHTML(b.icon, "pboard-ico");
   return `<div class="pboard">
     <div class="pboard-h">
-      <div class="pboard-ttl">${ico}<b class="pboard-name">${esc(b.name)}</b> <span class="muted">${esc(atl.owner)}/${esc(atl.repo)}</span>${atl.version ? ` <span class="pill ver">${esc(atl.version)}</span>` : ""}</div>
+      <div class="pboard-ttl">${ico}<b class="pboard-name">${esc(b.name)}</b> <span class="muted">${esc(atl.owner)}/${esc(atl.repo)}</span></div>
       <div class="pbc-act">${syncBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">modifier</button><button class="lnk" data-detatl="${esc(b.name)}" title="Ouvrir le détail du dépôt atelier (branches, fichiers, activité)">détail ›</button><button class="lnk danger" data-delproj="${esc(b.name)}" title="Retirer ce lien de projet (aucun dépôt n'est supprimé)">supprimer</button></div>
     </div>
     <div class="pgraph" id="pg-${idx}"><div class="skeleton"></div></div>
@@ -150,13 +150,25 @@ async function fillProjectGraph(b, idx) {
       branches = (br || []).map((x) => ({ name: x.name, has_local: false, has_remote: true, author: x.author, ahead: 0, behind: 0 }));
     }
   } catch (e) { if (!el("pg-" + idx)) return; box.innerHTML = `<div class="muted" style="padding:8px 2px">Branches indisponibles : ${esc(cleanErr(e))}</div>`; return; }
-  if (el("pg-" + idx)) box.innerHTML = projectGraphHTML(b, branches);
+  // Tags RÉELLEMENT publiés sur l'atelier (API) : sert à signaler honnêtement un tag LOCAL non poussé
+  // (git describe local montrerait sinon une version que l'atelier n'a pas). `known` reste faux si on
+  // n'a pas pu lire les tags (hors-ligne) → on ne marque alors JAMAIS « non poussé » par prudence.
+  let atlTags = new Set(), atlTagsKnown = false;
+  try {
+    if (b.atelier) {
+      for (const t of (await App().RepoTags(b.atelier.instance, b.atelier.owner, b.atelier.repo)) || []) if (t.name) atlTags.add(t.name);
+      atlTagsKnown = true;
+    }
+  } catch (_) {}
+  if (el("pg-" + idx)) box.innerHTML = projectGraphHTML(b, branches, atlTags, atlTagsKnown);
 }
 
 // projectGraphHTML : une VOIE par branche, 3 zones Local · Atelier · Production. Nœud par zone où la
 // branche existe, segment coloré selon l'état ; nuance ambre si modifs non enregistrées.
-function projectGraphHTML(b, branches) {
+function projectGraphHTML(b, branches, atlTags, atlTagsKnown) {
   if (!branches.length) return `<div class="muted" style="padding:8px 2px">Aucune branche.</div>`;
+  atlTags = atlTags || new Set();
+  const pub = (v) => !!v && atlTags.has(v); // ce tag existe-t-il VRAIMENT sur l'atelier ?
   const prods = b.productions || [];
   const names = branches.map((x) => x.name);
   const prodBranch = names.includes("main") ? "main" : names.includes("master") ? "master" : ((branches.find((x) => x.current) || branches[0]).name);
@@ -170,10 +182,16 @@ function projectGraphHTML(b, branches) {
   const lanes = sorted.map((br) => {
     const hereBranch = b.local && br.name === b.local.branch;
     const dirty = hereBranch && !b.local.clean;
-    // Nœud LOCAL
+    // Nœud LOCAL — on signale un tag LOCAL non encore publié sur l'atelier (marqueur ⬆ + ambre).
+    const locVer = br.local_version || "";
+    const locUnpushed = atlTagsKnown && br.has_local && !!locVer && !pub(locVer);
+    const locLabel = locVer ? (locVer + (locUnpushed ? " ⬆" : "")) : "";
+    const locTitle = (dirty
+      ? "travail en cours (" + b.local.changed + " fichier" + (b.local.changed > 1 ? "s" : "") + ")"
+      : "sur ce poste")
+      + (locVer ? " · " + locVer + (locUnpushed ? " — version LOCALE, pas encore publiée sur l'atelier" : "") : "");
     const localNode = br.has_local
-      ? node(`pg-local${dirty ? " pg-dirty" : ""}${hereBranch ? " pg-here" : ""}`, br.local_version,
-          dirty ? "travail en cours (" + b.local.changed + " fichier" + (b.local.changed > 1 ? "s" : "") + ")" : "sur ce poste" + (br.local_version ? " · " + br.local_version : ""))
+      ? node(`pg-local${dirty ? " pg-dirty" : ""}${hereBranch ? " pg-here" : ""}${locUnpushed ? " pg-unpushed" : ""}`, locLabel, locTitle)
       : node("pg-empty", "", "pas sur ce poste");
     // Segment LOCAL→ATELIER
     let la = "pg-s-empty", laTxt = "";
@@ -184,10 +202,19 @@ function projectGraphHTML(b, branches) {
       else if (br.behind) { la = "pg-s-behind"; laTxt = "↓" + br.behind; }
       else { la = "pg-s-ok"; laTxt = "✓"; }
     } else if (br.has_local) { la = "pg-s-local"; laTxt = "local seul"; }
-    // Nœud ATELIER : vert quand à jour, ambre quand il lui manque des commits locaux (br.ahead)
+    // Nœud ATELIER : vert quand à jour, ambre quand il lui manque des commits locaux (br.ahead).
+    // Version AFFICHÉE = la version réellement PUBLIÉE sur l'atelier (et non le `git describe` local qui
+    // pourrait montrer un tag local non poussé). Si la pointe distante n'est pas exactement une version
+    // publiée, on retombe (branche de prod) sur la dernière version publiée du dépôt, sinon rien.
+    let atlVer = br.remote_version || "", atlExtra = "";
+    if (atlTagsKnown && br.has_remote) {
+      if (pub(br.remote_version)) atlVer = br.remote_version;
+      else if (br.name === prodBranch && b.atelier && b.atelier.version) { atlVer = b.atelier.version; atlExtra = " (dernière version publiée)"; }
+      else { atlVer = ""; atlExtra = " (aucune version publiée à cette pointe)"; }
+    }
     const atelierNode = br.has_remote
-      ? node(`pg-atelier${br.has_local && br.ahead ? " pg-late" : ""}`, br.remote_version,
-          "sur l'atelier" + (br.remote_version ? " · " + br.remote_version : ""))
+      ? node(`pg-atelier${br.has_local && br.ahead ? " pg-late" : ""}`, atlVer,
+          "sur l'atelier" + (atlVer ? " · " + atlVer : "") + atlExtra)
       : node("pg-empty", "", "pas sur l'atelier");
     // Segment ATELIER→PROD + nœud PROD (voie principale uniquement)
     let ap = "pg-s-empty", apTxt = "", prodNode = node("pg-empty", "", "");
@@ -412,39 +439,90 @@ async function promoteWizard(b, idx, label) {
 // Supprimer une branche jamais fusionnée déclenche une alerte VISUELLE (le travail serait perdu).
 // ===================================================================================================
 
-// gitPanelHTML : coquille du panneau (remplie ensuite par fillGitPanel). Nécessite un clone local.
+// ---- Panneau git À ONGLETS (1.9.10) : un onglet par git — Local · Atelier · Vitrine ----
+// Mêmes codes couleur que le graphe du dessus (--ok local, --accent atelier, --vitrine vitrine). Les
+// 3 onglets NE sont PAS symétriques, c'est VOULU et rendu lisible : Local = établi (aucun PIN) ; Atelier
+// = source partagée (supprimer une branche distante → PIN, branche par défaut protégée) ; Vitrine = prod
+// publique (LECTURE + Promouvoir seulement — aucun geste destructif direct sur la prod, Règle 24).
+
+// gpVitrineTargets : productions joignables (sans serveur en erreur), avec leur index d'ORIGINE (pour
+// Promouvoir, qui indexe b.productions). gpActiveTab : onglet courant, retombe sur « local » si la
+// vitrine demandée n'existe pas.
+function gpVitrineTargets(b) {
+  return (b.productions || []).map((p, i) => ({ ...p, origIdx: i })).filter((p) => !p.error);
+}
+function gpActiveTab(b) {
+  const t = state.gpTab || "local";
+  if (t === "vitrine" && !gpVitrineTargets(b).length) return "local";
+  return t;
+}
+
+// gitPanelHTML : coquille à onglets. Le panneau existe même SANS clone local (les onglets distants lisent
+// par API) ; c'est l'onglet Local qui invite à cloner si besoin. Rempli ensuite par fillGitTab.
 function gitPanelHTML(b) {
-  if (!b.local || !b.local.path) {
-    return `<div class="gitpanel-empty">
-      <div class="gpe-ico">🖥</div>
-      <div><b>Pas encore de clone sur ce poste</b>
-      <p class="muted">Clonez l'atelier ici (« Cloner ici » ci-dessus) pour gérer branches, fusions et copies de travail directement dans SituLab.</p></div></div>`;
-  }
+  const active = gpActiveTab(b);
+  const hasVitrine = gpVitrineTargets(b).length > 0;
+  const tab = (id, ico, label) => `<button type="button" class="gp-tab gp-tab-${id}${active === id ? " on" : ""}" data-gptab="${id}">${ico}<span>${label}</span></button>`;
+  const tabs = [tab("local", ZICON.desktop, "Local"), tab("atelier", ZICON.forgejo, "Atelier")];
+  if (hasVitrine) tabs.push(tab("vitrine", ZICON.github, "Vitrine"));
   return `<div class="gitpanel" data-gp>
+    <div class="gp-tabs" role="tablist">${tabs.join("")}</div>
+    <div class="gp-tabcontent" id="gp-tabcontent"><div class="skeleton"></div></div>
+  </div>`;
+}
+
+// fillGitTab : remplit le contenu de l'onglet courant (local / atelier / vitrine).
+async function fillGitTab(b) {
+  const tab = gpActiveTab(b);
+  if (tab === "atelier") return fillRemoteTab(b, "atelier");
+  if (tab === "vitrine") return fillRemoteTab(b, "vitrine");
+  return fillLocalTab(b);
+}
+
+// fillLocalTab : l'établi — branches locales (empreinte Local·Atelier·Vitrine + gestes sans PIN) et
+// copies de travail (worktrees). Sans clone local → invite à cloner.
+async function fillLocalTab(b) {
+  const box = el("gp-tabcontent"); if (!box) return;
+  const path = b.local && b.local.path;
+  if (!path) {
+    box.innerHTML = `<div class="gitpanel-empty">
+      <div class="gpe-ico">🖥</div>
+      <div><b>Pas encore de clone sur ce poste ${helpDot("git-local")}</b>
+      <p class="muted">Clonez l'atelier ici (« Cloner ici » ci-dessus) pour gérer branches et copies de travail.</p></div></div>`;
+    return;
+  }
+  box.innerHTML = `
     <section class="gp-sec">
-      <div class="gp-sec-h"><span class="gp-sec-t">⎇ Branches</span>
+      <div class="gp-sec-h"><span class="gp-sec-t">⎇ Branches ${helpDot("git-local")}</span>
         <button class="btn btn-ghost btn-sm" data-gpnewbranch>＋ Nouvelle branche</button></div>
       <div class="gp-list" id="gp-branches"><div class="skeleton"></div></div>
     </section>
     <section class="gp-sec">
-      <div class="gp-sec-h"><span class="gp-sec-t">🗂 Copies de travail</span>
+      <div class="gp-sec-h"><span class="gp-sec-t">🗂 Copies de travail ${helpDot("git-worktree")}</span>
         <button class="btn btn-ghost btn-sm" data-gpnewwt>＋ Nouveau worktree</button></div>
-      <div class="gp-hint">Un <b>worktree</b> ouvre une autre branche dans un autre dossier, en partageant le même historique — parfait pour une session IA en parallèle. <button class="lnk" data-gpguide>Clone ou worktree ?</button></div>
       <div class="gp-list" id="gp-worktrees"><div class="skeleton"></div></div>
-    </section>
-  </div>`;
-}
-
-// fillGitPanel : charge branches (matrice locale) + worktrees et dessine les lignes. Best-effort.
-async function fillGitPanel(b) {
-  const path = b.local && b.local.path;
-  if (!path) return;
+    </section>`;
   const bbox = el("gp-branches");
   if (bbox) {
     try {
       const m = await App().BranchMatrix(path);
       const branches = ((m && m.branches) || []).filter((x) => x.has_local);
-      bbox.innerHTML = branches.length ? branches.map(branchRowHTML).join("") : `<div class="muted" style="padding:6px 2px">Aucune branche locale.</div>`;
+      // Présence VITRINE par branche : best-effort réseau. On distingue HONNÊTEMENT « absente » (serveur
+      // lu, branche non trouvée) de « inconnu » (serveur non joignable) — jamais de faux « absente ».
+      const prods = (b.productions || []).filter((p) => !p.error);
+      let vitNames = null, vitOk = true;
+      if (prods.length) {
+        vitNames = new Set();
+        await Promise.all(prods.map(async (p) => {
+          try { ((await App().RepoBranches(p.instance, p.owner, p.repo)) || []).forEach((x) => vitNames.add(x.name)); }
+          catch (_) { vitOk = false; }
+        }));
+      }
+      const vitState = (name) => !prods.length ? "none" : (vitNames.has(name) ? "present" : (vitOk ? "absent" : "unknown"));
+      if (!el("gp-branches")) return;
+      bbox.innerHTML = branches.length
+        ? branches.map((br) => branchRowHTML(br, vitState(br.name))).join("")
+        : `<div class="muted" style="padding:6px 2px">Aucune branche locale.</div>`;
     } catch (e) { if (el("gp-branches")) bbox.innerHTML = `<div class="muted" style="padding:6px 2px">Branches indisponibles : ${esc(cleanErr(e))}</div>`; }
   }
   const wbox = el("gp-worktrees");
@@ -456,13 +534,117 @@ async function fillGitPanel(b) {
   }
 }
 
-// branchRowHTML : une ligne de branche locale, avec son état et ses actions. Une branche NON fusionnée
-// (hors courante) porte un badge d'avertissement (sa suppression ferait perdre du travail).
-function branchRowHTML(br) {
+// fillRemoteTab : onglet ATELIER (source partagée, suppression distante sous PIN) ou VITRINE (prod :
+// LECTURE + Promouvoir). Les branches distantes sont lues par API (RepoBranches). Pour l'atelier, la
+// branche par défaut (récupérée via reposOf, en cache) est protégée : pas de bouton « supprimer ».
+async function fillRemoteTab(b, which) {
+  const box = el("gp-tabcontent"); if (!box) return;
+  const atelier = which === "atelier";
+  const targets = atelier ? (b.atelier ? [{ ...b.atelier, origIdx: -1 }] : []) : gpVitrineTargets(b);
+  const note = atelier
+    ? `<div class="gp-scope-note gp-note-atelier"><span class="gp-sn-ico">${ZICON.forgejo}</span> <b>Atelier</b> — source de vérité partagée ${helpDot("git-atelier")}</div>`
+    : `<div class="gp-scope-note gp-note-vitrine"><span class="gp-sn-ico">${ZICON.github}</span> <b>Vitrine</b> — production publique, lecture seule ${helpDot("git-vitrine")}</div>`;
+  if (!targets.length) {
+    box.innerHTML = note + `<div class="muted" style="padding:8px 2px">${atelier ? "Aucun atelier défini pour ce projet." : "Aucune vitrine reliée."}</div>`;
+    return;
+  }
+  box.innerHTML = note + `<div id="gp-remote-groups"><div class="skeleton"></div></div>`;
+  const groups = await Promise.all(targets.map(async (t) => {
+    let branches = [], err = "", def = "", tags = {};
+    try {
+      branches = (await App().RepoBranches(t.instance, t.owner, t.repo)) || [];
+      if (atelier) { try { const rp = (await reposOf(t.instance)).find((r) => r.full_name === t.owner + "/" + t.repo); def = (rp && rp.default_branch) || ""; } catch (_) {} }
+      // Correspondance exacte pointe↔version : on bâtit SHA → nom de tag (premier rencontré). Honnête :
+      // on ne pourra afficher la version que si la pointe de branche EST exactement ce tag (best-effort).
+      try { for (const x of (await App().RepoTags(t.instance, t.owner, t.repo)) || []) { if (x.sha && !tags[x.sha]) tags[x.sha] = x.name; } } catch (_) {}
+    } catch (e) { err = cleanErr(e); }
+    return { t, branches, err, def, tags };
+  }));
+  const gb = el("gp-remote-groups"); if (!gb) return;
+  gb.innerHTML = groups.map((g) => remoteGroupHTML(g, which, b)).join("");
+}
+
+// remoteGroupHTML : un dépôt distant (atelier ou une vitrine) = en-tête + liste de branches. Vitrine :
+// bouton « Promouvoir → » (reprend le tunnel existant). Atelier : suppression distante par branche.
+function remoteGroupHTML(g, which, b) {
+  const atelier = which === "atelier";
+  const ico = atelier ? ZICON.forgejo : ZICON.github;
+  const promo = !atelier ? `<button class="btn btn-primary btn-sm" data-gppromote="${esc(b.name)}" data-pidx="${g.t.origIdx}" data-plabel="${esc(g.t.owner + "/" + g.t.repo)}">Promouvoir →</button>` : "";
+  const head = `<div class="gp-remote-h">${ico}<b>${esc(g.t.owner)}/${esc(g.t.repo)}</b> <span class="muted">${esc(g.t.instance)}</span>${promo}</div>`;
+  if (g.err) return `<div class="gp-remote-group gp-remote-${which}">${head}<div class="muted" style="padding:6px 2px">Branches indisponibles : ${esc(g.err)}</div></div>`;
+  const rows = g.branches.length ? g.branches.map((br) => remoteBranchRowHTML(br, g, which)).join("") : `<div class="muted" style="padding:6px 2px">Aucune branche.</div>`;
+  return `<div class="gp-remote-group gp-remote-${which}">${head}<div class="gp-list">${rows}</div></div>`;
+}
+
+// remoteBranchRowHTML : une branche distante. La branche par défaut porte un badge et N'EST PAS
+// supprimable. La suppression (atelier uniquement) est sous PIN.
+function remoteBranchRowHTML(br, g, which) {
+  const isDefault = g.def ? br.name === g.def : (br.name === "main" || br.name === "master");
+  const tag = isDefault ? `<span class="gp-badge" title="branche par défaut — protégée">par défaut</span>` : "";
+  const del = (which === "atelier" && !isDefault)
+    ? `<button class="lnk danger" data-gprdel="${esc(br.name)}" data-inst="${esc(g.t.instance)}" data-owner="${esc(g.t.owner)}" data-repo="${esc(g.t.repo)}" data-scope="atelier">supprimer</button>`
+    : "";
+  const date = (br.commit_date || "").slice(0, 10);
+  const ver = gpVerChip((g.tags && br.commit_sha) ? g.tags[br.commit_sha] : "", 0, true);
+  return `<div class="gp-row">
+    <div class="gp-row-main"><span class="gp-bname">⎇ ${esc(br.name)}</span> ${ver}${tag}</div>
+    <div class="gp-row-bits">${date ? `<small class="muted">${esc(date)}</small>` : ""}</div>
+    <div class="gp-row-acts">${del}</div>
+  </div>`;
+}
+
+// deleteRemoteBranchFlow : supprimer une branche DISTANTE (atelier). PIN requis (pinConfirm gère le mode
+// lecture seule + saisie). La branche par défaut est déjà écartée côté UI, et re-refusée côté cœur.
+function deleteRemoteBranchFlow(d, reload) {
+  pinConfirm(`Supprimer la branche distante « ${d.branch} » sur l'atelier ${d.owner}/${d.repo} — elle disparaîtra pour toute l'équipe. (Les clones locaux et la vitrine ne sont pas touchés.)`, async (pin) => {
+    await App().DeleteRemoteBranch(d.inst, d.owner, d.repo, d.branch, pin);
+    closeModal(); toast("Branche distante « " + d.branch + " » supprimée", "ok"); reload();
+  });
+}
+
+// scopeTrioHTML : trio de pastilles « où vit la branche » — Local · Atelier · Vitrine. Réutilise le
+// langage visuel du graphe (icônes poste/forgejo/github). pleine = présente, éteinte = absente, « ? » =
+// inconnu (serveur non joignable → jamais de faux « absente »). vitrine "none" → pastille vitrine masquée.
+function scopeTrioHTML(local, atelier, vitrine) {
+  // gp-pip-<kind> porte la couleur d'EMPLACEMENT (local=cyan · atelier=rose · vitrine=violet), distincte
+  // de la palette d'état, pour qu'on identifie l'emplacement d'un coup d'œil sans confusion.
+  const kindCls = { desktop: "gp-pip-local", forgejo: "gp-pip-atelier", github: "gp-pip-vitrine" };
+  const pip = (kind, on, label, unknown) => `<span class="gp-pip ${kindCls[kind] || ""} ${on ? "on" : (unknown ? "unknown" : "off")}" title="${esc(label)}">${ZICON[kind]}${unknown ? `<span class="gp-pip-q">?</span>` : ""}</span>`;
+  const out = [
+    pip("desktop", !!local, local ? "présente sur ce poste (local)" : "absente de ce poste"),
+    pip("forgejo", !!atelier, atelier ? "présente sur l'atelier" : "absente de l'atelier"),
+  ];
+  if (vitrine && vitrine !== "none") {
+    out.push(pip("github", vitrine === "present",
+      vitrine === "present" ? "présente sur la vitrine" : (vitrine === "unknown" ? "vitrine : état inconnu (serveur non joignable)" : "absente de la vitrine"),
+      vitrine === "unknown"));
+  }
+  return `<span class="gp-scope" aria-hidden="true">${out.join("")}</span>`;
+}
+
+// gpVerChip : puce « 🏷 version » d'une branche. ahead>0 → « 🏷 v1.9.10 +N » (N commits APRÈS la version).
+// exactOnly=true (onglets distants) : on n'affiche que si la pointe est PILE sur un tag (match SHA), car
+// l'API distante ne permet pas de calculer honnêtement l'écart ; vide sinon.
+function gpVerChip(name, ahead, exactOnly) {
+  if (!name) return "";
+  const n = ahead | 0;
+  if (exactOnly && n > 0) return "";
+  const txt = n > 0 ? `${esc(name)} +${n}` : esc(name);
+  const title = n > 0 ? `${n} commit(s) après la version ${name}` : `pile sur la version ${name}`;
+  return `<span class="gp-ver ${n > 0 ? "gp-ver-ahead" : "gp-ver-exact"}" title="${esc(title)}">🏷 ${txt}</span>`;
+}
+
+// branchRowHTML : une ligne de branche locale, avec son EMPREINTE (trio Local·Atelier·Vitrine), son état
+// et ses actions. Le trio répond à « où vit cette branche » AVANT toute suppression. Une branche NON
+// fusionnée (hors courante) porte un badge d'avertissement. `vitrine` : present|absent|unknown|none.
+function branchRowHTML(br, vitrine) {
+  vitrine = vitrine || "none";
   const cur = br.current ? `<span class="gp-cur" title="branche courante de ce dossier">● ici</span>` : "";
+  const ver = gpVerChip(br.local_version, br.local_ver_ahead, false);
   const bits = [];
-  if (br.ahead) bits.push(`<span class="gp-ahead" title="${br.ahead} commit(s) d'avance sur l'atelier">↑${br.ahead}</span>`);
+  if (br.ahead) bits.push(`<span class="gp-ahead" title="${br.ahead} commit(s) d'avance sur l'atelier (non publiés)">↑${br.ahead}</span>`);
   if (br.behind) bits.push(`<span class="gp-behind" title="${br.behind} commit(s) de retard sur l'atelier">↓${br.behind}</span>`);
+  const scope = scopeTrioHTML(true, !!br.has_remote, vitrine);
   let badge = "";
   if (!br.current) {
     badge = br.merged
@@ -472,9 +654,9 @@ function branchRowHTML(br) {
   const acts = br.current ? "" : `
     <button class="lnk" data-gpswitch="${esc(br.name)}">basculer</button>
     <button class="lnk" data-gpmerge="${esc(br.name)}" title="fusionner « ${esc(br.name)} » dans la branche courante">fusionner ici</button>
-    <button class="lnk danger" data-gpdel="${esc(br.name)}" data-merged="${br.merged ? "1" : "0"}">supprimer</button>`;
+    <button class="lnk danger" data-gpdel="${esc(br.name)}" data-merged="${br.merged ? "1" : "0"}" data-atelier="${br.has_remote ? "1" : "0"}" data-vitrine="${esc(vitrine)}" data-ahead="${br.ahead || 0}">supprimer</button>`;
   return `<div class="gp-row">
-    <div class="gp-row-main"><span class="gp-bname">⎇ ${esc(br.name)}</span> ${cur}${badge}</div>
+    <div class="gp-row-main">${scope}<span class="gp-bname">⎇ ${esc(br.name)}</span> ${ver}${cur}${badge}</div>
     <div class="gp-row-bits">${bits.join(" ")}${br.author ? ` <small class="muted">· ${esc(br.author)}</small>` : ""}</div>
     <div class="gp-row-acts">${acts}</div>
   </div>`;
@@ -493,13 +675,29 @@ function worktreeRowHTML(w) {
   </div>`;
 }
 
-// bindGitPanel : délégation des actions du panneau. refresh() re-remplit le panneau après un geste
-// (et, câblé depuis le détail d'un projet, rafraîchit aussi le tableau de bord).
+// bindGitPanel : délégation des actions du panneau À ONGLETS. refresh() re-remplit l'onglet courant
+// après un geste (et, câblé depuis le détail d'un projet, rafraîchit aussi le graphe au-dessus). Ne
+// dépend PAS d'un clone local : les onglets distants et le changement d'onglet marchent sans clone ;
+// les gestes locaux ne sont câblés que si leurs boutons existent (onglet Local avec clone).
 function bindGitPanel(b, refresh) {
   const root = el("proj-gitpanel"); if (!root) return;
-  const path = b.local && b.local.path; if (!path) return;
-  const reload = refresh || (() => fillGitPanel(b));
+  const reload = refresh || (() => fillGitTab(b));
+  const path = b.local && b.local.path;
   root.onclick = async (ev) => {
+    // Changement d'onglet (bascule la classe active + remplit).
+    const tb = ev.target.closest("[data-gptab]");
+    if (tb) {
+      state.gpTab = tb.dataset.gptab;
+      root.querySelectorAll(".gp-tab").forEach((x) => x.classList.toggle("on", x.dataset.gptab === state.gpTab));
+      return fillGitTab(b);
+    }
+    // Onglets DISTANTS : suppression (atelier, PIN) et Promouvoir (vitrine).
+    const rdl = ev.target.closest("[data-gprdel]");
+    if (rdl) return deleteRemoteBranchFlow({ branch: rdl.dataset.gprdel, inst: rdl.dataset.inst, owner: rdl.dataset.owner, repo: rdl.dataset.repo }, reload);
+    const pr = ev.target.closest("[data-gppromote]");
+    if (pr) return promoteWizard(b, parseInt(pr.dataset.pidx, 10), pr.dataset.plabel);
+    // Onglet LOCAL (ces boutons n'existent que s'il y a un clone).
+    if (!path) return;
     const sw = ev.target.closest("[data-gpswitch]");
     if (sw) {
       try { await App().GitSwitchBranch(path, sw.dataset.gpswitch); toast("Sur la branche « " + sw.dataset.gpswitch + " »", "ok"); reload(); }
@@ -507,11 +705,16 @@ function bindGitPanel(b, refresh) {
       return;
     }
     const mg = ev.target.closest("[data-gpmerge]"); if (mg) return mergeBranchFlow(path, mg.dataset.gpmerge, reload);
-    const dl = ev.target.closest("[data-gpdel]"); if (dl) return deleteBranchFlow(path, dl.dataset.gpdel, dl.dataset.merged === "1", reload);
+    const dl = ev.target.closest("[data-gpdel]");
+    if (dl) return deleteBranchFlow(path, dl.dataset.gpdel, {
+      merged: dl.dataset.merged === "1",
+      atelier: dl.dataset.atelier === "1",
+      vitrine: dl.dataset.vitrine,
+      ahead: parseInt(dl.dataset.ahead || "0", 10),
+    }, reload);
     const nb = ev.target.closest("[data-gpnewbranch]"); if (nb) return newBranchModal(path, reload);
     const nw = ev.target.closest("[data-gpnewwt]"); if (nw) return addWorktreeModal(b, reload);
     const wr = ev.target.closest("[data-gpwtrm]"); if (wr) return removeWorktreeFlow(path, wr.dataset.gpwtrm, reload);
-    const gd = ev.target.closest("[data-gpguide]"); if (gd) { state.view = "git"; try { localStorage.setItem("situlab.gittab", "copies"); } catch (_) {} render(); }
   };
 }
 
@@ -550,31 +753,63 @@ function mergeBranchFlow(path, branch, reload) {
   el("modal-ok").textContent = "Fusionner";
 }
 
-// deleteBranchFlow : supprimer une branche locale. Si NON fusionnée → alerte VISUELLE forte (travail
-// perdu) et suppression forcée seulement après confirmation explicite ; sinon suppression simple.
-function deleteBranchFlow(path, branch, merged, reload) {
+// deleteBranchFlow : supprimer une branche LOCALE, avec un message CONSCIENT DE LA PORTÉE (où la branche
+// survit). scope = {merged, atelier(bool), vitrine(present|absent|unknown|none), ahead(int)}. Quatre cas
+// honnêtes : (A) vit aussi sur atelier/vitrine sans commit local en attente → serein, rien perdu ;
+// (B) idem mais des commits locaux non publiés → prudent, perte réelle ; (C) locale seule mais fusionnée
+// → doux ; (D) locale seule jamais fusionnée → alerte forte. Geste 100 % local (pas de PIN).
+function deleteBranchFlow(path, branch, scope, reload) {
+  scope = scope || {};
+  const onAtelier = !!scope.atelier, onVitrine = scope.vitrine === "present";
+  const elsewhere = onAtelier || onVitrine, aheadLost = (scope.ahead || 0) > 0;
+  const where = [onAtelier ? "l'atelier" : null, onVitrine ? "la vitrine" : null].filter(Boolean);
+  const whereTxt = where.length === 2 ? "l'atelier et la vitrine" : (where[0] || "");
+
   const doDelete = async (force) => {
     try { await App().GitDeleteBranch(path, branch, force); closeModal(); toast("Branche « " + branch + " » supprimée", "ok"); reload(); }
     catch (e) {
       const msg = cleanErr(e);
-      // Repli : si git refuse (branche non fusionnée détectée côté git), bascule sur l'alerte forte.
-      if (!force && /fusionn|not fully merged|merged/i.test(msg)) { closeModal(); return unmergedAlert(); }
+      // Repli : si git refuse (branche non fusionnée détectée côté git) et qu'elle ne vit pas ailleurs,
+      // bascule sur l'alerte forte. Sinon on force (le travail existe sur atelier/vitrine).
+      if (!force && /fusionn|not fully merged|merged/i.test(msg)) {
+        if (elsewhere && !aheadLost) return doDelete(true);
+        closeModal(); return unmergedAlert();
+      }
       toast(msg, "err");
     }
   };
   const unmergedAlert = () => {
     openModal("🗑 Supprimer une branche NON fusionnée ?", `<div class="field">
       <div class="danger-hero"><div class="dh-ico">🗑️</div><div class="dh-burst">⚠️</div></div>
-      <div class="callout danger"><b>« ${esc(branch)} » n'a jamais été fusionnée.</b><br>Son travail n'existe nulle part ailleurs : le supprimer, c'est le <b>perdre définitivement</b>.</div>
+      <div class="callout danger"><b>« ${esc(branch)} » n'existe que sur ce poste et n'a jamais été fusionnée.</b><br>Son travail n'existe nulle part ailleurs : le supprimer, c'est le <b>perdre définitivement</b>.</div>
       <p class="sub">Si vous en êtes sûr·e, confirmez. Sinon, fusionnez-la d'abord (« fusionner ici »).</p></div>`, () => doDelete(true));
     el("modal-ok").textContent = "Supprimer quand même"; el("modal-ok").classList.add("danger-btn");
   };
-  if (merged) {
-    openModal("Supprimer la branche ?", `<div class="field"><div class="callout">La branche <b>⎇ ${esc(branch)}</b> est fusionnée dans l'intégration : la supprimer ne perd aucun travail.</div></div>`, () => doDelete(false));
-    el("modal-ok").textContent = "Supprimer"; el("modal-ok").classList.add("danger-btn");
-  } else {
-    unmergedAlert();
+
+  // (A) Vit aussi sur atelier/vitrine, rien en attente localement → serein.
+  if (elsewhere && !aheadLost) {
+    openModal("Supprimer la copie locale ?", `<div class="field">
+      <div class="callout ok"><b>⎇ ${esc(branch)}</b> existe aussi sur <b>${whereTxt}</b>.<br>Vous retirez seulement la copie de <b>ce poste</b> — re-clonable à tout moment. <b>Aucun travail n'est perdu.</b></div>
+      <div class="gp-del-scope">Où vit la branche : ${scopeTrioHTML(true, onAtelier, scope.vitrine)}</div></div>`, () => doDelete(true));
+    el("modal-ok").textContent = "Retirer la copie locale";
+    return;
   }
+  // (B) Vit ailleurs MAIS des commits locaux ne sont pas encore publiés → perte réelle.
+  if (elsewhere && aheadLost) {
+    openModal("⚠ Commits locaux non publiés", `<div class="field">
+      <div class="callout warn"><b>« ${esc(branch)} » a ${scope.ahead} commit(s) d'avance</b> qui ne sont <b>pas encore</b> sur ${whereTxt}.<br>Supprimer la copie locale maintenant <b>perdrait ces ${scope.ahead} commit(s)</b> — la version de ${whereTxt} est plus ancienne.</div>
+      <p class="sub">Pour les garder, publiez d'abord (« Synchroniser »). Sinon, confirmez la perte.</p></div>`, () => doDelete(true));
+    el("modal-ok").textContent = "Supprimer malgré la perte"; el("modal-ok").classList.add("danger-btn");
+    return;
+  }
+  // (C) Locale seule, mais fusionnée dans l'intégration → aucun travail perdu.
+  if (scope.merged) {
+    openModal("Supprimer la branche ?", `<div class="field"><div class="callout">La branche <b>⎇ ${esc(branch)}</b> n'existe que sur ce poste, mais elle est <b>fusionnée dans l'intégration</b> : la supprimer ne perd aucun travail.</div></div>`, () => doDelete(false));
+    el("modal-ok").textContent = "Supprimer"; el("modal-ok").classList.add("danger-btn");
+    return;
+  }
+  // (D) Locale seule, jamais fusionnée → alerte forte.
+  unmergedAlert();
 }
 
 // addWorktreeModal : créer un worktree (autre dossier, autre branche, même historique). Option « nouvelle
@@ -659,12 +894,11 @@ function chealthHTML(p) {
 function classeurCardHTML(p) {
   const atl = p.atelier || {};
   const v = classeurVerdict(p);
-  const ver = (p.local && p.local.describe) ? ` <span class="pill ver">${esc(p.local.describe)}</span>` : "";
   const aria = `${p.name} — atelier ${atl.owner || ""}/${atl.repo || ""}${p.local ? ", cloné sur ce poste" : ", pas de clone local"}, ${p.vitrines || 0} vitrine(s), ${v.label}`;
   return `<button type="button" class="classeur" data-open-project="${esc(p.name)}" aria-label="${esc(aria)}">
     <span class="classeur-tab">${iconHTML(p.icon, "classeur-ico")}<span class="classeur-name">${esc(p.name)}</span></span>
     <span class="classeur-body">
-      <span class="classeur-repo"><span class="classeur-k">atelier</span> <span class="org">${esc(atl.owner || "")}/</span>${esc(atl.repo || "")}${ver}</span>
+      <span class="classeur-repo"><span class="classeur-k">atelier</span> <span class="org">${esc(atl.owner || "")}/</span>${esc(atl.repo || "")}</span>
       <span class="classeur-foot">${chealthHTML(p)}<span class="classeur-state" data-tone="${v.tone}">${esc(v.label)}</span></span>
     </span>
   </button>`;
@@ -734,9 +968,10 @@ async function renderProject(name) {
   const gp = el("proj-gitpanel");
   if (gp) {
     gp.innerHTML = gitPanelHTML(b);
-    // Refresh LOCAL après un geste local (branche/fusion/worktree) : on re-remplit le panneau et le
-    // graphe de branches (BranchMatrix, sans réseau), au lieu d'un ProjectBoardOne complet (tags/vitrines).
-    if (b.local && b.local.path) { fillGitPanel(b); bindGitPanel(b, () => { fillGitPanel(b); fillProjectGraph(b, 0); }); }
+    // Panneau à onglets (1.9.10) : fonctionne même SANS clone (les onglets distants lisent par API). On
+    // re-remplit l'onglet COURANT après un geste + le graphe au-dessus (local : BranchMatrix sans réseau).
+    bindGitPanel(b, () => { fillGitTab(b); fillProjectGraph(b, 0); });
+    fillGitTab(b);
   }
 }
 

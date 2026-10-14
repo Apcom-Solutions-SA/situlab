@@ -66,16 +66,33 @@ func (p *guiPrompter) PromptPIN(reason string, detail any, action, intent string
 	wailsrt.WindowCenter(p.ctx)
 	wailsrt.WindowSetAlwaysOnTop(p.ctx, true)
 	defer wailsrt.WindowSetAlwaysOnTop(p.ctx, false)
-	wailsrt.EventsEmit(p.ctx, "situlab:pin-request", map[string]any{"reason": reason, "detail": detail, "action": action, "intent": intent})
 
-	select {
-	case r := <-ch:
-		if r.ok {
-			return r.pin, daemon.PINConfirmed
+	// Ré-émission jusqu'à réponse : au DÉMARRAGE À FROID, c'est l'appel d'agent lui-même qui réveille
+	// l'app ; le frontend ne lie son écouteur "situlab:pin-request" qu'APRÈS avoir booté, donc une
+	// émission unique serait perdue — et le frontend retomberait sur son écran de déverrouillage
+	// STANDARD, sans le contexte de l'action. En répétant l'évènement, on garantit que la fenêtre de
+	// requête d'agent (contextuelle) finit par s'afficher et PRENNE LA MAIN sur l'écran standard.
+	// Idempotent côté frontend : une ré-émission est ignorée tant que la fenêtre est déjà ouverte.
+	payload := map[string]any{"reason": reason, "detail": detail, "action": action, "intent": intent}
+	wailsrt.EventsEmit(p.ctx, "situlab:pin-request", payload)
+	deadline := time.Now().Add(pinPromptTTL)
+	reping := time.NewTicker(500 * time.Millisecond)
+	defer reping.Stop()
+
+	for {
+		select {
+		case r := <-ch:
+			if r.ok {
+				return r.pin, daemon.PINConfirmed
+			}
+			return "", daemon.PINRefused // l'humain a annulé la fenêtre
+		case <-reping.C:
+			if !time.Now().Before(deadline) {
+				return "", daemon.PINTimedOut // garde-fou : pas de blocage éternel ; l'agent saura que c'est un délai
+			}
+			wailsrt.WindowShow(p.ctx)
+			wailsrt.EventsEmit(p.ctx, "situlab:pin-request", payload)
 		}
-		return "", daemon.PINRefused // l'humain a annulé la fenêtre
-	case <-time.After(pinPromptTTL):
-		return "", daemon.PINTimedOut // garde-fou : pas de blocage éternel ; l'agent saura que c'est un délai
 	}
 }
 

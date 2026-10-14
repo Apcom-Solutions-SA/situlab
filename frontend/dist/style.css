@@ -27,6 +27,10 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, system-ui, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
   --fs-xs: 11.5px; --fs-sm: 12.5px; --fs-base: 13.5px; --fs-md: 15px; --fs-lg: 18px; --fs-xl: 22px;
+  /* Zoom global de l'interface (1.9.10) : agrandit UNIFORMÉMENT tout le logiciel — texte, marges,
+     contrôles, icônes, SVG, y compris les px en dur. Un seul chiffre à régler ; candidat à un réglage
+     utilisateur (« densité »). 1 = taille d'origine. */
+  --ui-zoom: 1.12;
   /* --- Transitions --- */
   --t-fast: 120ms ease-out; --t-mid: 200ms cubic-bezier(.4, 0, .2, 1);
 
@@ -48,6 +52,11 @@
   --warn: var(--amber); --warn-soft: rgba(208, 131, 34, .14);
   --danger: var(--red-500); --danger-soft: rgba(209, 73, 91, .12);
   --info: var(--blue-500); --info-soft: #e8f1fb;
+  /* Identité couleur des EMPLACEMENTS git (1.9.11) — uniques dans l'app, hors palette d'état
+     (bleu=nav/action · vert=ok · ambre=attention · rouge=destructif). Une seule source ici.
+     local=CYAN · atelier=ROSE · vitrine=VIOLET (--vitrine, défini plus bas, conservé). */
+  --local: #0891b2; --local-soft: rgba(8, 145, 178, .12);
+  --atelier: #db2777; --atelier-soft: rgba(219, 39, 119, .11);
   --violet: var(--violet-500); --violet-soft: rgba(124, 92, 222, .14);
   /* Vitrine (production) : couleur d'IDENTITÉ distincte de l'orange (--warn), réservé à « travail en
      cours / en retard ». Alias dynamique de --violet → suit automatiquement chaque thème. */
@@ -79,6 +88,8 @@
     --danger: #e36c7c; --danger-soft: rgba(227, 108, 124, .16);
     --info: #5ea2e8; --info-soft: #1f2d3e;
     --violet: #a78bfa; --violet-soft: rgba(167, 139, 250, .16);
+    --local: #22d3ee; --local-soft: rgba(34, 211, 238, .15);
+    --atelier: #f472b6; --atelier-soft: rgba(244, 114, 182, .15);
     --focus: #5ea2e8;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, .35);
@@ -94,6 +105,8 @@
   --ok: #4cc08a; --ok-soft: rgba(76, 192, 138, .14); --warn: #e0a252; --warn-soft: rgba(224, 162, 82, .16);
   --danger: #e36c7c; --danger-soft: rgba(227, 108, 124, .16); --info: #5ea2e8; --info-soft: #1f2d3e;
   --violet: #a78bfa; --violet-soft: rgba(167, 139, 250, .16); --focus: #5ea2e8;
+  --local: #22d3ee; --local-soft: rgba(34, 211, 238, .15);
+  --atelier: #f472b6; --atelier-soft: rgba(244, 114, 182, .15);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3); --shadow-md: 0 4px 16px rgba(0, 0, 0, .35); --shadow-lg: 0 16px 44px rgba(0, 0, 0, .5);
 }
 
@@ -105,6 +118,8 @@ body {
   color: var(--text);
   background: var(--bg-canvas);
   -webkit-font-smoothing: antialiased;
+  /* Agrandissement global uniforme de l'interface (voir --ui-zoom). */
+  zoom: var(--ui-zoom);
 }
 .hidden { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -160,7 +175,7 @@ input[type=checkbox], input[type=radio] { appearance: auto; accent-color: var(--
 
 /* ---------- Onboarding ---------- */
 .onboarding {
-  height: 100vh; display: flex; align-items: center; justify-content: center;
+  height: calc(100vh / var(--ui-zoom, 1)); display: flex; align-items: center; justify-content: center;
   background: radial-gradient(130% 100% at 50% 0%, var(--bg-raised) 0%, var(--bg-canvas) 62%);
 }
 .connect-card {
@@ -168,6 +183,8 @@ input[type=checkbox], input[type=radio] { appearance: auto; accent-color: var(--
   border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 34px 30px 28px; text-align: center;
 }
 .connect-logo { width: 68px; height: 68px; }
+.lock-badge { font-size: 34px; line-height: 1; margin: 14px 0 2px; }
+.connect-card #lk-unlock { margin-top: 18px; }
 .connect-card h1 { font-size: var(--fs-xl); margin-top: 10px; letter-spacing: -.3px; }
 .tagline { color: var(--text-soft); margin: 6px 0 22px; }
 #connect-form { text-align: left; display: flex; flex-direction: column; gap: 14px; }
@@ -176,7 +193,9 @@ label small { font-weight: 500; color: var(--text-faint); }
 .inline-error { color: var(--danger); font-size: var(--fs-sm); font-weight: 600; }
 
 /* ---------- Shell app ---------- */
-.app { height: 100vh; display: flex; flex-direction: column; }
+/* Hauteur du shell compensée par le zoom global : sous body{zoom}, un 100vh serait magnifié et
+   déborderait la fenêtre (scroll parasite). calc(100vh / --ui-zoom) × zoom = 100vh pile → aucun scroll. */
+.app { height: calc(100vh / var(--ui-zoom, 1)); display: flex; flex-direction: column; }
 .topbar {
   height: 52px; flex: 0 0 52px; display: flex; align-items: center; justify-content: space-between;
   padding: 0 var(--sp-4); background: var(--bg-surface); border-bottom: 1px solid var(--border);
@@ -269,7 +288,7 @@ label small { font-weight: 500; color: var(--text-faint); }
 .push-preview .pp-new .pp-t { color: var(--warn); }
 /* Badges de rôle (v1.7) : atelier / production. */
 .role-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; letter-spacing: .02em; vertical-align: middle; }
-.role-atelier { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.role-atelier { background: color-mix(in srgb, var(--atelier) 16%, transparent); color: var(--atelier); }
 .role-production { background: var(--vitrine-soft); color: var(--vitrine); }
 /* Tableau de bord Projets 3 colonnes (v1.8) */
 #proj-board { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
@@ -288,14 +307,17 @@ label small { font-weight: 500; color: var(--text-faint); }
 /* Bulle = « station » posée sur la voie : opaque, au premier plan, masque le trait sous elle. */
 .pg-node { position: relative; z-index: 2; flex: 0 0 auto; width: 14px; height: 14px; border-radius: 50%; }
 /* point simple (sans tag) : pastille pleine colorée par l'état — vert à jour, jamais bleue */
-.pg-local { background: var(--ok); box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px color-mix(in srgb, var(--ok) 25%, transparent); }
-.pg-atelier { background: var(--ok); box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px color-mix(in srgb, var(--ok) 25%, transparent); }
+.pg-local { background: var(--local); box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px color-mix(in srgb, var(--local) 25%, transparent); }
+.pg-atelier { background: var(--atelier); box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px color-mix(in srgb, var(--atelier) 25%, transparent); }
 .pg-atelier.pg-late { background: var(--warn); box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px color-mix(in srgb, var(--warn) 25%, transparent); }
-/* bulle portant un tag de version : pastille opaque (fond surface) cerclée par l'état */
+/* bulle portant un tag de version : pastille opaque (fond surface) cerclée par la couleur d'emplacement */
 .pg-tagged { width: auto; height: auto; border-radius: var(--r-full); padding: 2px 9px; font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; background: var(--bg-surface); border: 1.5px solid var(--border-strong); box-shadow: none; }
-.pg-local.pg-tagged, .pg-atelier.pg-tagged { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.pg-local.pg-tagged { color: var(--local); border-color: color-mix(in srgb, var(--local) 55%, var(--border)); }
+.pg-atelier.pg-tagged { color: var(--atelier); border-color: color-mix(in srgb, var(--atelier) 55%, var(--border)); }
 .pg-atelier.pg-tagged.pg-late { background: var(--bg-surface); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); box-shadow: none; }
-.pg-prod { width: auto; height: auto; border-radius: var(--r-full); padding: 2px 9px; font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; background: var(--bg-surface); color: var(--ok); border: 1.5px solid color-mix(in srgb, var(--ok) 55%, var(--border)); }
+/* Tag LOCAL non encore publié sur l'atelier : couleur locale + liseré pointillé = « existe ici seulement ». */
+.pg-local.pg-tagged.pg-unpushed { color: var(--local); border-color: color-mix(in srgb, var(--local) 60%, var(--border)); border-style: dashed; }
+.pg-prod { width: auto; height: auto; border-radius: var(--r-full); padding: 2px 9px; font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; background: var(--bg-surface); color: var(--vitrine); border: 1.5px solid color-mix(in srgb, var(--vitrine) 55%, var(--border)); }
 .pg-prod.pg-late { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
 .pg-empty { width: 10px; height: 10px; border-radius: 50%; border: 2px dashed var(--border-strong); background: var(--bg-surface); box-sizing: border-box; }
 .pg-dirty { background: var(--warn) !important; color: var(--warn) !important; box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px color-mix(in srgb, var(--warn) 30%, transparent) !important; animation: pulse 1.6s infinite; }
@@ -329,8 +351,8 @@ label small { font-weight: 500; color: var(--text-faint); }
 .pg2-head { height: 28px; display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em; color: var(--text-faint); }
 .pg2-zone .pg2-head { justify-content: center; }
 .pg2-ico { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.pg2-local .pg2-ico { color: var(--ok); } .pg2-atl .pg2-ico, .pg2-prod .pg2-ico { color: inherit; }
-.pg2-atl .pg2-ico { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+.pg2-local .pg2-ico { color: var(--local); } .pg2-atl .pg2-ico, .pg2-prod .pg2-ico { color: inherit; }
+.pg2-atl .pg2-ico { fill: color-mix(in srgb, var(--atelier) 22%, transparent); }
 .pg2-prod .pg2-ico { fill: color-mix(in srgb, var(--vitrine) 22%, transparent); }
 /* Masque grisant « serveur déconnecté » posé sur une boîte de palier. */
 .pg2-off-mask { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 10px;
@@ -400,10 +422,10 @@ label small { font-weight: 500; color: var(--text-faint); }
 .pg-brn-sec { font-weight: 400; color: var(--text-soft); }
 .chip-wip { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .02em; padding: 0 6px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); vertical-align: middle; }
 /* teintes d'identité des paliers */
-.pg2-local { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 6%, transparent); }
-.pg2-local .pg2-head { color: var(--ok); }
-.pg2-atl { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.pg2-atl .pg2-head { color: var(--accent); }
+.pg2-local { border-color: color-mix(in srgb, var(--local) 45%, var(--border)); background: color-mix(in srgb, var(--local) 6%, transparent); }
+.pg2-local .pg2-head { color: var(--local); }
+.pg2-atl { border-color: color-mix(in srgb, var(--atelier) 45%, var(--border)); background: color-mix(in srgb, var(--atelier) 6%, transparent); }
+.pg2-atl .pg2-head { color: var(--atelier); }
 .pg2-prod { border-color: color-mix(in srgb, var(--vitrine) 45%, var(--border)); background: color-mix(in srgb, var(--vitrine) 6%, transparent); }
 .pg2-prod .pg2-head { color: var(--vitrine); }
 @media (max-width: 760px) {
@@ -659,8 +681,8 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .pa-unlock { background: var(--bg-sunken); color: var(--text-soft); }
 .pin-flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; padding: 10px 12px; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); }
 .pf-node { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--fs-sm); padding: 4px 10px; border-radius: var(--r-sm); background: var(--bg-surface); border: 1px solid var(--border); }
-.pf-local { color: var(--ok); }
-.pf-atl { color: var(--accent); }
+.pf-local { color: var(--local); }
+.pf-atl { color: var(--atelier); }
 .pf-prod { color: var(--vitrine); }
 .pf-arrow { color: var(--text-faint); font-weight: 700; font-size: 1.1em; }
 /* Fenetre PIN — Point 4 : l'INTENTION declaree par l'agent (ses mots) vs ce que SituLab CONSTATE. */
@@ -749,7 +771,11 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .repo-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: 7px; font-size: var(--fs-sm); }
 .repo-branches { margin-top: 10px; }
 .repo-branches.hidden { display: none; }
-.repo-foot { margin-top: 10px; display: flex; justify-content: flex-end; }
+.repo-foot { margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+/* Ligne d'identité épurée du catalogue (1.9.11) : dossier local, ou mention « pas copié ». */
+.repo-ident { margin-top: 7px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-sm); }
+.repo-ident.muted { color: var(--text-faint); }
+.repo-proj-btn { margin-right: auto; } /* « Fiche projet » à gauche, « Voir détail » à droite */
 
 /* --- Carte groupée : un dépôt distant, plusieurs clones locaux --- */
 .repo-head-static { cursor: default; }
@@ -783,6 +809,9 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .gp-ahead { color: var(--accent); font-weight: 700; }
 .gp-behind { color: var(--warn); font-weight: 700; }
 .gp-badge { font-size: var(--fs-xs); font-weight: 700; padding: 2px 8px; border-radius: var(--r-full); background: var(--bg-raised); color: var(--text-soft); border: 1px solid var(--border); }
+.gp-ver { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-xs); padding: 1px 7px; border-radius: var(--r-full); border: 1px solid var(--border); color: var(--text-soft); white-space: nowrap; }
+.gp-ver-exact { background: var(--ok-soft); color: var(--ok); border-color: transparent; } /* pile sur une version */
+.gp-ver-ahead { background: var(--bg-raised); color: var(--text-soft); } /* N commits après la version */
 .gp-merged { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .gp-unmerged { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 /* Alerte VISUELLE de suppression d'une branche jamais fusionnée : une poubelle + un éclat. */
@@ -791,6 +820,61 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .dh-burst { position: absolute; top: 2px; right: 44%; font-size: 1.4em; animation: dh-pulse 1.1s ease-in-out infinite; }
 @keyframes dh-pulse { 0%, 100% { transform: scale(1); opacity: .75; } 50% { transform: scale(1.25); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .dh-burst { animation: none; } }
+.callout.ok { background: var(--ok-soft); border-color: var(--ok); }
+
+/* --- Panneau git « qui se comprend » (1.9.10) : portée explicite + empreinte Local·Atelier·Vitrine --- */
+/* Bandeau de portée : rappelle que TOUT le panneau agit localement (jamais atelier/vitrine). */
+.gp-scope-note { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-sm); color: var(--text-soft); background: var(--bg-sunken); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--r-md); padding: 8px 11px; margin-bottom: 10px; line-height: 1.5; }
+.gp-scope-note .gp-sn-ico { flex: 0 0 auto; }
+/* Légende (pliée sous le titre Branches) : décode le trio et les gestes, une fois. */
+.gp-legend { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--text-soft); background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 7px 10px; margin-bottom: 8px; line-height: 1.6; }
+.gp-legend .gp-lg-k { font-weight: 700; color: var(--text); }
+/* Trio de pastilles : présence par palier. Réutilise les icônes du graphe (pg2-ico). */
+.gp-scope { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-right: 2px; }
+.gp-pip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--bg-raised); }
+.gp-pip .pg2-ico { width: 13px; height: 13px; }
+/* Pip « présente » teinté par EMPLACEMENT (--pipc) : local=cyan · atelier=rose · vitrine=violet. */
+.gp-pip.on { --pipc: var(--accent); background: color-mix(in srgb, var(--pipc) 15%, transparent); border-color: color-mix(in srgb, var(--pipc) 48%, transparent); color: var(--pipc); }
+.gp-pip-local.on   { --pipc: var(--local); }
+.gp-pip-atelier.on { --pipc: var(--atelier); }
+.gp-pip-vitrine.on { --pipc: var(--vitrine); }
+.gp-pip.off { opacity: .4; }
+.gp-pip.off .pg2-ico { color: var(--text-faint); }
+.gp-pip.unknown { border-style: dashed; color: var(--text-soft); }
+.gp-pip-q { position: absolute; right: -3px; top: -5px; font-size: 10px; font-weight: 800; color: var(--warn); }
+.gp-del-scope { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-soft); margin-top: 2px; }
+/* Onglets du panneau git : un par emplacement, aux couleurs d'identité (--local / --atelier / --vitrine). */
+.gp-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.gp-tab { appearance: none; -webkit-appearance: none; font: inherit; color: var(--text-soft); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 8px 14px; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-weight: 600; border-radius: var(--r-md) var(--r-md) 0 0; }
+.gp-tab .pg2-ico { width: 15px; height: 15px; }
+.gp-tab:hover { color: var(--text); background: var(--bg-sunken); }
+.gp-tab.on { color: var(--text); }
+.gp-tab-local.on { border-bottom-color: var(--local); color: var(--local); }
+.gp-tab-atelier.on { border-bottom-color: var(--atelier); color: var(--atelier); }
+.gp-tab-vitrine.on { border-bottom-color: var(--vitrine); color: var(--vitrine); }
+.gp-tab-vitrine .pg2-ico { fill: currentColor; stroke: none; }
+/* Onglets d'emplacement du catalogue de dépôts (1.9.11) : compteur + état désactivé (onglet vide). */
+.repo-tabs { margin: 2px 0 14px; flex-wrap: wrap; }
+.repo-tab-n { font-size: var(--fs-xs); font-weight: 700; color: var(--text-soft); background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; min-width: 20px; text-align: center; }
+.gp-tab.on .repo-tab-n { color: inherit; border-color: currentColor; background: color-mix(in srgb, currentColor 12%, transparent); }
+.gp-tab:disabled { opacity: .4; cursor: default; }
+.gp-tab:disabled:hover { color: var(--text-soft); background: none; }
+/* Marqueur « présent via le clone d'atelier » (vitrine appariée par projet, 1.9.11). */
+.via-atelier { background: color-mix(in srgb, var(--atelier) 15%, transparent); color: var(--atelier); border: 1px solid color-mix(in srgb, var(--atelier) 42%, transparent); }
+.gp-tabcontent { display: flex; flex-direction: column; gap: 12px; }
+.gp-scope-note .pg2-ico { width: 15px; height: 15px; vertical-align: -2px; }
+.gp-note-atelier { border-left-color: var(--atelier); } .gp-note-atelier .pg2-ico { color: var(--atelier); }
+.gp-note-vitrine { border-left-color: var(--vitrine); } .gp-note-vitrine .pg2-ico { color: var(--vitrine); fill: currentColor; stroke: none; }
+/* Groupe d'un dépôt distant (atelier / une vitrine). */
+.gp-remote-group { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-surface); box-shadow: var(--shadow-sm); padding: 10px 12px; }
+.gp-remote-group + .gp-remote-group { margin-top: 10px; }
+.gp-remote-h { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); font-weight: 700; padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.gp-remote-h .pg2-ico { width: 16px; height: 16px; flex: 0 0 auto; }
+.gp-remote-h .muted { font-size: var(--fs-xs); font-weight: 400; }
+.gp-remote-h .btn { margin-left: auto; }
+.gp-remote-atelier .gp-remote-h { color: var(--atelier); }
+.gp-remote-vitrine .gp-remote-h { color: var(--vitrine); }
+.gp-remote-vitrine .gp-remote-h .pg2-ico { fill: currentColor; stroke: none; }
 
 /* --- Accueil « classeurs » (1.9.8) : grille légère, zéro réseau au rendu. Même langage que .pboard. --- */
 .view-sub { font-size: var(--fs-sm); color: var(--text-soft); margin-top: 3px; }
@@ -817,11 +901,11 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 /* Glyphe de santé : triptyque Local·Atelier·Vitrine, statique (dernier état connu, jamais de pulse). */
 .chealth { display: inline-flex; align-items: center; gap: 3px; }
 .chealth-node { width: 11px; height: 11px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid transparent; }
-.chealth-node[data-role="local"][data-state="clean"] { background: var(--ok); }
+.chealth-node[data-role="local"][data-state="clean"] { background: var(--local); }
 .chealth-node[data-role="local"][data-state="dirty"], .chealth-node[data-role="local"][data-state="behind"] { background: var(--warn); }
 .chealth-node[data-role="local"][data-state="ahead"] { background: var(--accent); }
 .chealth-node[data-role="local"][data-state="absent"] { border-color: var(--border-strong); }
-.chealth-node[data-role="atelier"] { background: var(--accent); }
+.chealth-node[data-role="atelier"] { background: var(--atelier); }
 .chealth-node[data-role="vitrine"][data-state="on"] { background: var(--vitrine); }
 .chealth-node[data-role="vitrine"][data-state="absent"] { border-color: var(--border-strong); }
 .chealth-seg { width: 12px; height: 0; border-top: 1.5px solid var(--border-strong); }
@@ -1081,3 +1165,85 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .diag-txt { flex: 1 1 auto; min-width: 0; font-size: var(--fs-sm); }
 .diag-txt .muted { font-size: var(--fs-xs); margin-top: 2px; }
 .diag-row .btn { flex: 0 0 auto; align-self: center; }
+
+/* ============================================================
+   Aide contextuelle (1.9.11) — pastille ⓘ + fiche « montée en force »
+   ============================================================ */
+
+/* La pastille ⓘ posée près d'un titre de section. */
+.help-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; margin-left: 6px; padding: 0; vertical-align: -3px;
+  font-size: 12px; font-weight: 700; line-height: 1;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid transparent; border-radius: var(--r-full);
+  cursor: pointer; transition: transform var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+}
+.help-dot:hover { transform: scale(1.12); background: var(--accent); color: var(--accent-ink); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* La modale d'aide : un peu plus large, en-tête à bord perdu. */
+.modal-card.help-modal { width: 470px; padding: 0; overflow: hidden; }
+.modal-card.help-modal #modal-body { margin: 0; padding: 18px 20px 4px; }
+.modal-card.help-modal .modal-actions { padding: 10px 20px 16px; }
+
+/* Accent par thème (local / atelier / vitrine). */
+.modal-card.help-local   { --ha: var(--local);   --ha-soft: var(--local-soft); }
+.modal-card.help-atelier { --ha: var(--atelier); --ha-soft: var(--atelier-soft); }
+.modal-card.help-vitrine { --ha: var(--vitrine); --ha-soft: var(--vitrine-soft); }
+
+/* En-tête coloré à bord perdu. */
+.modal-card.help-modal .help-hd {
+  display: flex; align-items: center; gap: 12px;
+  margin: -18px -20px 14px; padding: 18px 20px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--ha) 0%, color-mix(in srgb, var(--ha) 72%, #000 8%) 100%);
+}
+.help-hd-ico {
+  flex: 0 0 auto; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; background: rgba(255, 255, 255, .18); border-radius: var(--r-md);
+}
+.help-hd-t { font-weight: 800; font-size: var(--fs-lg); letter-spacing: -.2px; }
+
+/* Accroche. */
+.help-lead { font-size: var(--fs-base); line-height: 1.55; color: var(--text); margin: 0 0 14px; }
+
+/* Cartes. */
+.help-cards { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 14px; }
+.help-card {
+  display: flex; align-items: flex-start; gap: 11px; padding: 11px 13px;
+  border: 1px solid var(--border); border-left: 3px solid var(--ha);
+  border-radius: var(--r-md); background: var(--bg-raised);
+  transition: transform var(--t-fast), border-color var(--t-fast);
+}
+.help-card:hover { transform: translateX(2px); border-color: color-mix(in srgb, var(--ha) 50%, var(--border)); }
+.help-card-ico { flex: 0 0 auto; font-size: 20px; line-height: 1.2; }
+.help-card-t { font-weight: 700; font-size: var(--fs-sm); margin-bottom: 2px; }
+.help-card-x { font-size: var(--fs-sm); color: var(--text-soft); line-height: 1.45; }
+
+/* Bloc (légende, tableau). */
+.help-block { margin-bottom: 14px; }
+.help-block-t { font-weight: 700; font-size: var(--fs-sm); color: var(--text-soft); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 7px; }
+
+/* Légende. */
+.help-legend { display: flex; flex-direction: column; gap: 6px; }
+.help-leg-row { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); color: var(--text); }
+.help-sw { flex: 0 0 auto; width: 14px; height: 14px; border-radius: var(--r-full); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+.help-sw.sw-full { background: var(--ha); box-shadow: 0 0 0 3px var(--ha-soft); }
+.help-sw.sw-empty { background: transparent; border: 1.5px solid var(--border-strong); }
+.help-sw.sw-unknown { background: var(--bg-raised); border: 1.5px solid var(--border-strong); color: var(--text-soft); }
+/* Pastilles de code couleur des emplacements (identité git). */
+.help-sw.sw-local   { background: var(--local);   box-shadow: 0 0 0 3px var(--local-soft); }
+.help-sw.sw-atelier { background: var(--atelier); box-shadow: 0 0 0 3px var(--atelier-soft); }
+.help-sw.sw-vitrine { background: var(--vitrine); box-shadow: 0 0 0 3px var(--vitrine-soft); }
+.help-note { font-size: var(--fs-sm); color: var(--text-soft); line-height: 1.45; margin: 8px 0 0; }
+
+/* Tableau geste → effet. */
+.help-table { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; font-size: var(--fs-sm); }
+.help-table th { text-align: left; font-weight: 700; color: var(--text-soft); background: var(--bg-raised); padding: 7px 11px; border-bottom: 1px solid var(--border); }
+.help-table td { padding: 8px 11px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
+.help-table tr:last-child td { border-bottom: none; }
+.help-table td:first-child { font-weight: 600; white-space: nowrap; }
+
+/* Règle (pied de fiche). */
+.help-rule { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--ha); background: var(--ha-soft); border-radius: var(--r-md); padding: 9px 12px; margin-bottom: 4px; }
+.help-rule-ico { flex: 0 0 auto; font-size: 15px; }

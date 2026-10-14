@@ -2,6 +2,60 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 
+## [1.9.11] — 2026-10-14 — « Catalogue épuré & aide contextuelle »
+
+### Catalogue de dépôts — une carte par dépôt, lisible d'un coup d'œil
+- **Carte épurée.** Un dépôt = **une seule carte**, sans dépliage de branches (les branches se lisent
+  désormais dans le détail). Deux portes seulement : **« Fiche projet »** (si le dépôt appartient à un
+  projet) et **« Voir détail »**. L'état n'apparaît en badge **que s'il est actionnable** (modifs, à
+  envoyer/récupérer, à réunir, détaché, illisible) — « à jour » et « pas sur ce poste » sont dits par les
+  pastilles d'emplacement.
+- **Pastilles d'emplacement** sur chaque carte : 🖥 ce poste · atelier · vitrine (pleine = présente,
+  éteinte = absente), colorées selon le rôle de la connexion.
+- **Filtres & onglets.** Filtre **État**, filtre **Projet** (dans / hors projet) et **onglets
+  d'emplacement** « Tous · Sur ce poste · En ligne » avec compteurs (un onglet vide se désactive). Ils
+  remplacent l'ancien bouton « Sur ce poste ».
+- **« Récupérer ici »** (nouveau) directement sur un dépôt en ligne pas encore copié : cloner dans un
+  dossier, lier un dossier existant, ou déléguer à l'IA — puis resynchronisation automatique.
+- **Vitrine présente « via l'atelier ».** Une production dont le clone d'**atelier** du même projet est
+  présent sur ce poste est marquée « ⇄ via l'atelier » et **n'est plus proposée à la récupération** ni
+  dédoublée en carte isolée (appariement **par projet**, côté service).
+
+### Aide contextuelle & couleurs d'emplacement
+- **Pastille ⓘ d'aide** près des titres de section : ouvre une **fiche pédagogique** en modale
+  (git local, copies de travail/worktrees, atelier, vitrine). Le contenu explicatif quitte les pages
+  fonctionnelles, qui s'allègent (panneau git notamment).
+- **Identité couleur unique des emplacements** : **local = cyan**, **atelier = rose**, **vitrine =
+  violet**, distincte de la palette d'état (nav/ok/attention/destructif). Appliquée partout : graphe de
+  branches, onglets du panneau git, glyphe de santé, flux PIN, badges de rôle.
+
+## [1.9.10] — 2026-10-12
+
+### Verrouillage & PIN — lisibilité et fin de la double demande
+- **Plus de double demande de PIN.** Quand une requête d'agent survient alors que la session est
+  verrouillée, c'est la **fenêtre de confirmation contextuelle** (avec l'action demandée) qui s'affiche
+  et qui déverrouille ; l'écran de déverrouillage **standard** est désormais **épargné**. Le démon
+  **ré-émet** sa demande jusqu'à réponse, pour que la fenêtre contextuelle s'affiche de façon fiable
+  même au démarrage à froid (l'évènement n'est plus perdu si le frontend n'a pas encore lié son écouteur)
+  — et la fenêtre masque le splash d'ouverture pour ne jamais rester cachée derrière.
+- **Page « session verrouillée » accueillante.** Le verrouillage automatique (inactivité) est maintenant
+  **détecté de façon proactive** : l'app se **gèle** et affiche une page claire « Session verrouillée »
+  avec un bouton explicite de déverrouillage, au lieu de rester faussement utilisable sur des données
+  périmées.
+- **Zoom réglable (Réglages → Apparence).** Densité d'affichage Compact / Normal / Grand.
+
+### Panneau git — versions par branche et honnêteté des tags
+- **Version par branche.** Chaque branche affiche sa puce « 🏷 version » : onglet Local = tag le plus
+  proche **avec l'écart** (`v1.9.9` si pile dessus, `v1.9.9 +N` sinon) ; onglets Atelier/Vitrine = version
+  **seulement** si la pointe est exactement taguée (correspondance de commit, honnête vis-à-vis de l'API).
+- **Signalement des tags locaux non poussés.** Dans le graphe, un tag présent **localement** mais **pas
+  sur l'atelier** est marqué (pointillé + ⬆) ; le nœud « Atelier » affiche la version **réellement
+  publiée** (API) plutôt que le `git describe` local trompeur. Aucun marquage « non poussé » sans certitude
+  (hors-ligne : repli neutre).
+- **En-tête épuré.** Retrait des badges de version redondants à côté du nom de dépôt (détail projet et
+  accueil Projets) : les versions se lisent dans les colonnes Local / Atelier / Vitrine et les puces de
+  branche.
+
 ## [1.9.9] — 2026-10-11
 
 ### Interne — maintenabilité du frontend
