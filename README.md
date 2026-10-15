@@ -1,17 +1,26 @@
 # SituLab
 
-**L'utilitaire git pour tous.** Un client [Forgejo](https://forgejo.org) de bureau,
-multiplateforme, qui rend lisible ce que vous avez en ligne et en local — sans ouvrir un
-navigateur, sans connaître git en profondeur.
+**L'utilitaire git et mémoire pour tous.** Un poste de travail de bureau, multiplateforme, qui rend
+lisible ce que vous avez en ligne et en local — sans ouvrir un navigateur, sans connaître git en
+profondeur — et qui garde votre mémoire de travail en ordre pour vous comme pour vos agents IA.
 
-> SituLab — © 2026 APCOM Solutions SA — version 1.11.1 — licence Apache 2.0
+> SituLab — © 2026 APCOM Solutions SA — version 1.16.0 — licence Apache 2.0
+
+## Quatre piliers
+
+- **KERNEL** — le dépôt qui *est* votre mémoire : désigné, lisible, synchronisé en deux gestes.
+- **SPOKES** — les projections de mission rattachées à un KERNEL.
+- **CORPUS** — vos clouds de fichiers souverains (Nextcloud, kDrive), avec un accès IA borné par dossier.
+- **BACKUP** — vos plans de sauvegarde des dépôts vers le CORPUS.
+
+Autour : l'**appairage** *clone local ↔ atelier ↔ vitrine* et la **promotion** d'une version validée.
 
 ## Idée
 
 Vous vous connectez à une ou plusieurs instances **Forgejo/Gitea** (ex. `https://git.apcom.app`)
-ou à **GitHub**. SituLab vous montre alors, **selon vos droits**, vos dépôts, votre profil, vos
-organisations et vos tokens, et pilote les **opérations git locales** (statut, clone, push).
-Simple pour l'humain, scriptable pour les agents IA.
+ou à **GitHub**, et à vos **clouds souverains**. SituLab vous montre alors, **selon vos droits**, vos
+dépôts et vos fichiers, et pilote les **opérations git locales** (statut, clone, push) comme les gestes
+cloud. Simple pour l'humain, scriptable pour les agents IA.
 
 Pour Forgejo, l'onboarding crée lui-même un jeton à partir de vos identifiants (seul le PIN est
 ensuite redemandé). Pour GitHub, vous collez un **jeton d'accès personnel** (GitHub ne permet pas
@@ -58,10 +67,10 @@ valide les écritures par son PIN : voir [`docs/AGENTS.md`](docs/AGENTS.md).
 # Go ≥ 1.25 (directive go.mod), Wails v2. Toolchain système récent : rien à épingler.
 
 # Icône Windows (ressource)
-go-winres simply --icon build/appicon.png --product-version 1.11.1 --file-version 1.11.1
+go-winres simply --icon build/appicon.png --product-version 1.16.0 --file-version 1.16.0
 
 # Binaire console (indispensable pour que le mode CLI écrive de façon fiable)
-go build -tags "desktop,production" -ldflags "-X main.version=1.11.1 -s -w" -o build/bin/situlab.exe .
+go build -tags "desktop,production" -ldflags "-X main.version=1.16.0 -s -w" -o build/bin/situlab.exe .
 
 # Installateur Windows (NSIS) : depuis build/
 cd build && makensis installer.nsi   # -> build/SituLab-Setup.exe

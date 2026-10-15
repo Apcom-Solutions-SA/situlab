@@ -341,7 +341,7 @@ function createRepoModal(preset) {
   if (preset.owner && orgs.includes(preset.owner)) el("nowner").value = preset.owner;
   else if (orgs.length) el("nowner").value = orgs[0];
   el("modal-ok").textContent = "Continuer";
-  wireAiInvite(() => promptRepoCreate(el("nowner") ? el("nowner").value : ""));
+  wireAiInvite(() => promptRepoCreate(el("nowner") ? el("nowner").value : "", el("nr") ? el("nr").value : ""));
 }
 
 // deleteRepoModal : suppression définitive d'un dépôt distant, avec garde-fou (retaper le
@@ -352,7 +352,7 @@ function deleteRepoModal(owner, repo) {
     <div class="callout warn"><b>Action irréversible.</b> Le dépôt « ${esc(slug)} » et tout son contenu seront supprimés du serveur.</div>
     <label>Pour confirmer, tapez <b>${esc(repo)}</b><input id="dr-confirm" placeholder="${esc(repo)}" /></label>
     <div class="inline-error hidden" id="dr-error"></div>
-    ${aiInviteHTML("Vous pouvez aussi demander la suppression à votre IA. Copiez le prompt et collez-le dans votre IA — SituLab vous demandera votre PIN au moment d'agir.")}</div>`, async () => {
+    ${aiInviteHTML("Vous pouvez aussi déléguer la suppression à votre IA. Copiez le prompt et collez-le dans votre IA — SituLab gère seul la validation si elle est nécessaire.")}</div>`, async () => {
     const er = el("dr-error");
     if (el("dr-confirm").value.trim() !== repo) { er.textContent = "Le nom saisi ne correspond pas."; er.classList.remove("hidden"); return; }
     pinConfirm(`Supprimer définitivement « ${slug} »`, async (pin) => {
@@ -377,26 +377,42 @@ function afterRepoChange() {
 // un dossier déjà présent, ou déléguer à l'IA. Après l'action, le catalogue se resynchronise.
 function getRepoHereModal(r) {
   const { owner, repo } = splitFull(r.full_name);
+  // Plug-and-play (1.12) : nom pré-rempli depuis le dépôt (éditable), emplacement choisi au sélecteur
+  // natif. Aucune saisie de chemin à la main ; le chemin final est composé et affiché en aperçu.
+  let base = "";                 // dossier parent choisi (sélecteur natif)
+  const sep = () => (base.includes("\\") || /^[A-Za-z]:/.test(base) ? "\\" : "/");
+  const destOf = () => { const n = (el("gr-name") && el("gr-name").value.trim()) || repo; return base ? base + sep() + n : ""; };
+  const refreshPreview = () => { const p = el("gr-dest"); if (p) p.textContent = destOf() || "— choisissez d'abord un emplacement —"; };
   openModal("Récupérer « " + repo + " » sur ce poste", `<div class="field">
-    <p class="sub">Copier le dépôt <b>${esc(r.full_name)}</b> dans un dossier de ce poste (il sera créé). SituLab le relie et le synchronise aussitôt.</p>
-    <label>Dossier de destination<input id="gr-dir" class="inp" placeholder="C:\\work\\${esc(repo)}" autocomplete="off" /></label>
+    <p class="sub">Copier le dépôt <b>${esc(r.full_name)}</b> sur ce poste. SituLab le relie et le synchronise aussitôt — rien à taper.</p>
+    <label>Nom du dossier<input id="gr-name" class="inp" value="${esc(repo)}" autocomplete="off" spellcheck="false" /></label>
+    <div class="gr-loc">
+      <button class="btn btn-ghost btn-sm" type="button" id="gr-pick">📁 Choisir l'emplacement…</button>
+      <span class="gr-dest-wrap">→ <code id="gr-dest" class="gr-dest">— choisissez d'abord un emplacement —</code></span>
+    </div>
     <div class="inline-error hidden" id="gr-err"></div>
     <div class="link-opt">
       <div class="link-opt-h">Déjà présent ailleurs sur ce poste ?</div>
       <button class="btn btn-ghost btn-sm" type="button" id="gr-link">📁 Lier un dossier existant…</button>
     </div>
     <div class="link-opt">
-      <div class="link-opt-h">🤖 Ou laissez votre IA le faire</div>
+      <div class="link-opt-h">Ou laissez votre IA le faire</div>
       <button class="btn btn-ghost btn-sm" type="button" id="gr-prompt">Copier le prompt pour mon IA</button>
     </div></div>`, async () => {
-    const dir = el("gr-dir").value.trim(), er = el("gr-err");
-    if (!dir) { er.textContent = "Indiquez un dossier de destination."; er.classList.remove("hidden"); return; }
+    const dir = destOf(), er = el("gr-err");
+    if (!base) { er.textContent = "Choisissez l'emplacement avec le bouton ci-dessus."; er.classList.remove("hidden"); return; }
+    if (!(el("gr-name").value.trim())) { er.textContent = "Indiquez un nom de dossier."; er.classList.remove("hidden"); return; }
     try {
       await App().Clone(state.instance, owner, repo, dir);
       closeModal(); toast("Dépôt récupéré sur ce poste", "ok"); afterRepoChange();
     } catch (e) { if (isLocked(e)) return handleLock(); er.textContent = cleanErr(e); er.classList.remove("hidden"); }
   });
   el("modal-ok").textContent = "Cloner ici";
+  el("gr-name").oninput = refreshPreview;
+  el("gr-pick").onclick = async () => {
+    try { const p = await App().PickFolder(); if (p) { base = p; refreshPreview(); } }
+    catch (e) { toast(cleanErr(e), "err"); }
+  };
   el("gr-link").onclick = () => { closeModal(); linkLocalPick(); };
   el("gr-prompt").onclick = () => copyLinkLocalPrompt();
 }

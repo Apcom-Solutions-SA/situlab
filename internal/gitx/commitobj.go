@@ -94,6 +94,23 @@ func parseIdent(ident string) (name, email, date string) {
 // reproduit à l'identique auteur/committer, le seul changement de contenu est l'ajout du trailer — ce
 // que la vérification v2 reconstruit en retirant ce trailer (cf. attest.CommitPreimage).
 func RecommitWithTrailer(dir, sha, key, val string) (string, error) {
+	newSha, err := CommitWithTrailerObject(dir, sha, key, val)
+	if err != nil {
+		return "", err
+	}
+	// Avance la branche courante vers le nouveau commit, en exigeant que HEAD vaille encore l'ancien
+	// (compare-and-swap) : jamais écraser un commit survenu entre-temps.
+	if _, err := run(dir, LocalTimeout, "update-ref", "HEAD", newSha, sha); err != nil {
+		return "", err
+	}
+	return newSha, nil
+}
+
+// CommitWithTrailerObject recrée le commit `sha` à l'identique (même arbre, mêmes parents, mêmes
+// identités/dates) en ajoutant un trailer « key: val », et renvoie le SHA du nouvel objet — SANS
+// toucher à aucune référence. Utile pour signer un commit DÉTACHÉ (ex. commit de promotion créé par
+// plomberie, pas encore sur une branche) : on signe l'objet puis on publie le nouveau SHA.
+func CommitWithTrailerObject(dir, sha, key, val string) (string, error) {
 	obj, err := CommitObject(dir, sha)
 	if err != nil {
 		return "", err
@@ -116,13 +133,7 @@ func RecommitWithTrailer(dir, sha, key, val string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	newSha := strings.TrimSpace(out)
-	// Avance la branche courante vers le nouveau commit, en exigeant que HEAD vaille encore l'ancien
-	// (compare-and-swap) : jamais écraser un commit survenu entre-temps.
-	if _, err := run(dir, LocalTimeout, "update-ref", "HEAD", newSha, sha); err != nil {
-		return "", err
-	}
-	return newSha, nil
+	return strings.TrimSpace(out), nil
 }
 
 // appendTrailer place « key: val » dans un bloc de trailer final, séparé du corps par une ligne vide.

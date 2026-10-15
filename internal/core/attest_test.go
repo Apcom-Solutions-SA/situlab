@@ -60,6 +60,7 @@ func TestAttestEndToEnd(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	if err := s.Unlock("123456"); err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,7 @@
 ; Produit : build\SituLab-Setup.exe
 
 !define APP "SituLab"
-!define VERSION "1.11.1"
+!define VERSION "1.15.0"
 !define PUBLISHER "APCOM Solutions SA"
 !define EXE "situlab.exe"
 
@@ -19,17 +19,74 @@ SetCompressor /SOLID lzma
 !include "WinMessages.nsh"
 !include "LogicLib.nsh"
 !include "WordFunc.nsh"
+!include "nsDialogs.nsh"
 !insertmacro un.WordReplace
+
+; Primo-paramètres de modules (v1.13) : cases cochées par DÉFAUT ; l'utilisateur peut en réduire.
+; Les choix sont écrits dans $INSTDIR\situlab-modules.json, consommé par l'app au 1er lancement.
+Var MOD_AGENTS
+Var MOD_GITADV
+Var MOD_SPOKES
+Var MOD_CORPUS
+Var MOD_BACKUP
 
 !define MUI_ICON "windows\icon.ico"
 !define MUI_UNICON "windows\icon.ico"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
+Page custom ModulesPageCreate ModulesPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "French"
+
+; --- Page « Modules » : quelles fonctions activer (tout coché = plein contrôle) ---
+Function ModulesPageCreate
+  !insertmacro MUI_HEADER_TEXT "Modules" "Choisissez les fonctions à activer (tout est coché par défaut)."
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+  ${NSD_CreateLabel} 0 0 100% 24u "Vous pourrez ajuster ces modules plus tard dans Réglages > Modules."
+  Pop $1
+  ${NSD_CreateCheckbox} 0 28u 100% 11u "Accès IA (agents) — Assistant IA, bibliotheque de prompts, CLI/MCP"
+  Pop $MOD_AGENTS
+  ${NSD_Check} $MOD_AGENTS
+  ${NSD_CreateCheckbox} 0 42u 100% 11u "Git avance — etapes separees, matrice des branches, outils git locaux"
+  Pop $MOD_GITADV
+  ${NSD_Check} $MOD_GITADV
+  ${NSD_CreateCheckbox} 0 56u 100% 11u "SPOKES — projections de mission"
+  Pop $MOD_SPOKES
+  ${NSD_Check} $MOD_SPOKES
+  ${NSD_CreateCheckbox} 0 70u 100% 11u "CORPUS — clouds de fichiers souverains"
+  Pop $MOD_CORPUS
+  ${NSD_Check} $MOD_CORPUS
+  ${NSD_CreateCheckbox} 0 84u 100% 11u "BACKUP — sauvegardes git vers cloud"
+  Pop $MOD_BACKUP
+  ${NSD_Check} $MOD_BACKUP
+  nsDialogs::Show
+FunctionEnd
+
+Function ModulesPageLeave
+  ${NSD_GetState} $MOD_AGENTS $MOD_AGENTS
+  ${NSD_GetState} $MOD_GITADV $MOD_GITADV
+  ${NSD_GetState} $MOD_SPOKES $MOD_SPOKES
+  ${NSD_GetState} $MOD_CORPUS $MOD_CORPUS
+  ${NSD_GetState} $MOD_BACKUP $MOD_BACKUP
+FunctionEnd
+
+; BoolStr : pile [etat 0/1] -> remplace par "true"/"false"
+Function BoolStr
+  Exch $0
+  ${If} $0 == 0
+    StrCpy $0 "false"
+  ${Else}
+    StrCpy $0 "true"
+  ${EndIf}
+  Exch $0
+FunctionEnd
 
 Section "SituLab"
   SetOutPath "$INSTDIR"
@@ -55,6 +112,28 @@ Section "SituLab"
   ; un PATH système long le tronquerait. Ajout idempotent.
   Push "$INSTDIR"
   Call AddToUserPath
+
+  ; Primo-paramètres de modules → seed JSON consommé par l'app au 1er lancement.
+  Push $MOD_AGENTS
+  Call BoolStr
+  Pop $MOD_AGENTS
+  Push $MOD_GITADV
+  Call BoolStr
+  Pop $MOD_GITADV
+  Push $MOD_SPOKES
+  Call BoolStr
+  Pop $MOD_SPOKES
+  Push $MOD_CORPUS
+  Call BoolStr
+  Pop $MOD_CORPUS
+  Push $MOD_BACKUP
+  Call BoolStr
+  Pop $MOD_BACKUP
+  FileOpen $9 "$INSTDIR\situlab-modules.json" w
+  ${If} $9 != ""
+    FileWrite $9 '{"agents":$MOD_AGENTS,"git_advanced":$MOD_GITADV,"spokes":$MOD_SPOKES,"corpus":$MOD_CORPUS,"backup":$MOD_BACKUP}'
+    FileClose $9
+  ${EndIf}
 
   ; Demande au shell de rafraîchir ses icônes (SHCNE_ASSOCCHANGED) : évite qu'une (ré)installation
   ; au même emplacement laisse une vignette de raccourci périmée dans le cache d'icônes de Windows.
@@ -124,6 +203,7 @@ FunctionEnd
 Section "Uninstall"
   Delete "$INSTDIR\${EXE}"
   Delete "$INSTDIR\icon.ico"
+  Delete "$INSTDIR\situlab-modules.json"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APP}\${APP}.lnk"

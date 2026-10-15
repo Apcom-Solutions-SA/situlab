@@ -461,7 +461,11 @@ func (s *Service) GitMerge(path, ref string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	before := gitx.HeadSHA(path)
 	out, err := gitx.Merge(path, ref)
+	if err == nil {
+		s.attestMergeCommit(path, before) // signe une VRAIE fusion ; jamais une avance-rapide
+	}
 	return mapConflict(path, out, err)
 }
 
@@ -519,7 +523,11 @@ func (s *Service) GitCherryPick(path, commit string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	before := gitx.HeadSHA(path)
 	out, err := gitx.CherryPick(path, commit)
+	if err == nil {
+		s.attestFreshCommit(path, before)
+	}
 	return mapConflict(path, out, err)
 }
 
@@ -531,7 +539,11 @@ func (s *Service) GitCherryPickContinue(path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	before := gitx.HeadSHA(path)
 	out, err := gitx.CherryPickContinue(path)
+	if err == nil {
+		s.attestFreshCommit(path, before)
+	}
 	return mapConflict(path, out, err)
 }
 
@@ -554,7 +566,11 @@ func (s *Service) GitRevert(path, commit string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	before := gitx.HeadSHA(path)
 	out, err := gitx.Revert(path, commit)
+	if err == nil {
+		s.attestFreshCommit(path, before)
+	}
 	return mapConflict(path, out, err)
 }
 

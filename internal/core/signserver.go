@@ -29,14 +29,16 @@ func signNonce() string {
 	return hex.EncodeToString(b[:])
 }
 
-// requestServerAttestation demande au service l'empreinte du commit `sha` du dépôt `repoURL`. Renvoie le
-// JSON d'attestation TEL QUEL (à écrire dans la note refs/notes/situlab, format identique au local).
-func requestServerAttestation(baseURL, token, sha, repoURL string) ([]byte, error) {
+// requestServerPreimageAttestation demande au service la signature d'un PRÉ-IMAGE de commit (attestation
+// v2 → portée par un trailer immuable, visible en ligne). Le serveur signe EXACTEMENT les octets du
+// pré-image fournis ; la clé privée reste sur le serveur. Timeout court : la signature est best-effort et
+// ne doit jamais faire traîner un commit si le service est lent/injoignable.
+func requestServerPreimageAttestation(baseURL, token, preimageB64, repoURL string) ([]byte, error) {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultSignServerURL
 	}
-	payload, _ := json.Marshal(map[string]string{"commit_sha": sha, "repo_url": repoURL, "nonce": signNonce()})
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/api/sign", bytes.NewReader(payload))
+	payload, _ := json.Marshal(map[string]string{"preimage_b64": preimageB64, "repo_url": repoURL, "nonce": signNonce()})
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/api/sign-preimage", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +46,7 @@ func requestServerAttestation(baseURL, token, sha, repoURL string) ([]byte, erro
 	if token != "" {
 		req.Header.Set("Authorization", "token "+token)
 	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
 	if err != nil {
 		return nil, err
 	}

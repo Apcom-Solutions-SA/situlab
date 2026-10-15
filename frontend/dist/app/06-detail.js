@@ -6,6 +6,8 @@ function openDetail(r) {
     full_name: r.full_name || r.name, owner, repo, has_remote: r.has_remote,
     html_url: r.html_url || "", local_path: r.local_path || "", ref: r.default_branch || "", tab: "apercu",
     path: "", refs: [], tags: [], _remote: null, _local: null,
+    // D'où l'on vient, pour que « Retour » y ramène (fiche projet, organiseur…).
+    from: r.from || "organize", fromProject: r.fromProject || "",
   };
   state.view = "detail";
   render();
@@ -27,11 +29,15 @@ async function renderDetail() {
       </div>
     </div>
     <div class="tabs">
-      <button class="tab active" data-tab="apercu">Aperçu</button>
-      ${d.has_remote ? `<button class="tab" data-tab="fichiers">Fichiers</button><button class="tab" data-tab="histo">Historique</button><button class="tab" data-tab="activite">Activité</button>` : ""}
+      <button class="tab${(d.tab || "apercu") === "apercu" ? " active" : ""}" data-tab="apercu">Aperçu</button>
+      ${d.has_remote ? `<button class="tab${d.tab === "fichiers" ? " active" : ""}" data-tab="fichiers">Fichiers</button><button class="tab${d.tab === "histo" ? " active" : ""}" data-tab="histo">Historique</button><button class="tab${d.tab === "activite" ? " active" : ""}" data-tab="activite">Activité</button>` : ""}
     </div>
     <div id="detail-body"><div class="skeleton"></div></div>`;
-  el("back").onclick = () => navTo("organize");
+  el("back").onclick = () => {
+    // Retour contextuel (1.12) : vers la fiche projet si on en vient, sinon l'organiseur.
+    if (d.from === "project" && d.fromProject && typeof openProject === "function") return openProject(d.fromProject);
+    navTo(d.from || "organize");
+  };
   if (el("open-web")) el("open-web").onclick = () => safeOpenURL(d.html_url || ((state.repos || []).find((x) => x.full_name === d.full_name) || {}).html_url);
   if (el("unfollow")) el("unfollow").onclick = () => {
     // Protection (1.9.2) : « ne plus suivre » demande désormais une confirmation explicite. Le dossier
@@ -103,7 +109,7 @@ function paintDetail(liveOnly) {
 async function paintActivite(body, liveOnly) {
   if (liveOnly) return;
   const d = state.detail;
-  body.innerHTML = `<div class="toolbar">
+  body.innerHTML = scopeNoteHTML(d, "activite") + `<div class="toolbar">
       <button class="btn btn-primary btn-sm" id="new-issue" title="Une issue = une note de suivi : un bug à corriger, une idée, une question. Elle reste ouverte jusqu'à ce qu'on la ferme.">＋ Nouvelle issue</button>
       <button class="btn btn-ghost btn-sm" id="new-pr" title="Une demande de fusion propose de réunir le travail d'une branche dans une autre, pour relecture avant d'intégrer.">＋ Demande de fusion</button>
       <button class="btn btn-ghost btn-sm" id="new-rel" title="Une version (release) marque un point stable, étiqueté (ex. v1.0), à publier.">＋ Version</button>
@@ -352,7 +358,7 @@ function paintApercu(body, liveOnly) {
     ${changed ? `<div class="panel"><div class="panel-h">Modifications en cours</div><ul class="files">${changed}</ul></div>` : ""}
   </div>` : "";
 
-  body.innerHTML = syncHero(d, loc) + versionScale(d, loc) +
+  body.innerHTML = scopeNoteHTML(d, "apercu") + syncHero(d, loc) + versionScale(d, loc) +
     (d.local_path ? `<div class="detail-branches"><div class="vscale-h">Branches (en ligne ⟷ ce poste)</div><div id="detail-bg"><div class="skeleton"></div></div></div>` : "") +
     lists;
 
@@ -555,7 +561,7 @@ function cloneModal(d) {
 async function paintFiles(body, liveOnly) {
   if (liveOnly) return;
   const d = state.detail;
-  body.innerHTML = `<div class="crumbs" id="crumbs"></div><div id="files"><div class="skeleton"></div></div>`;
+  body.innerHTML = scopeNoteHTML(d, "fichiers") + `<div class="crumbs" id="crumbs"></div><div id="files"><div class="skeleton"></div></div>`;
   paintCrumbs();
   try {
     const entries = await App().RepoContents(state.instance, d.owner, d.repo, d.path, d.ref);
@@ -690,24 +696,51 @@ function stripAttestTrailer(msg) {
   return String(msg || "").split("\n").filter((l) => !/^SituLab-Approved:\s/.test(l)).join("\n").replace(/\n+$/, "");
 }
 
+// scopeNoteHTML : dit CLAIREMENT ce que l'onglet montre (1.12). Fichiers/Historique/Activité = le dépôt
+// EN LIGNE sélectionné (atelier ou vitrine selon d'où on a ouvert) ; Aperçu = comparaison en ligne ⟷ poste.
+function scopeNoteHTML(d, kind) {
+  if (kind === "apercu") return `<div class="detail-scope"><span class="ds-ico">⇄</span> en ligne ⟷ ce poste</div>`;
+  const ref = d.ref ? ` · <b>${esc(d.ref)}</b>` : "";
+  return `<div class="detail-scope"><span class="ds-ico">🌐</span> en ligne — ${esc(d.full_name || d.repo)}${ref}</div>`;
+}
+
+// hasAttestTrailer : le commit porte-t-il le sceau SituLab ? Le trailer « SituLab-Approved: » fait
+// partie du message et voyage avec le commit — on le lit donc DIRECTEMENT dans le message renvoyé par
+// le serveur, sans avoir besoin d'un clone local.
+function hasAttestTrailer(msg) {
+  return /^SituLab-Approved:\s/m.test(String(msg || ""));
+}
+
 function paintHisto(body, liveOnly) {
   const d = state.detail, rem = d._remote || { commits: [] };
   const tags = (d.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("") || `<span class="muted">aucune version</span>`;
+  let signedN = 0;
   const commits = (rem.commits || []).map((c) => {
     const full = stripAttestTrailer(c.message), nl = full.indexOf("\n");
     const subject = nl < 0 ? full : full.slice(0, nl);
     const bodyTxt = nl < 0 ? "" : full.slice(nl + 1).trim();
     const sha = esc(c.sha || "");
-    return `<div class="cmt" data-sha="${sha}">
-      <div class="cmt-head"><span class="cmt-subject">${esc(subject)}</span><span class="att-badge" data-att="${sha}"></span></div>
+    // Sceau d'après la PRÉSENCE du trailer dans le message en ligne (pas besoin de clone local).
+    const signed = hasAttestTrailer(c.message);
+    if (signed) signedN++;
+    const badge = signed
+      ? `<span class="att-badge ok" data-att="${sha}" title="Signé via SituLab — garantie d'origine">${SEAL_SVG}</span>`
+      : `<span class="att-badge none" data-att="${sha}" title="Pas de signature SituLab sur ce commit"></span>`;
+    return `<div class="cmt${signed ? " signed" : ""}" data-sha="${sha}">
+      <div class="cmt-head"><span class="cmt-subject">${esc(subject)}</span>${badge}</div>
       <div class="cmt-meta"><code>${esc(c.short)}</code><span class="cmt-who">${esc(c.author)}</span><span class="cmt-when">${esc(fmtDate(c.date))}</span></div>
       ${bodyTxt ? `<button class="cmt-more" data-more="${sha}">Détails ▾</button><div class="cmt-body hidden" id="cb-${sha}">${esc(bodyTxt)}</div>` : ""}
     </div>`;
   }).join("") || blankslate("∅", "Aucun commit", "");
+  const shownN = (rem.commits || []).length;
   const sig = "histo|" + JSON.stringify([d.ref, d.tags || [], rem.commits || [], d.local_path || ""]);
   if (liveOnly && sig === d._paintSig) return;
   d._paintSig = sig;
-  body.innerHTML = `<div id="att-banner"></div>
+  const summaryHTML = shownN === 0 ? ""
+    : signedN > 0
+      ? `<div class="att-note ok"><span class="seal-sm">${SEAL_SVG}</span> <b>${signedN}</b>/${shownN} commit(s) signé(s) via SituLab — garantie d'origine.</div>`
+      : `<div class="att-note"><span class="seal-ph">🛡</span> Aucun de ces commits ne porte la signature SituLab (le sceau marque un commit créé ou promu via SituLab).</div>`;
+  body.innerHTML = scopeNoteHTML(d, "histo") + `<div id="att-banner"></div><div id="att-summary">${summaryHTML}</div>
     <div class="blk"><div class="blk-h">Versions</div><div class="tags">${tags}</div></div>
     <div class="blk"><div class="blk-h">Historique — ${esc(d.ref)}</div><div class="cmt-timeline">${commits}</div></div>`;
   // Déplier/replier le corps d'un commit (délégation sur la timeline).
@@ -725,26 +758,39 @@ function paintHisto(body, liveOnly) {
 // enrichAttestation appose le SCEAU « certified » sur les commits vérifiés (par SHA) et affiche un
 // bandeau tant que la racine embarquée est la racine de TEST. Lecture locale (clone requis).
 async function enrichAttestation(d) {
+  // Bannière mode TEST (la racine de gouvernance n'est pas installée → les sceaux ne sont pas
+  // vérifiables réellement). Le sceau lui-même est déjà posé par paintHisto d'après la présence du
+  // trailer dans le message en ligne (pas besoin de clone local).
   try {
     if (await App().AttestUsingTestRoot()) {
       const b = el("att-banner");
       if (b) b.innerHTML = `<div class="callout warn" style="margin-bottom:10px">Signature en mode <b>TEST</b> — la racine de gouvernance n'est pas encore installée : les sceaux ne sont pas vérifiables réellement.</div>`;
     }
   } catch (_) {}
-  if (!d.local_path) return;
+  if (state.detail !== d || !d.local_path) return;
+  // Vérification LOCALE (autoritative) : le clone a le commit COMPLET avec son trailer, alors que l'API
+  // en ligne renvoie souvent le message tronqué (sans trailer). On POSE donc le sceau d'après la
+  // vérification cryptographique locale — plus fiable que la détection par message.
   let rows = [];
-  try { rows = (await App().AttestHistory(d.local_path, 100)) || []; } catch (_) { return; }
+  try { rows = (await App().AttestHistory(d.local_path, 200)) || []; } catch (_) { return; }
   if (state.detail !== d) return;
   const map = {};
   rows.forEach((r) => { if (r && r.sha) map[r.sha] = r.attestation; });
+  let signed = 0, shown = 0;
   document.querySelectorAll(".cmt[data-sha]").forEach((row) => {
+    shown++;
     const v = map[row.dataset.sha], badge = row.querySelector(".att-badge");
-    if (v && v.verified && badge) {
-      badge.className = "att-badge ok";
-      badge.innerHTML = SEAL_SVG;
-      badge.title = "Signé via SituLab — garantie d'origine" + (v.subject ? " · " + v.subject : "");
-      row.classList.add("signed");
+    if (v && v.verified) {
+      if (badge) { badge.className = "att-badge ok"; badge.innerHTML = SEAL_SVG; badge.title = "Signé via SituLab — garantie d'origine vérifiée localement" + (v.subject ? " · " + v.subject : ""); }
+      row.classList.add("signed"); signed++;
     }
   });
+  // Résumé recalculé d'après la vérification locale (remplace l'estimation faite sur le message en ligne).
+  const sum = el("att-summary");
+  if (sum && shown > 0) {
+    sum.innerHTML = signed > 0
+      ? `<div class="att-note ok"><span class="seal-sm">${SEAL_SVG}</span> <b>${signed}</b>/${shown} commit(s) signé(s) via SituLab — garantie d'origine vérifiée localement.</div>`
+      : `<div class="att-note"><span class="seal-ph">🛡</span> Aucun de ces commits ne porte la signature SituLab (le sceau marque un commit créé ou promu via SituLab).</div>`;
+  }
 }
 

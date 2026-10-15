@@ -16,42 +16,6 @@ import (
 	"situlab/internal/keyring"
 )
 
-// Le client du service de signature serveur : POST /api/sign avec le jeton Forgejo, renvoie l'attestation
-// (telle quelle) ; les codes d'erreur remontent proprement.
-func TestRequestServerAttestation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/sign" {
-			w.WriteHeader(400)
-			return
-		}
-		if r.Header.Get("Authorization") != "token TOK" {
-			w.WriteHeader(403)
-			return
-		}
-		var in map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&in)
-		if len(in["commit_sha"]) == 0 || in["nonce"] == "" || in["repo_url"] == "" {
-			w.WriteHeader(400)
-			return
-		}
-		_, _ = w.Write([]byte(`{"attestation":{"commit":"` + in["commit_sha"] + `","cert":{},"sig":"zz","ts":"t"}}`))
-	}))
-	defer srv.Close()
-
-	att, err := requestServerAttestation(srv.URL, "TOK", "0123456789abcdef0123456789abcdef01234567", "https://git.example/o/r")
-	if err != nil {
-		t.Fatalf("requestServerAttestation : %v", err)
-	}
-	if !strings.Contains(string(att), `"commit":"0123456789abcdef0123456789abcdef01234567"`) {
-		t.Fatalf("attestation inattendue : %s", att)
-	}
-
-	// Jeton refusé → erreur (403).
-	if _, err := requestServerAttestation(srv.URL, "MAUVAIS", "abc", "u"); err == nil {
-		t.Error("un jeton refusé doit remonter une erreur")
-	}
-}
-
 // La liste de révocation accepte un tableau JSON ou un objet { "revoked": [...] }.
 func TestFetchRevokedSerials(t *testing.T) {
 	for _, body := range []string{`["A","B"]`, `{"revoked":["A","B"]}`} {
@@ -70,20 +34,21 @@ func TestFetchRevokedSerials(t *testing.T) {
 	}
 }
 
-// Mode SERVEUR de bout en bout : un commit via SituLab déclenche un appel au service, et l'attestation
-// renvoyée est écrite TELLE QUELLE dans la note git. (La validité crypto est testée côté attest ; ici on
-// vérifie le branchement : appel serveur → note.)
+// Mode SERVEUR de bout en bout (v2) : un commit via SituLab appelle /api/sign-preimage avec le jeton
+// Forgejo et le PRÉ-IMAGE du commit, et l'attestation renvoyée est posée en TRAILER immuable dans le
+// commit (plus de note). Ici on vérifie le branchement : appel serveur (pré-image) → trailer.
 func TestAttestCommitServerMode(t *testing.T) {
 	if !gitx.Available() {
 		t.Skip("git indisponible")
 	}
-	var gotAuth, gotSHA string
+	var gotAuth, gotPre, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
 		var in map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&in)
-		gotSHA = in["commit_sha"]
-		_, _ = w.Write([]byte(`{"attestation":{"commit":"` + in["commit_sha"] + `","via":"server"}}`))
+		gotPre = in["preimage_b64"]
+		_, _ = w.Write([]byte(`{"attestation":{"v":2,"cert":{},"sig":"zz","ts":"t"}}`))
 	}))
 	defer srv.Close()
 
@@ -96,6 +61,7 @@ func TestAttestCommitServerMode(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	if err := s.Unlock("123456"); err != nil {
 		t.Fatal(err)
 	}
@@ -122,14 +88,20 @@ func TestAttestCommitServerMode(t *testing.T) {
 		t.Fatalf("Commit : %v", err)
 	}
 	sha := gitx.HeadSHA(dir)
-	note := gitx.ReadNote(dir, attestNotesRef, sha)
-	if !strings.Contains(note, `"via":"server"`) || !strings.Contains(note, sha) {
-		t.Fatalf("la note doit venir du service : %q", note)
+	obj, err := gitx.CommitObject(dir, sha)
+	if err != nil {
+		t.Fatalf("CommitObject : %v", err)
+	}
+	if !strings.Contains(obj.Message, attestTrailerKey+": ") {
+		t.Fatalf("le commit doit porter le trailer d'attestation, message = %q", obj.Message)
+	}
+	if gotPath != "/api/sign-preimage" {
+		t.Errorf("le service doit être appelé sur /api/sign-preimage, obtenu %q", gotPath)
 	}
 	if gotAuth != "token FORGE-TOK" {
 		t.Errorf("le service doit recevoir le jeton Forgejo, obtenu %q", gotAuth)
 	}
-	if gotSHA != sha {
-		t.Errorf("le service doit recevoir le SHA du commit, obtenu %q", gotSHA)
+	if gotPre == "" {
+		t.Errorf("le service doit recevoir le pré-image du commit (preimage_b64 vide)")
 	}
 }

@@ -119,6 +119,11 @@ function projectGraphCard(b, idx) {
   const atl = b.atelier || {}, prods = b.productions || [];
   const syncBtn = b.local && (!b.local.clean || b.local.ahead || b.local.behind) ? `<button class="btn btn-ghost btn-sm" data-sync="${esc(b.name)}" title="Récupérer, enregistrer vos modifications et les envoyer à l'atelier — en un geste, sous PIN. (Proposé seulement quand il y a quelque chose à synchroniser ; la lecture de l'état, elle, est automatique.)">Synchroniser</button>` : "";
   const cloneBtn = !b.local ? `<button class="btn btn-ghost btn-sm" data-clone="${esc(b.name)}" title="Copier le dépôt atelier dans un dossier de ce poste">Cloner ici</button>` : "";
+  // Publier la VERSION (tag) local→atelier (1.12) : « Synchroniser » envoie les commits mais PAS les
+  // tags. Si le poste est sur une version (tag exact) que l'atelier n'a pas encore, on le propose.
+  const locTag = (b.local && b.local.describe && !/-g[0-9a-f]+$/i.test(b.local.describe)) ? b.local.describe : "";
+  const atlVer = (b.atelier && b.atelier.version) || "";
+  const publishBtn = (locTag && locTag !== atlVer) ? `<button class="btn btn-ghost btn-sm" data-publishtag="${esc(b.name)}" data-tag="${esc(locTag)}" title="Publier la version ${esc(locTag)} vers l'atelier (le contenu est déjà envoyé ; on nomme la version). L'atelier affichera alors ${esc(locTag)}.">📌 Publier ${esc(locTag)} → atelier</button>` : "";
   const prodBtns = prods.map((p, i) => {
     if (p.error) return ""; // serveur vitrine déconnecté → masque + Reconnecter dans la boîte VITRINE
     const prod = `${esc(p.owner)}/${esc(p.repo)}`;
@@ -130,7 +135,7 @@ function projectGraphCard(b, idx) {
   return `<div class="pboard">
     <div class="pboard-h">
       <div class="pboard-ttl">${ico}<b class="pboard-name">${esc(b.name)}</b> <span class="muted">${esc(atl.owner)}/${esc(atl.repo)}</span></div>
-      <div class="pbc-act">${syncBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">modifier</button><button class="lnk" data-detatl="${esc(b.name)}" title="Ouvrir le détail du dépôt atelier (branches, fichiers, activité)">détail ›</button><button class="lnk danger" data-delproj="${esc(b.name)}" title="Retirer ce lien de projet (aucun dépôt n'est supprimé)">supprimer</button></div>
+      <div class="pbc-act">${syncBtn}${publishBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">modifier</button><button class="lnk danger" data-delproj="${esc(b.name)}" title="Retirer ce lien de projet (aucun dépôt n'est supprimé)">supprimer</button></div>
     </div>
     <div class="pgraph" id="pg-${idx}"><div class="skeleton"></div></div>
   </div>`;
@@ -193,15 +198,16 @@ function projectGraphHTML(b, branches, atlTags, atlTagsKnown) {
     const localNode = br.has_local
       ? node(`pg-local${dirty ? " pg-dirty" : ""}${hereBranch ? " pg-here" : ""}${locUnpushed ? " pg-unpushed" : ""}`, locLabel, locTitle)
       : node("pg-empty", "", "pas sur ce poste");
-    // Segment LOCAL→ATELIER
-    let la = "pg-s-empty", laTxt = "";
+    // Segment LOCAL→ATELIER — la FLÈCHE pointe vers le maillon EN RETARD (celui qui doit recevoir),
+    // l'infobulle dit en clair qui est en avance de combien.
+    let la = "pg-s-empty", laTxt = "", laTitle = "";
     if (br.has_local && br.has_remote) {
-      if (dirty) { la = "pg-s-dirty"; laTxt = "travail en cours"; }
-      else if (br.ahead && br.behind) { la = "pg-s-div"; laTxt = "à réunir"; }
-      else if (br.ahead) { la = "pg-s-ahead"; laTxt = "↑" + br.ahead; }
-      else if (br.behind) { la = "pg-s-behind"; laTxt = "↓" + br.behind; }
-      else { la = "pg-s-ok"; laTxt = "✓"; }
-    } else if (br.has_local) { la = "pg-s-local"; laTxt = "local seul"; }
+      if (dirty) { la = "pg-s-dirty"; laTxt = "●"; laTitle = "modifications non enregistrées sur le poste"; }
+      else if (br.ahead && br.behind) { la = "pg-s-div"; laTxt = "⇆"; laTitle = `poste et atelier ont divergé (poste +${br.ahead}, atelier +${br.behind}) — à réunir`; }
+      else if (br.ahead) { la = "pg-s-ahead"; laTxt = br.ahead + " ▸"; laTitle = `le poste est en avance de ${br.ahead} sur l'atelier — ${br.ahead} à publier`; }
+      else if (br.behind) { la = "pg-s-behind"; laTxt = "◂ " + br.behind; laTitle = `l'atelier est en avance de ${br.behind} — ${br.behind} à récupérer sur le poste`; }
+      else { la = "pg-s-ok"; laTxt = "✓"; laTitle = "poste et atelier alignés"; }
+    } else if (br.has_local) { la = "pg-s-local"; laTxt = "local"; laTitle = "présent seulement sur le poste (pas encore sur l'atelier)"; }
     // Nœud ATELIER : vert quand à jour, ambre quand il lui manque des commits locaux (br.ahead).
     // Version AFFICHÉE = la version réellement PUBLIÉE sur l'atelier (et non le `git describe` local qui
     // pourrait montrer un tag local non poussé). Si la pointe distante n'est pas exactement une version
@@ -216,12 +222,13 @@ function projectGraphHTML(b, branches, atlTags, atlTagsKnown) {
       ? node(`pg-atelier${br.has_local && br.ahead ? " pg-late" : ""}`, atlVer,
           "sur l'atelier" + (atlVer ? " · " + atlVer : "") + atlExtra)
       : node("pg-empty", "", "pas sur l'atelier");
-    // Segment ATELIER→PROD + nœud PROD (voie principale uniquement)
-    let ap = "pg-s-empty", apTxt = "", prodNode = node("pg-empty", "", "");
+    // Segment ATELIER→PROD + nœud PROD (voie principale uniquement) — flèche vers la vitrine si elle est en retard.
+    let ap = "pg-s-empty", apTxt = "", apTitle = "", prodNode = node("pg-empty", "", "");
     if (br.name === prodBranch && prods.length && !prods[0].error) {
       const p = prods[0];
       ap = p.balanced ? "pg-s-ok" : "pg-s-behind";
-      apTxt = p.balanced ? "✓" : "↓" + p.behind;
+      apTxt = p.balanced ? "✓" : p.behind + " ▸";
+      apTitle = p.balanced ? "vitrine à jour" : `la vitrine est en retard de ${p.behind} version(s) sur l'atelier — à promouvoir`;
       prodNode = node(`pg-prod${p.balanced ? "" : " pg-late"}`, p.version || "—", esc(p.owner) + "/" + esc(p.repo) + " · " + esc(p.version || "—"));
     }
     // « depuis quoi » : branche de suivi d'un travail local non encore publié (lien discret pointillé)
@@ -241,7 +248,7 @@ function projectGraphHTML(b, branches, atlTags, atlTagsKnown) {
       localOn: !!br.has_local, localNode,
       atlOn: !!br.has_remote, atelierNode,
       prodOn: br.name === prodBranch && prods.length && !prods[0].error, prodNode,
-      la, laTxt, ap, apTxt,
+      la, laTxt, laTitle, ap, apTxt, apTitle,
     };
   });
 
@@ -253,22 +260,27 @@ function projectGraphHTML(b, branches, atlTags, atlTagsKnown) {
   const cell = (on, inner) => on
     ? `<div class="pg2-cell pg2-on">${inner}</div>`
     : `<div class="pg2-cell pg2-absent"><span class="pg-absent" title="cette branche n'existe pas ici">–</span></div>`;
-  const gap = (cls, txt) => `<div class="pg2-cell pg-seg ${cls}"><em>${txt}</em></div>`;
+  const gap = (cls, txt, title) => `<div class="pg2-cell pg-seg ${cls}"${title ? ` title="${esc(title)}"` : ""}><em>${txt}</em></div>`;
   // Masque grisant posé sur une boîte dont le serveur est déconnecté : message amical + Reconnecter.
   const offMask = (inst, err) => inst ? `<div class="pg2-off-mask"><div class="pg2-off-ico">🔌</div><div class="pg2-off-t">Serveur « ${esc(inst)} » déconnecté</div><button class="btn btn-primary btn-sm" data-reconinst="${esc(inst)}">Reconnecter</button></div>` : "";
-  const zone = (title, cls, cells, icon, mask) => `<div class="pg2-col pg2-zone ${cls}"><div class="pg2-head">${icon || ""}<span>${title}</span></div>${cells.join("")}${mask || ""}</div>`;
-  const gapCol = (cells) => `<div class="pg2-col pg2-gapcol"><div class="pg2-head"></div>${cells.join("")}</div>`;
+  // action = petit « consulter › » placé SOUS le titre de la colonne (1.12) : chaque palier a son accès
+  // de lecture là où il vit, au lieu d'un bouton global en haut de la carte.
+  const zone = (title, cls, cells, icon, mask, action) => `<div class="pg2-col pg2-zone ${cls}"><div class="pg2-head">${icon || ""}<span>${title}</span></div><div class="pg2-head-act">${action || ""}</div>${cells.join("")}${mask || ""}</div>`;
+  const consult = (scope, title) => `<button type="button" class="lnk pg2-consult" data-consult="${scope}" data-proj="${esc(b.name)}" title="${esc(title)}">consulter ›</button>`;
+  const gapCol = (cells) => `<div class="pg2-col pg2-gapcol"><div class="pg2-head"></div><div class="pg2-head-act"></div>${cells.join("")}</div>`;
 
   const atl = b.atelier || {}, prod0 = (b.productions || [])[0] || {};
   const atlMask = atl.error ? offMask(atl.instance, atl.error) : "";
   const prodErr = (b.productions || []).find((p) => p.error);
   const hasVitrine = !!(b.productions || []).length;
 
-  const labelCol = `<div class="pg2-col pg2-labels"><div class="pg2-head"></div>` +
+  const labelCol = `<div class="pg2-col pg2-labels"><div class="pg2-head"></div><div class="pg2-head-act"></div>` +
     lanes.map((r) => `<div class="pg2-name" title="${r.title}">${r.label}</div>`).join("") + `</div>`;
-  const localCol = zone("LOCAL", "pg2-local", lanes.map((r) => cell(r.localOn, r.localNode)), ZICON.desktop);
-  const g1 = gapCol(lanes.map((r) => gap(r.la, r.laTxt)));
-  const atlCol = zone("ATELIER", "pg2-atl", lanes.map((r) => cell(r.atlOn, r.atelierNode)), providerMark(atl.instance), atlMask);
+  const localCol = zone("LOCAL", "pg2-local", lanes.map((r) => cell(r.localOn, r.localNode)), ZICON.desktop,
+    "", b.local ? consult("local", "Votre copie sur ce poste : comparaison avec l'atelier, branches") : "");
+  const g1 = gapCol(lanes.map((r) => gap(r.la, r.laTxt, r.laTitle)));
+  const atlCol = zone("ATELIER", "pg2-atl", lanes.map((r) => cell(r.atlOn, r.atelierNode)), providerMark(atl.instance), atlMask,
+    !atl.error && atl.instance ? consult("atl", "Fichiers, historique et activité de l'atelier en ligne") : "");
 
   // Colonne Vitrine CONDITIONNELLE (1.9.2) : affichée seulement s'il y a une vitrine (ou un serveur
   // vitrine déconnecté à signaler). Sans vitrine → pas de colonne « Aucune vitrine » vide, mais un
@@ -276,14 +288,34 @@ function projectGraphHTML(b, branches, atlTags, atlTagsKnown) {
   let tail;
   if (hasVitrine || prodErr) {
     const prodMask = prodErr ? offMask(prodErr.instance, prodErr.error) : "";
-    const g2 = gapCol(lanes.map((r) => gap(r.ap, r.apTxt)));
-    const prodCol = zone("VITRINE", "pg2-prod", lanes.map((r) => cell(r.prodOn, r.prodNode)), providerMark(prod0.instance), prodMask);
+    const g2 = gapCol(lanes.map((r) => gap(r.ap, r.apTxt, r.apTitle)));
+    const prodCol = zone("VITRINE", "pg2-prod", lanes.map((r) => cell(r.prodOn, r.prodNode)), providerMark(prod0.instance), prodMask,
+      !prodErr && prod0.instance ? consult("prod:0", "Fichiers, historique et activité de la vitrine en ligne") : "");
     tail = g2 + prodCol;
   } else {
-    tail = `<div class="pg2-col pg2-connect"><div class="pg2-head"></div><div class="pg2-connect-box"><button type="button" class="btn btn-ghost btn-sm" data-addvitrine="${esc(b.name)}">＋ Connecter une vitrine</button></div></div>`;
+    tail = `<div class="pg2-col pg2-connect"><div class="pg2-head"></div><div class="pg2-head-act"></div><div class="pg2-connect-box"><button type="button" class="btn btn-ghost btn-sm" data-addvitrine="${esc(b.name)}">＋ Connecter une vitrine</button></div></div>`;
   }
 
   return `<div class="pg2">${labelCol}${localCol}${g1}${atlCol}${tail}</div>`;
+}
+
+// publishVersionFlow : publie la VERSION (tag local) vers l'atelier — comble « sync envoie les commits
+// mais pas les tags ». Atelier autonome par défaut → tenté sans PIN ; sinon on le demande.
+async function publishVersionFlow(b, tag) {
+  if (!b || !b.local || !tag) return;
+  const run = (pin) => App().PublishTag(b.atelier.instance, b.atelier.owner, b.atelier.repo, b.local.path, tag, pin);
+  try {
+    toast("Publication de la version " + tag + "…");
+    await run("");
+    toast("Version " + tag + " publiée vers l'atelier", "ok"); refreshProjectsView();
+  } catch (e) {
+    if (isLocked(e)) return handleLock();
+    if (isPinNeeded(e)) {
+      pinConfirm("Publier la version " + tag + " vers l'atelier", async (pin) => {
+        await run(pin); closeModal(); toast("Version " + tag + " publiée vers l'atelier", "ok"); refreshProjectsView();
+      });
+    } else toast(cleanErr(e), "err");
+  }
 }
 
 // projectSync : Synchroniser le clone local avec l'atelier. L'atelier n'exige pas le PIN par défaut
@@ -323,13 +355,14 @@ function projectCloneModal(b) {
 }
 
 // openProjectDetail : ouvre le détail d'un dépôt d'un projet (bascule sur sa connexion au besoin).
-function openProjectDetail(instance, owner, repo, localPath) {
+function openProjectDetail(instance, owner, repo, localPath, initialTab) {
   if (instance && instance !== state.instance) {
     state.instance = instance;
     const sel = el("instance-select"); if (sel) sel.value = instance;
     state.repos = null; state.repoSig = ""; updateRoleBadge();
   }
-  state.detail = { full_name: owner + "/" + repo, owner, repo, has_remote: true, html_url: "", local_path: localPath || "", ref: "", tab: "apercu", path: "", refs: [], tags: [], _remote: null, _local: null };
+  state.detail = { full_name: owner + "/" + repo, owner, repo, has_remote: true, html_url: "", local_path: localPath || "", ref: "", tab: initialTab || "apercu", path: "", refs: [], tags: [], _remote: null, _local: null,
+    from: "project", fromProject: state.projectName || "" };
   state.view = "detail"; render();
 }
 
@@ -344,8 +377,17 @@ function bindProjectBoard(boards) {
     const ep = ev.target.closest("[data-editproj]"); if (ep) return editProjectModal(byName[ep.dataset.editproj]);
     const av = ev.target.closest("[data-addvitrine]"); if (av) return editProjectModal(byName[av.dataset.addvitrine], { addVitrine: true });
     const sy = ev.target.closest("[data-sync]"); if (sy) return projectSync(byName[sy.dataset.sync]);
+    const ptg = ev.target.closest("[data-publishtag]"); if (ptg) return publishVersionFlow(byName[ptg.dataset.publishtag], ptg.dataset.tag);
     const cl = ev.target.closest("[data-clone]"); if (cl) return projectCloneModal(byName[cl.dataset.clone]);
-    const dt = ev.target.closest("[data-detatl]"); if (dt) { const b = byName[dt.dataset.detatl]; return openProjectDetail(b.atelier.instance, b.atelier.owner, b.atelier.repo, b.local ? b.local.path : ""); }
+    const cs = ev.target.closest("[data-consult]");
+    if (cs) {
+      const b = byName[cs.dataset.proj]; if (!b) return;
+      const scope = cs.dataset.consult;
+      if (scope === "local") return openProjectDetail(b.atelier.instance, b.atelier.owner, b.atelier.repo, b.local ? b.local.path : "", "apercu");
+      if (scope === "atl") return openProjectDetail(b.atelier.instance, b.atelier.owner, b.atelier.repo, b.local ? b.local.path : "", "fichiers");
+      if (scope.indexOf("prod:") === 0) { const p = (b.productions || [])[+scope.slice(5)]; if (p) return openProjectDetail(p.instance, p.owner, p.repo, "", "fichiers"); }
+      return;
+    }
     const dp = ev.target.closest("[data-delproj]");
     if (dp) {
       openModal("Supprimer ce projet ?", `<div class="field"><div class="callout warn">Le lien « ${esc(dp.dataset.delproj)} » est retiré. Aucun dépôt n'est touché.</div></div>`, async () => {
@@ -879,9 +921,19 @@ function chealthHTML(p) {
   const loc = p.local;
   const localState = !loc ? "absent" : (!loc.clean ? "dirty" : (loc.ahead ? "ahead" : (loc.behind ? "behind" : "clean")));
   const vit = (p.vitrines || 0) > 0 ? "1" : "0";
+  // Delta local↔atelier porté PAR LE SEGMENT (1.12) : sens + nombre lisibles d'un coup d'œil, sans texte.
+  // ↑N = le poste est en avance (à publier) · ↓N = l'atelier est en avance (à récupérer) · ⇅ = divergé.
+  let segState = "off", segTxt = "", segTitle = "";
+  if (loc) {
+    if (loc.ahead && loc.behind) { segState = "div"; segTxt = "⇅"; segTitle = `divergé : poste +${loc.ahead}, atelier +${loc.behind}`; }
+    else if (loc.ahead) { segState = "ahead"; segTxt = "↑" + loc.ahead; segTitle = `le poste est en avance de ${loc.ahead} (à publier vers l'atelier)`; }
+    else if (loc.behind) { segState = "behind"; segTxt = "↓" + loc.behind; segTitle = `l'atelier est en avance de ${loc.behind} (à récupérer sur le poste)`; }
+    else if (!loc.clean) { segState = "dirty"; segTitle = "modifications non enregistrées sur le poste"; }
+    else { segState = "ok"; segTitle = "poste et atelier alignés"; }
+  }
   return `<span class="chealth" aria-hidden="true">
     <span class="chealth-node" data-role="local" data-state="${localState}"></span>
-    <span class="chealth-seg" data-on="${loc ? "1" : "0"}"></span>
+    <span class="chealth-seg" data-on="${loc ? "1" : "0"}" data-delta="${segState}" title="${esc(segTitle)}">${segTxt ? `<span class="chealth-delta">${segTxt}</span>` : ""}</span>
     <span class="chealth-node" data-role="atelier" data-state="on"></span>
     <span class="chealth-seg" data-on="${vit}"></span>
     <span class="chealth-node" data-role="vitrine" data-state="${vit === "1" ? "on" : "absent"}"></span>
@@ -904,7 +956,7 @@ function classeurCardHTML(p) {
   const atl = p.atelier || {};
   const v = classeurVerdict(p);
   const aria = `${p.name}${p.kernel ? " (KERNEL)" : ""}${p.spoke ? " (SPOKE)" : ""} — atelier ${atl.owner || ""}/${atl.repo || ""}${p.local ? ", cloné sur ce poste" : ", pas de clone local"}, ${p.vitrines || 0} vitrine(s), ${v.label}`;
-  const kTab = p.kernel ? `<span class="classeur-kbadge" title="Désigné comme KERNEL (mémoire)">💡 KERNEL</span>` : (p.spoke ? `<span class="classeur-sbadge" title="Désigné comme SPOKE (projection de mission)">🛰 SPOKE</span>` : "");
+  const kTab = p.kernel ? `<span class="classeur-kbadge" title="Désigné comme KERNEL (mémoire)">${NAV_ICO.kernel} KERNEL</span>` : (p.spoke ? `<span class="classeur-sbadge" title="Désigné comme SPOKE (projection de mission)">${NAV_ICO.spokes} SPOKE</span>` : "");
   return `<button type="button" class="classeur${p.kernel ? " classeur-kernel" : (p.spoke ? " classeur-spoke" : "")}" data-open-project="${esc(p.name)}" aria-label="${esc(aria)}">
     <span class="classeur-tab">${iconHTML(p.icon, "classeur-ico")}<span class="classeur-name">${esc(p.name)}</span>${kTab}</span>
     <span class="classeur-body">

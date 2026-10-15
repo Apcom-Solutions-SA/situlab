@@ -46,7 +46,17 @@ function promptEditModal(p) {
 async function renderSettings() {
   const theme = readTheme();
   const zoom = readZoom();
-  const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions git"], ["cloud", "☁ Connexions cloud"], ["app", "🎨 Apparence"], ["ia", "🤖 Assistant IA"], ["diag", "🩺 Diagnostic"], ["ver", "🏷️ Versions"], ["lic", "⚖️ Licence"]];
+  const mods = state.modules || {};
+  const MODULE_GROUPS = [
+    { k: "agents", label: "Accès IA (agents)", d: "Assistant IA, bibliothèque de prompts, configuration CLI/MCP." },
+    { k: "git_advanced", label: "Git avancé", d: "Étapes git séparées, matrice des branches, outils git locaux, réglages de dépôt." },
+    { k: "spokes", label: "SPOKES", d: "Le menu des projections de mission." },
+    { k: "corpus", label: "CORPUS (clouds)", d: "Le menu des clouds de fichiers souverains." },
+    { k: "backup", label: "BACKUP", d: "Le menu des sauvegardes git → cloud." },
+  ];
+  const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions git"], ["cloud", "☁ Connexions cloud"], ["app", "🎨 Apparence"], ["modules", "🧩 Modules"]]
+    .concat(mods.agents === false ? [] : [["ia", "🤖 Assistant IA"]])
+    .concat([["osbox", "🖥 OS de travail"], ["diag", "🩺 Diagnostic"], ["ver", "🏷️ Versions"], ["lic", "⚖️ Licence"]]);
   let setTab = "secu";
   try { setTab = localStorage.getItem("situlab.settab") || "secu"; } catch (_) {}
   // Une pastille de santé (ou un lien) peut demander à ouvrir un onglet précis des Réglages.
@@ -70,9 +80,8 @@ async function renderSettings() {
           <option value="-1">jamais</option></select></div></div>
       <label class="set-row toggle"><div class="set-row-l">Verrouiller après chaque écriture <small>reverrouille dès qu'une modification est confirmée</small></div>
         <span class="switch"><input id="lock-write" type="checkbox" /><span class="track"></span></span></label>
-      <label class="set-row toggle"><div class="set-row-l">Mode lecture seule <small>consulter sans risque : bloque tout envoi, suppression et modification</small></div>
+      <label class="set-row toggle"><div class="set-row-l">Mode lecture seule <small>consulter sans risque : bloque tout envoi, suppression et modification — git <b>et</b> cloud (CORPUS)</small></div>
         <span class="switch"><input id="read-only" type="checkbox" /><span class="track"></span></span></label>
-      <div class="set-note">Gestion des jetons d'accès : onglet <b>Tokens</b>.</div>
     </section>
 
     <section class="set-sec set-panel" data-panel="conn"><div class="set-sec-h">🔗 Connexions git</div>
@@ -103,22 +112,45 @@ async function renderSettings() {
           <button data-zoom="normal" class="${zoom === "normal" ? "on" : ""}">Normal</button>
           <button data-zoom="grand" class="${zoom === "grand" ? "on" : ""}">Grand</button>
         </div></div></div>
-      <label class="set-row toggle"><div class="set-row-l">Mode avancé <small>révèle les étapes git séparées, la matrice des branches, les outils git locaux et les réglages de dépôt</small></div>
-        <span class="switch"><input id="adv-mode" type="checkbox" /><span class="track"></span></span></label>
+      <div class="set-note">Le « mode avancé » est devenu le module <b>Git avancé</b> — réglez-le dans l'onglet <b>🧩 Modules</b>.</div>
+    </section>
+
+    <section class="set-sec set-panel" data-panel="modules"><div class="set-sec-h">🧩 Modules — ce que vous voyez</div>
+      <div class="set-sec-d">Adaptez SituLab à votre usage. <b>Tout est activé par défaut</b> : réduisez pour une interface simple (utilisateur porté), gardez tout pour le plein contrôle (développeur).</div>
+      <div class="seg" style="margin:4px 0 12px" role="group" aria-label="Préréglage" id="mod-presets">
+        <button data-mpreset="essentiel">Essentiel</button>
+        <button data-mpreset="complet">Complet</button>
+      </div>
+      <div id="mod-rows">${MODULE_GROUPS.map((g) => `<label class="set-row toggle"><div class="set-row-l">${g.label}<small>${g.d}</small></div>
+        <span class="switch"><input type="checkbox" data-mod="${g.k}" ${mods[g.k] !== false ? "checked" : ""} /><span class="track"></span></span></label>`).join("")}</div>
     </section>
 
     <section class="set-sec set-panel" data-panel="ia"><div class="set-sec-h">🤖 Assistant IA</div>
-      <div class="set-sec-d">SituLab dépose un fichier <code>AGENTS.md</code> près de vos dépôts : mode d'emploi pour votre IA + votre <b>fiche de collaboration</b>. Votre IA la lit au démarrage et peut l'enrichir avec vous. <button class="lnk" id="agents-view">Consulter AGENTS.md</button></div>
-      <label class="set-row-l" style="display:block">Notes de collaboration (reprises dans AGENTS.md)
-        <textarea id="agent-notes" rows="4" placeholder="Ex. : réponds en français ; propose toujours un plan avant d'agir ; mes dépôts de prod sont sur l'organisation apcom…" style="width:100%;margin-top:6px;resize:vertical"></textarea></label>
-      <div class="set-row-c" style="margin-top:10px;justify-content:flex-start">
-        <button class="btn btn-primary btn-sm" id="agent-save">Enregistrer</button>
-        <button class="btn btn-ghost btn-sm" id="agent-deposit">Déposer AGENTS.md dans un dossier…</button>
-        <button class="btn btn-ghost btn-sm" id="agent-config">Configurer mon agent IA</button>
+      <div class="set-sec-d">SituLab est la porte de votre IA vers vos dépôts, clouds et sauvegardes — elle prépare, vous validez. Réglez ici comment elle vous assiste.</div>
+      <div class="ia-cards">
+        <div class="ia-card">
+          <div class="ia-card-h">🗺 Carte de contextualisation</div>
+          <div class="ia-card-d">Le fichier <code>AGENTS.md</code> : la carte que votre IA lit au démarrage pour piloter SituLab. Déposez-le près de vos dépôts.</div>
+          <div class="ia-card-act"><button class="btn btn-ghost btn-sm" id="agents-view">Consulter</button><button class="btn btn-ghost btn-sm" id="agent-deposit">Déposer dans un dossier…</button></div>
+        </div>
+        <div class="ia-card">
+          <div class="ia-card-h">⚙ Brancher mon agent</div>
+          <div class="ia-card-d">Message de première connexion + configuration MCP (Cursor, Claude Desktop…) prêts à coller.</div>
+          <div class="ia-card-act"><button class="btn btn-primary btn-sm" id="agent-config">Configurer mon agent IA</button></div>
+        </div>
+        <div class="ia-card ia-card-wide">
+          <div class="ia-card-h">🤝 Notes de collaboration <span class="muted">(reprises dans AGENTS.md)</span></div>
+          <textarea id="agent-notes" rows="4" placeholder="Ex. : réponds en français ; propose toujours un plan avant d'agir ; mes dépôts de prod sont sur l'organisation apcom…" style="width:100%;margin-top:6px;resize:vertical"></textarea>
+          <div class="ia-card-act" style="margin-top:8px"><button class="btn btn-primary btn-sm" id="agent-save">Enregistrer</button></div>
+        </div>
       </div>
-      <div class="plib-h"><b>Bibliothèque de prompts</b> <span class="muted">— des messages prêts à coller dans votre IA. Les vôtres sont conservés lors des mises à jour.</span></div>
+      <div class="plib-h" style="margin-top:16px"><b>📋 Bibliothèque de prompts</b> <span class="muted">— des messages prêts à coller dans votre IA. Les vôtres sont conservés lors des mises à jour.</span></div>
       <div id="prompt-lib"></div>
       <button class="btn btn-ghost btn-sm" id="prompt-add" style="margin-top:8px">＋ Ajouter un prompt</button>
+    </section>
+
+    <section class="set-sec set-panel" data-panel="osbox"><div class="set-sec-h">🖥 OS de travail séparé</div>
+      <div id="osbox-panel"><div class="skeleton"></div></div>
     </section>
 
     <section class="set-sec set-panel" data-panel="diag"><div class="set-sec-h">🩺 Diagnostic</div>
@@ -140,7 +172,7 @@ async function renderSettings() {
     </section>
 
     <section class="set-sec danger-zone set-panel" data-panel="secu"><div class="dz-h">⚠ Zone sensible — effacer mes données de ce poste</div>
-      <p class="sub">Supprime définitivement vos connexions, votre trousseau chiffré, vos réglages et les jetons du coffre Windows sur cette machine. Pour repartir à zéro ou céder le poste. <b>Irréversible.</b></p>
+      <p class="sub">Supprime définitivement, sur cette machine, <b>tout</b> ce que SituLab y garde : connexions git <b>et</b> cloud, trousseau chiffré par le PIN, réglages, et votre classement (KERNEL, spokes, tags, appairages, fichiers d'ouverture). Pour repartir à zéro ou céder le poste. <b>Irréversible.</b> Vos dépôts et fichiers sur le disque ne sont pas touchés.</p>
       <button class="btn btn-ghost btn-sm btn-danger" id="purge-data">Effacer mes données…</button>
     </section>
 
@@ -153,6 +185,9 @@ async function renderSettings() {
     document.querySelectorAll(".set-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== k));
     document.querySelectorAll(".set-navbtn").forEach((b) => b.classList.toggle("active", b.dataset.settab === k));
     try { localStorage.setItem("situlab.settab", k); } catch (_) {}
+    // Chargement PARESSEUX de l'OS de travail (OSBoxStatus interroge wsl.exe : on n'en paie le coût
+    // que si l'onglet est réellement ouvert).
+    if (k === "osbox" && el("osbox-panel") && typeof renderOSBoxPanel === "function") renderOSBoxPanel();
   };
   document.querySelectorAll(".set-navbtn").forEach((b) => b.onclick = () => showTab(b.dataset.settab));
   showTab(setTab);
@@ -169,11 +204,18 @@ async function renderSettings() {
 
   document.querySelectorAll("[data-th]").forEach((b) => b.onclick = () => { writeTheme(b.dataset.th); applyTheme(b.dataset.th); renderSettings(); });
   document.querySelectorAll("[data-zoom]").forEach((b) => b.onclick = () => { writeZoom(b.dataset.zoom); applyZoom(b.dataset.zoom); renderSettings(); });
-  const adv = el("adv-mode");
-  if (adv) {
-    adv.checked = !!state.advanced;
-    adv.onchange = () => { setAdvanced(adv.checked); toast(adv.checked ? "Mode avancé activé" : "Mode simplifié activé", "ok"); };
-  }
+  // Onglet Modules : préréglages + bascules → persisté au cœur, appliqué immédiatement (menus + git avancé).
+  const refreshMods = async () => { state.modules = await App().Modules().catch(() => ({})); if (typeof applyModules === "function") applyModules(); };
+  document.querySelectorAll("#mod-rows input[data-mod]").forEach((c) => c.onchange = async () => {
+    try { await App().SetModule(c.dataset.mod, c.checked); await refreshMods(); renderSettings(); }
+    catch (e) { toast(cleanErr(e), "err"); }
+  });
+  document.querySelectorAll("#mod-presets [data-mpreset]").forEach((b) => b.onclick = async () => {
+    const all = {}; MODULE_GROUPS.forEach((g) => all[g.k] = true);
+    const target = b.dataset.mpreset === "essentiel" ? { ...all, agents: false, git_advanced: false, spokes: false } : all;
+    try { await App().SetModules(target); await refreshMods(); toast("Préréglage appliqué", "ok"); renderSettings(); }
+    catch (e) { toast(cleanErr(e), "err"); }
+  });
 
   // Section Versions : version installée + liens (téléchargement/MAJ sur le site, lecture en direct des
   // Releases GitHub). La détection fine de MAJ se fait côté site (connect-src 'self' interdit le fetch
@@ -295,18 +337,23 @@ async function renderDiagnostic() {
     : row("warn", "Git absent", "Clone, synchro et versions locales sont indisponibles.", `<button class="btn btn-ghost btn-sm" data-openurl="https://git-scm.com/downloads">Installer git ↗</button>`));
   rows.push(doc.pin_set ? row("ok", "PIN configuré", "Vos jetons sont chiffrés par votre PIN.") : row("warn", "Aucun PIN", "Définissez-en un dans Compte & sécurité."));
   rows.push(doc.unlocked ? row("ok", "Session déverrouillée", "SituLab peut lire vos accès.") : row("info", "Session verrouillée", "Déverrouillez avec votre PIN pour agir."));
-  rows.push(row("info", "Connexions", `${doc.instances} serveur(s) configuré(s).`));
+  let nClouds = 0; try { nClouds = ((await App().FileClouds()) || []).length; } catch (_) {}
+  rows.push(row("info", "Connexions",
+    `${doc.instances} serveur(s) git · ${nClouds} cloud(s) CORPUS configuré(s).`,
+    `<span class="diag-links"><button class="lnk" data-gototab="conn">git ›</button><button class="lnk" data-gototab="cloud">cloud ›</button></span>`));
   rows.push(doc.vault_residual ? row("warn", "Coffre Windows", `${doc.vault_residual} jeton(s) encore dans l'ancien coffre OS — ils seront migrés automatiquement au prochain déverrouillage.`) : row("ok", "Coffre Windows", "Aucun jeton résiduel."));
-  let swActive = false; try { swActive = await App().AttestSoftwareActive(); } catch (_) {}
   rows.push(doc.sign_test_root
-    ? row("warn", "Signature de garantie", "Racine de TEST embarquée — la vraie racine de gouvernance n'est pas installée (les ✅ ne sont pas vérifiables réellement).")
-    : swActive
-      ? row("ok", "Signature logicielle", "Active — chaque commit via SituLab porte la garantie « SituLab » (signature du logiciel, pas par utilisateur).")
-      : row("info", "Signature logicielle", "Pas encore activée sur ce binaire — elle sera mintée par la gouvernance (identité unique « SituLab »)."));
+    ? row("warn", "Signature de garantie", "Racine de TEST embarquée — la vraie racine de gouvernance n'est pas installée (les sceaux ne sont pas vérifiables réellement).")
+    : row("ok", "Signature de garantie", "Automatique : chaque commit et chaque promotion créés via SituLab sont signés par le service APCOM (clé jamais sur le poste). Le sceau se lit dans l'historique."));
+  // N'apparaît QUE si SituLab a réellement détecté un accès git concurrent sur ce poste : on dit alors
+  // OÙ il est, À QUOI il donne accès, et POURQUOI on conseille de le retirer (un agent IA l'emprunterait
+  // hors du contrôle de SituLab). Rien de détecté → simple ✅, pas d'avertissement anxiogène.
   rows.push((doc.other_git_creds || []).length
-    ? row("warn", "Autres accès git sur ce poste", `${doc.other_git_creds.map(esc).join(", ")}. Ces identifiants (clé SSH, credential helper) permettent un accès git <b>indépendant</b> de SituLab, hors confirmation PIN. Pour un cloisonnement strict, faites tourner vos agents sous un autre compte / bac à sable.`)
-    : row("ok", "Autres accès git", "Aucun identifiant git concurrent détecté — la confirmation PIN protège bien."));
+    ? row("warn", "Autres accès git sur ce poste", `Détecté : <b>${doc.other_git_creds.map(esc).join(", ")}</b>. Ces identifiants (clé SSH, gestionnaire d'identifiants git) donnent un accès <b>direct à vos dépôts distants</b>, <b>indépendant</b> de SituLab et <b>hors validation</b>. Un agent IA lancé sur ce poste pourrait les emprunter. Pour un cloisonnement strict, retirez-les ou faites tourner vos agents sous un autre compte / bac à sable.`)
+    : row("ok", "Autres accès git", "Aucun identifiant git concurrent détecté — les écritures passent bien par SituLab."));
   dc.innerHTML = `<div class="diag-list">${rows.join("")}</div>`;
+  // Liens « Connexions » → onglet correspondant des Réglages (navigation contextuelle).
+  dc.querySelectorAll("[data-gototab]").forEach((b) => b.onclick = () => { const t = document.querySelector(`.set-navbtn[data-settab="${b.dataset.gototab}"]`); if (t) t.click(); });
 }
 
 // renderSettingsClouds : liste et administre les connexions cloud dans les Réglages (1.11). La vue

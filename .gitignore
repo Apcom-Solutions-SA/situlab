@@ -16,3 +16,7 @@ node_modules/
 
 # Artefacts de distribution (portable, zips)
 /build/dist/
+
+# Binaires relais/box construits à la racine (le source est versionné)
+/situlab-relay
+/situlab-bridge

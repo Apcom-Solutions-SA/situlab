@@ -5,10 +5,38 @@ package ipc
 
 import (
 	"encoding/json"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestServerRejectsWrongToken — P2 (1.16) : le serveur ne sert AUCUNE requête à une connexion qui ne
+// présente pas le jeton d'autorisation valide en tête (fermeture P2 : plus de connexion anonyme servie).
+func TestServerRejectsWrongToken(t *testing.T) {
+	path := sockPath(t)
+	srv, err := Listen(path, func(r Request) Response { return Response{OK: true} })
+	if err != nil {
+		t.Fatalf("Listen : %v", err)
+	}
+	defer srv.Close()
+
+	c, err := net.DialTimeout("unix", path, 2*time.Second)
+	if err != nil {
+		t.Fatalf("Dial brut : %v", err)
+	}
+	defer c.Close()
+	if err := writeFrame(c, []byte("mauvais-jeton")); err != nil {
+		t.Fatalf("écriture du jeton : %v", err)
+	}
+	req, _ := json.Marshal(Request{Op: "ping"})
+	_ = writeFrame(c, req)
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := readFrame(c); err == nil {
+		t.Error("jeton invalide : le serveur n'aurait pas dû répondre (fermeture P2)")
+	}
+}
 
 // sockPath donne un chemin de socket court dans un dossier temporaire (la limite AF_UNIX
 // est d'environ 108 octets, y compris sous Windows).

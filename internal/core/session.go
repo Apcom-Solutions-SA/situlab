@@ -178,7 +178,7 @@ func (s *Service) sessionDEK() ([]byte, error) {
 	}
 	ttl := s.sessTTL
 	if ttl <= 0 {
-		ttl = sessionTTL
+		ttl = defaultLockTTL
 	}
 	s.sessUntil = time.Now().Add(ttl) // glissement sur usage
 	cp := make([]byte, len(s.sessDEK))

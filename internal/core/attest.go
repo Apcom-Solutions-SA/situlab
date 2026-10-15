@@ -61,60 +61,113 @@ func (s *Service) signKeyFor(instance string) ed25519.PrivateKey {
 	return ed25519.PrivateKey(priv)
 }
 
-// attestCommit signe (best-effort, NON bloquant) un commit créé par SituLab : si l'instance du dépôt a
-// une clé d'appareil + un cert, écrit l'attestation en note. La discipline est non bloquante → aucune
-// erreur n'est propagée au geste de commit.
+// attestCommit signe (best-effort, NON bloquant) un commit créé par SituLab, par un TRAILER immuable
+// « SituLab-Approved: » (v2 : voyage AVEC le commit → visible dans l'historique en ligne, sans note à
+// pousser). La signature vient du SERVICE APCOM par défaut (clé jamais sur le poste) ; repli sur une
+// signature locale si elle est disponible. Best-effort : aucune erreur n'est propagée au geste de commit.
 func (s *Service) attestCommit(path, sha string) {
 	if sha == "" {
 		return
 	}
-	inst := s.instanceForPath(path)
-	// Mode SERVEUR (1.9.6) : si la connexion du dépôt est en « signature serveur », le démon demande
-	// l'empreinte au service (clé jamais sur le poste). Prioritaire sur toute signature locale ; on ne
-	// retombe pas sur une clé locale (ce serait contraire au sens du mode serveur). Best-effort non bloquant.
-	if inst != "" && s.signModeServer(inst) {
-		s.attestCommitViaServer(inst, path, sha)
+	// Idempotent : ne JAMAIS re-signer un commit déjà scellé (éviterait de doubler le trailer et de
+	// changer le SHA d'un commit déjà publié).
+	if obj, err := gitx.CommitObject(path, sha); err == nil {
+		if _, _, has := splitAttestTrailer(obj.Message); has {
+			return
+		}
+	}
+	val := s.buildAttestationTrailer(s.instanceForPath(path), path, sha)
+	if val == "" {
 		return
 	}
-	// Chemins LOCAUX souverains → attestation v2 IMMUABLE portée par un trailer de commit (voyage avec
-	// le commit, plus de note à pousser). Préférence (1.9.5) : signature LOGICIELLE unique « SituLab »
-	// si elle est embarquée — le logiciel signe, pas l'utilisateur. Repli sur le cert d'appareil de
-	// l'instance sinon.
-	if priv, cert, ok := attest.SoftwareSigner(); ok {
-		defer zero(priv)
-		s.attestLocalTrailer(path, sha, priv, cert)
-		return
-	}
-	if inst == "" {
-		return
-	}
-	cert := s.signCertFor(inst)
-	if cert == nil {
-		return
-	}
-	priv := s.signKeyFor(inst)
-	if priv == nil {
-		return
-	}
-	defer zero(priv)
-	s.attestLocalTrailer(path, sha, priv, *cert)
+	_, _ = gitx.RecommitWithTrailer(path, sha, attestTrailerKey, val)
 }
 
-// attestLocalTrailer signe le pré-image du commit avec la clé d'appareil puis recrée le commit en y
-// ajoutant le trailer « SituLab-Approved: ». Best-effort non bloquant : à la moindre anicroche, le
-// commit reste tel quel (sans attestation), jamais d'erreur propagée au geste de commit.
-func (s *Service) attestLocalTrailer(path, sha string, priv ed25519.PrivateKey, cert attest.Cert) {
+// attestFreshCommit signe le commit de HEAD seulement s'il vient d'être CRÉÉ (HEAD a changé depuis
+// `before`) — pour les opérations qui produisent un nouveau commit non-fusion (cherry-pick, revert).
+func (s *Service) attestFreshCommit(path, before string) {
+	sha := gitx.HeadSHA(path)
+	if sha == "" || sha == before {
+		return
+	}
+	s.attestCommit(path, sha)
+}
+
+// attestMergeCommit signe le commit de HEAD seulement si une VRAIE fusion a été créée (HEAD changé ET
+// commit à ≥2 parents) — jamais une avance-rapide (qui ne fait que pointer un commit existant).
+func (s *Service) attestMergeCommit(path, before string) {
+	sha := gitx.HeadSHA(path)
+	if sha == "" || sha == before {
+		return
+	}
+	if obj, err := gitx.CommitObject(path, sha); err == nil && len(obj.Parents) >= 2 {
+		s.attestCommit(path, sha)
+	}
+}
+
+// attestPromotionSHA signe le commit de PROMOTION (créé par plomberie, encore DÉTACHÉ de toute branche)
+// par le même trailer immuable, et renvoie le NOUVEAU sha à publier vers la vitrine — la garantie
+// d'origine voyage ainsi avec le commit poussé. Best-effort : signature indisponible → sha d'origine
+// inchangé (la promotion n'est JAMAIS bloquée par la signature).
+func (s *Service) attestPromotionSHA(path, sha string) string {
+	if sha == "" {
+		return sha
+	}
+	val := s.buildAttestationTrailer(s.instanceForPath(path), path, sha)
+	if val == "" {
+		return sha
+	}
+	newSha, err := gitx.CommitWithTrailerObject(path, sha, attestTrailerKey, val)
+	if err != nil || newSha == "" {
+		return sha
+	}
+	return newSha
+}
+
+// buildAttestationTrailer produit la valeur du trailer d'attestation v2 (base64 du JSON d'attestation)
+// pour le commit `sha`, par le SERVICE DE SIGNATURE APCOM — UNE SEULE VOIE, zéro clé sur le poste.
+// La clé privée ne quitte jamais le serveur et n'est jamais remise à l'agent. Conditions : connexion
+// Forgejo (le service autorise via l'API Forgejo — donc pas GitHub), session déverrouillée (le jeton
+// autorise l'accès au dépôt visé) et origine distante connue. Renvoie "" si indisponible (best-effort :
+// commit sans sceau, jamais d'erreur propagée au geste de commit).
+func (s *Service) buildAttestationTrailer(inst, path, sha string) string {
+	if inst == "" || s.isGitHub(inst) {
+		return ""
+	}
+	token := s.instanceToken(inst)
+	if token == "" {
+		return ""
+	}
 	obj, err := gitx.CommitObject(path, sha)
 	if err != nil {
-		return
+		return ""
+	}
+	remote := ""
+	if st, e := gitx.StatusOf(path); e == nil {
+		remote = st.Remote
+	}
+	if remote == "" {
+		return ""
 	}
 	body := strings.TrimRight(obj.Message, "\n")
 	pre := attest.CommitPreimage(obj.Tree, obj.Parents, obj.Author, obj.Committer, body)
-	raw, err := attest.SignPreimage(priv, cert, pre).Encode()
-	if err != nil {
-		return
+	attJSON, e := requestServerPreimageAttestation(s.signServerURLFor(inst), token, base64.StdEncoding.EncodeToString(pre), remote)
+	if e != nil || len(attJSON) == 0 {
+		return ""
 	}
-	_, _ = gitx.RecommitWithTrailer(path, sha, attestTrailerKey, base64.StdEncoding.EncodeToString(raw))
+	return base64.StdEncoding.EncodeToString(attJSON)
+}
+
+// signServerURLFor : URL du service de signature pour une connexion (sa valeur, sinon le défaut APCOM).
+func (s *Service) signServerURLFor(inst string) string {
+	cfg, err := config.Load()
+	if err != nil {
+		return defaultSignServerURL
+	}
+	if in := cfg.Resolve(inst); in != nil && strings.TrimSpace(in.SignServerURL) != "" {
+		return in.SignServerURL
+	}
+	return defaultSignServerURL
 }
 
 // splitAttestTrailer isole le trailer d'attestation « SituLab-Approved: » du message d'un commit :
@@ -134,67 +187,21 @@ func splitAttestTrailer(message string) (body, val string, ok bool) {
 	return strings.TrimRight(message, "\n"), "", false
 }
 
-// signModeServer indique si la connexion est configurée en mode « signature serveur » (1.9.6).
-func (s *Service) signModeServer(inst string) bool {
-	cfg, err := config.Load()
-	if err != nil {
-		return false
-	}
-	in := cfg.Resolve(inst)
-	return in != nil && in.SignMode == "server"
-}
-
-// attestCommitViaServer demande l'empreinte du commit au service de signature serveur et l'écrit en note.
-// Le jeton Forgejo (détenu par le démon) autorise la demande ; il n'est JAMAIS remis au client/agent.
-// Best-effort non bloquant : un échec (réseau, 403, 429, 503) laisse simplement le commit sans note.
-func (s *Service) attestCommitViaServer(inst, path, sha string) {
-	cfg, err := config.Load()
-	if err != nil {
-		return
-	}
-	in := cfg.Resolve(inst)
-	if in == nil {
-		return
-	}
-	token := s.instanceToken(inst)
-	if token == "" {
-		return
-	}
-	remote := ""
-	if st, e := gitx.StatusOf(path); e == nil {
-		remote = st.Remote
-	}
-	att, e := requestServerAttestation(in.SignServerURL, token, sha, remote)
-	if e != nil {
-		return
-	}
-	_ = gitx.WriteNote(path, attestNotesRef, sha, string(att))
-}
-
-// RefreshRevokedServers récupère les listes de révocation des services de signature des connexions en
-// mode serveur et les fusionne dans RevokedSerials (best-effort, non bloquant). À appeler périodiquement.
+// RefreshRevokedServers récupère les listes de révocation des services de signature (le service APCOM par
+// défaut + toute URL de service propre à une connexion) et les fusionne dans RevokedSerials (best-effort,
+// non bloquant). À appeler périodiquement.
 func (s *Service) RefreshRevokedServers() {
 	cfg, err := config.Load()
 	if err != nil {
 		return
 	}
-	seen := map[string]bool{}
-	var urls []string
+	seen := map[string]bool{defaultSignServerURL: true}
+	urls := []string{defaultSignServerURL}
 	for _, in := range cfg.Instances {
-		if in.SignMode != "server" {
-			continue
-		}
-		u := in.SignServerURL
-		if u == "" {
-			u = defaultSignServerURL
-		}
-		if !seen[u] {
+		if u := strings.TrimSpace(in.SignServerURL); u != "" && !seen[u] {
 			seen[u] = true
 			urls = append(urls, u)
 		}
-	}
-	if len(urls) == 0 {
-		return
 	}
 	add := map[string]bool{}
 	for _, u := range urls {

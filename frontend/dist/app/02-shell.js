@@ -1,4 +1,33 @@
 /* ---------------- Shell ---------------- */
+// applyModules : applique les groupes de modules d'interface (v1.13) — masque/affiche les menus de
+// domaine et pilote le « git avancé ». Un groupe absent/true = activé (tout montré par défaut).
+function applyModules() {
+  const m = state.modules || {};
+  const on = (k) => m[k] !== false;
+  state.advanced = on("git_advanced"); // « Git avancé » = l'ancien mode avancé
+  [["corpus", "corpus"], ["spokes", "spokes"], ["backup", "backup"]].forEach(([mod, view]) => {
+    const btn = document.querySelector(`.nav-item[data-view="${view}"]`);
+    if (btn) btn.classList.toggle("hidden", !on(mod));
+  });
+  // Si la vue courante vient d'être masquée, on retombe sur KERNEL (toujours visible).
+  if ((state.view === "corpus" && !on("corpus")) || (state.view === "spokes" && !on("spokes")) || (state.view === "backup" && !on("backup"))) {
+    if (typeof navTo === "function") navTo("kernel");
+  }
+}
+
+// refreshOsboxNav : affiche l'entrée « Terminal » de la sidebar UNIQUEMENT quand l'OS de travail est
+// activé ET installé (sinon elle n'aurait aucun sens). Appelée au démarrage et à chaque changement
+// d'état de l'OS de travail (toggle, installation). Silencieuse si l'OS de travail est indisponible.
+async function refreshOsboxNav() {
+  const btn = el("nav-osterm");
+  if (!btn) return;
+  let show = false;
+  try { const st = await App().OSBoxStatus(); show = !!(st && st.enabled && st.installed); } catch (e) { show = false; }
+  btn.classList.toggle("hidden", !show);
+  // Si on était sur le terminal et qu'il vient de disparaître, on revient aux Réglages.
+  if (!show && state.view === "osterm" && typeof navTo === "function") navTo("settings");
+}
+
 async function showApp(instances) {
   hideBoot();
   el("onboarding").classList.add("hidden");
@@ -11,6 +40,9 @@ async function showApp(instances) {
 
   state.readOnly = await App().ReadOnly().catch(() => false);
   updateReadOnlyBanner();
+  state.modules = await App().Modules().catch(() => ({}));
+  applyModules();
+  refreshOsboxNav(); // entrée « Terminal » de la sidebar selon l'état de l'OS de travail (best-effort)
   await updateGitBanner();
 
   // Revenir à la dernière vue de 1er niveau (ex. après une reconnexion admin qui recharge la page).
@@ -20,10 +52,14 @@ async function showApp(instances) {
   await refreshWhoami();
   updateHealth(); // pastilles de santé git + cloud (remplace l'indicateur « en direct »)
   if (typeof refreshPairingAlert === "function") refreshPairingAlert(); // pastille « à appairer » (best-effort)
+  // Mise en route canalisante (1.13) : calcule l'avancement et bride les menus de domaine tant que les
+  // étapes obligatoires ne sont pas faites ; atterrit sur la page « Mise en route » le cas échéant.
+  await refreshSetup();
+  if (setupActive()) state.view = "setup";
   render();
   startLive();
   startAutoFetch(); // récupération de fond des nouveautés distantes (noyau : FetchAllLocal)
-  maybeAutoTour(); // visite guidée automatique, une seule fois après la 1re connexion
+  if (!setupActive()) maybeAutoTour(); // visite auto : seulement une fois la mise en route terminée
 }
 
 // updateGitBanner affiche un bandeau si git est absent du poste (SituLab pilote git, il ne le
@@ -242,7 +278,7 @@ function setNav(view) {
 const UM_VIEWS = ["admin", "directory", "stats"];
 // Écrans qui NE dépendent PAS de la connexion courante : restent ouverts même serveur déconnecté.
 // Projets (tableau de bord transverse), Réglages (où l'on se reconnecte), Aide (statique).
-const OFFLINE_OK_VIEWS = ["projects", "project", "corpus", "kernel", "spokes", "backup", "settings", "help", "git"];
+const OFFLINE_OK_VIEWS = ["projects", "project", "corpus", "kernel", "spokes", "backup", "settings", "help", "git", "setup", "osterm"];
 function render() {
   // La page « Dépôts » a été retirée (1.11) : son service (relier/assembler) vit désormais dans
   // Projets ▸ « Organiser mes dépôts ». On redirige toute vue « repos » résiduelle (vue mémorisée,
@@ -257,16 +293,22 @@ function render() {
   state._prevView = state.view;
   // Colonne plus étroite pour les écrans « formulaire » (Réglages, Projets) ; large ailleurs.
   const vw = el("view"); if (vw) vw.classList.toggle("narrow", state.view === "settings");
+  // Page terminal : la zone de contenu remplit sans padding ni scroll (le terminal gère son propre
+  // défilement interne) — évite un scroll vertical parasite qui masquerait la saisie.
+  const ct = document.querySelector(".content"); if (ct) ct.classList.toggle("content-term", state.view === "osterm");
   setNav((state.view === "detail" || state.view === "project" || state.view === "organize") ? "projects" : (UM_VIEWS.includes(state.view) ? "admin" : state.view));
   // Serveur courant déconnecté : on FIGE les écrans qui en dépendent et on explique comment revenir.
   // Projets et Réglages restent vivants (voir OFFLINE_OK_VIEWS).
   if (state.online === false && !OFFLINE_OK_VIEWS.includes(state.view)) return renderReconnectGate();
-  if (state.view === "projects") renderProjects();
+  if (state.view === "setup") renderSetup();
+  else if (state.view === "projects") renderProjects();
   else if (state.view === "organize") renderOrganize();
   else if (state.view === "corpus") renderCorpus();
   else if (state.view === "kernel") renderKernel();
   else if (state.view === "spokes") renderSpokes();
   else if (state.view === "backup") renderBackup();
+  else if (state.view === "bkjournal") renderBkJournal();
+  else if (state.view === "osterm") renderOSTerm();
   else if (state.view === "project") renderProject(state.projectName);
   else if (state.view === "help") renderHelp();
   else if (state.view === "git") renderGit();

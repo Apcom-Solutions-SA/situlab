@@ -89,6 +89,7 @@ func TestSaveProject(t *testing.T) {
 		if err := cfg.Save(); err != nil {
 			t.Fatal(err)
 		}
+		s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 		// Ré-enregistrer sans p2 : son marqueur doit être nettoyé, celui de p1 préservé.
 		if err := s.SaveProject("Proj", "Proj", "", atelier, []config.RepoRef{p1}); err != nil {
 			t.Fatal(err)
@@ -135,6 +136,7 @@ func TestProjectPromoteGuards(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	if err := s.Unlock("123456"); err != nil {
 		t.Fatalf("Unlock : %v", err)
 	}

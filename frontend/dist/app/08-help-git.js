@@ -76,11 +76,17 @@ function renderGit() {
     <div class="git-grid">${g.items.map(card).join("")}</div>
   </section>`).join("");
   el("view").innerHTML = `
-    <div class="view-head"><div class="view-title">Comprendre git</div><div class="view-sub">Le vocabulaire git en clair — et où chaque geste se trouve dans SituLab.</div></div>
+    <div class="view-head view-head-row">
+      <div><button class="btn btn-ghost btn-sm" id="git-back">‹ Réglages</button>
+      <div class="view-title" style="margin-top:6px">Comprendre git</div>
+      <div class="view-sub">Le vocabulaire git en clair — et où chaque geste se trouve dans SituLab.</div></div>
+    </div>
     <div class="set-layout">
       <nav class="set-nav">${GIT_GUIDE.map((g) => `<button class="set-navbtn" data-gittab="${g.k}">${esc(g.label)}</button>`).join("")}</nav>
       <div class="set-panels">${panels}</div>
     </div>`;
+  // Retour contextuel : on revient dans Réglages, directement sur l'onglet « Connexions git » (1.12).
+  if (el("git-back")) el("git-back").onclick = () => { state.settabTarget = "conn"; navTo("settings"); };
   const showTab = (k) => {
     document.querySelectorAll("#view .set-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== k));
     document.querySelectorAll("#view .set-navbtn").forEach((b) => b.classList.toggle("active", b.dataset.gittab === k));
@@ -94,52 +100,21 @@ function renderGit() {
 async function renderHelp() {
   let tab = "guide";
   try { tab = localStorage.getItem("situlab.helptab") || "guide"; } catch (_) {}
+  // Aide = le Guide, point (1.12). « À propos » (version, licence, NOTICE) vit désormais dans Réglages
+  // ▸ Versions / Licence — plus de doublon. La relance de la visite guidée reste ici, logiquement.
   el("view").innerHTML = `
-    <div class="view-head"><div class="view-title">Aide</div><div class="view-sub">Documentation embarquée — pour vous comme pour vos agents.</div></div>
-    <div class="set-layout">
-      <nav class="set-nav">
-        <button class="set-navbtn" data-helptab="guide">📖 Guide</button>
-        <button class="set-navbtn" data-helptab="about">ℹ À propos</button>
-      </nav>
-      <div class="set-panels">
-        <section class="set-sec set-panel" data-panel="guide"><div class="doc" id="doc"><div class="skeleton"></div></div></section>
-        <section class="set-sec set-panel" data-panel="about">
-          <div class="set-sec-h">À propos de SituLab</div>
-          <div class="about">
-            <div class="about-id">SituLab <span id="about-ver"></span></div>
-            <div class="about-cp">© 2026 APCOM Solutions SA — Logiciel libre sous licence Apache 2.0.</div>
-            <div class="about-acts" style="margin-top:14px">
-              <button class="btn btn-primary btn-sm" id="replay-tour">↺ Rejouer la visite guidée</button>
-              <button class="btn btn-ghost btn-sm" id="copy-prompt">🤖 Configurer mon agent IA</button>
-            </div>
-            <div class="about-acts" style="margin-top:10px">
-              <button class="btn btn-ghost btn-sm" id="show-license">Licence (Apache 2.0)</button>
-              <button class="btn btn-ghost btn-sm" id="show-notice">Avis &amp; marques (NOTICE)</button>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>`;
-  const showTab = (k) => {
-    document.querySelectorAll("#view .set-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== k));
-    document.querySelectorAll("#view .set-navbtn").forEach((b) => b.classList.toggle("active", b.dataset.helptab === k));
-    try { localStorage.setItem("situlab.helptab", k); } catch (_) {}
-  };
-  document.querySelectorAll("#view .set-navbtn").forEach((b) => b.onclick = () => showTab(b.dataset.helptab));
-  showTab(tab === "about" ? "about" : "guide");
+    <div class="view-head view-head-row">
+      <div><div class="view-title">Aide</div><div class="view-sub">Le guide SituLab — pour vous comme pour vos agents.</div></div>
+      <div class="view-head-actions">
+        <button class="btn btn-ghost btn-sm" id="replay-tour">↺ Rejouer la visite guidée</button>
+        <button class="btn btn-ghost btn-sm" id="go-agentcfg">🤖 Configurer mon agent IA</button>
+      </div></div>
+    <div class="doc" id="doc"><div class="skeleton"></div></div>`;
+  void tab;
   try { el("doc").innerHTML = mdToHtml(await App().Doc()); }
   catch (e) { el("doc").innerHTML = surfaceError("Documentation indisponible", cleanErr(e), null); }
-  try { el("about-ver").textContent = "v" + (await App().AppVersion()); } catch (e) {}
-  el("show-license").onclick = async () => {
-    try { infoModal("Licence — Apache 2.0", `<pre class="license-text">${esc(await App().License())}</pre>`); }
-    catch (e) { infoModal("Licence", `<div class="muted">${esc(cleanErr(e))}</div>`); }
-  };
-  el("show-notice").onclick = async () => {
-    try { infoModal("Avis de droits — NOTICE", `<pre class="license-text">${esc(await App().Notice())}</pre>`); }
-    catch (e) { infoModal("NOTICE", `<div class="muted">${esc(cleanErr(e))}</div>`); }
-  };
-  el("replay-tour").onclick = () => { navTo("organize"); setTimeout(() => startTour(true), 350); };
-  el("copy-prompt").onclick = () => aiAgentModal();
+  if (el("replay-tour")) el("replay-tour").onclick = () => { navTo("kernel"); setTimeout(() => startTour(true), 350); };
+  if (el("go-agentcfg")) el("go-agentcfg").onclick = () => aiAgentModal();
 }
 
 /* ---------------- Visite guidée (coachmarks) ---------------- */
@@ -154,22 +129,22 @@ function maybeAutoTour() {
   setTimeout(() => startTour(false), 650); // laisser le tableau de bord se peindre
 }
 
-// buildTourSteps construit la séquence selon le contexte (cible absente → étape centrée).
+// buildTourSteps : séquence ancrée sur le MENU latéral et le header — des cibles toujours présentes,
+// quelle que soit la vue courante (réancrage 1.13 ; les anciennes cibles de la page « Dépôts » retirée
+// n'existaient plus). Une cible masquée (module désactivé) est sautée ; cible absente → étape centrée.
 function buildTourSteps() {
+  const vis = (sel) => { const e = document.querySelector(sel); return e && !e.classList.contains("hidden"); };
   const steps = [
-    { ic: "👋", title: "Bienvenue", body: "Un tour rapide de SituLab, en quelques étapes. Vous pouvez passer à tout moment." },
-    { ic: "▦", sel: "#repo-list", title: "Votre tableau de bord", body: "Une carte par dépôt. Cliquez l'en-tête d'une carte pour déplier l'état de chaque branche : version en ligne, version sur ce poste, et l'écart entre les deux." },
+    { ic: "👋", title: "Bienvenue dans SituLab", body: "Un tour rapide en quelques étapes. Vous pouvez passer à tout moment (Échap). SituLab, c'est votre git et votre mémoire, sans navigateur." },
+    { ic: (typeof NAV_ICO !== "undefined" ? NAV_ICO.kernel : "◆"), svg: true, sel: '.nav-item[data-view="kernel"]', title: "KERNEL — votre mémoire", body: "Le dépôt qui EST votre mémoire de travail. C'est le centre : on le garde à jour en deux gestes, et votre IA l'ouvre pour se contextualiser." },
   ];
-  if (el("instance-select") && (state.instances || []).length > 1) {
-    steps.push({ ic: "🔀", sel: "#instance-select", title: "Vos connexions", body: "Basculez entre vos serveurs ici — Forgejo/Gitea ou GitHub." });
-  }
-  if (el("new-repo")) steps.push({ ic: "＋", sel: "#new-repo", title: "Créer un dépôt", body: "Créez un dépôt en ligne en un clic, directement depuis SituLab." });
-  if (!curIsGitHub()) {
-    const t = document.querySelector('.nav-item[data-view="tokens"]');
-    if (t && !t.classList.contains("hidden")) steps.push({ ic: "⚿", sel: '.nav-item[data-view="tokens"]', title: "Un accès pour votre IA", body: "Dans Tokens, créez un jeton dédié à votre assistant IA — avec juste les droits utiles." });
-  }
+  if (vis('.nav-item[data-view="corpus"]')) steps.push({ ic: "☁", sel: '.nav-item[data-view="corpus"]', title: "CORPUS — vos clouds souverains", body: "Vos fichiers sur Nextcloud ou kDrive, avec un accès IA borné par dossier : votre agent ne voit que ce que vous autorisez." });
+  if (vis('.nav-item[data-view="spokes"]')) steps.push({ ic: "🛰", sel: '.nav-item[data-view="spokes"]', title: "SPOKES — vos missions", body: "Des projections de mission rattachées à un KERNEL, pour organiser vos chantiers." });
+  if (vis('.nav-item[data-view="backup"]')) steps.push({ ic: "🛡", sel: '.nav-item[data-view="backup"]', title: "BACKUP — vos sauvegardes", body: "Des plans de sauvegarde de vos dépôts vers vos clouds, en clé-en-main." });
+  steps.push({ ic: "⎇", sel: '.nav-item[data-view="projects"]', title: "Dépôts git", body: "Appairez vos dépôts (local ↔ atelier ↔ vitrine), classez-les, et ouvrez leur détail. Le point de départ pour organiser votre poste." });
+  if (vis("#health")) steps.push({ ic: "🟢", sel: "#health", title: "L'état en un coup d'œil", body: "Les pastilles disent si vos connexions git et cloud sont joignables — et combien de dépôts restent à appairer." });
+  steps.push({ ic: "⚙", sel: '.nav-item[data-view="settings"]', title: "Réglages", body: "Vos connexions git & cloud, la sécurité (PIN, lecture seule), les Modules (adapter l'interface à votre usage) et votre Assistant IA." });
   steps.push({ ic: "?", sel: '.nav-item[data-view="help"]', title: "Aide & visite", body: "Toute la documentation est ici. Vous pourrez rejouer cette visite à tout moment depuis cette page." });
-  // Dernière étape : faire connaissance avec l'agent IA de l'utilisateur (ouvre la modale dédiée).
   steps.push({ ic: "🤖", title: "Votre assistant IA", body: "Dernière chose : présentons SituLab à votre agent IA. Terminez pour choisir votre assistant et obtenir, sur mesure, son message de première connexion.", ai: true });
   return steps;
 }
@@ -225,7 +200,7 @@ function tourNext() {
 function showTourStep(i) {
   tourState.i = i;
   const s = tourState.steps[i], last = i === tourState.steps.length - 1, n = tourState.steps.length;
-  el("tour-icon").textContent = s.ic || "•";
+  if (s.svg) el("tour-icon").innerHTML = s.ic || "•"; else el("tour-icon").textContent = s.ic || "•";
   el("tour-title").textContent = s.title;
   el("tour-body").textContent = s.body;
   // Pastilles de progression (● pour l'étape courante/passées, ○ pour les suivantes).
@@ -234,39 +209,43 @@ function showTourStep(i) {
   positionTour();
 }
 
-// positionTour place le spotlight sur la cible et l'infobulle à proximité (ou centrée).
+// positionTour place le spotlight sur la cible et l'infobulle à proximité, TOUJOURS dans l'écran.
 function positionTour() {
   if (!tourState) return;
   const s = tourState.steps[tourState.i];
   const hole = el("tour-hole"), tip = el("tour-tip");
   const target = s.sel ? document.querySelector(s.sel) : null;
-  if (target) {
-    const r = target.getBoundingClientRect();
-    const pad = 6;
-    hole.style.display = "block";
-    hole.style.left = (r.left - pad) + "px";
-    hole.style.top = (r.top - pad) + "px";
-    hole.style.width = (r.width + pad * 2) + "px";
-    hole.style.height = (r.height + pad * 2) + "px";
-    // Infobulle : sous la cible si place, sinon au-dessus ; à droite si la cible est étroite (sidebar).
-    tip.style.visibility = "hidden"; tip.style.left = "0px"; tip.style.top = "0px";
-    const tw = tip.offsetWidth, th = tip.offsetHeight, gap = 12, vw = window.innerWidth, vh = window.innerHeight;
-    let left, top;
-    if (r.right + gap + tw < vw) { left = r.right + gap; top = r.top; }      // à droite
-    else if (r.bottom + gap + th < vh) { left = r.left; top = r.bottom + gap; } // dessous
-    else { left = r.left; top = r.top - th - gap; }                           // dessus
-    left = Math.max(16, Math.min(left, vw - tw - 16));
-    top = Math.max(16, Math.min(top, vh - th - 16));
-    tip.style.left = left + "px"; tip.style.top = top + "px";
-    tip.style.visibility = "visible";
-  } else {
+  const vw = window.innerWidth, vh = window.innerHeight, gap = 14, m = 16;
+  if (!target) {
     hole.style.display = "none";
-    tip.style.visibility = "hidden";
     tip.style.left = "50%"; tip.style.top = "50%"; tip.style.transform = "translate(-50%,-50%)";
     tip.style.visibility = "visible";
     return;
   }
+  const r = target.getBoundingClientRect();
+  const pad = 4;
+  hole.style.display = "block";
+  hole.style.left = (r.left - pad) + "px";
+  hole.style.top = (r.top - pad) + "px";
+  hole.style.width = (r.width + pad * 2) + "px";
+  hole.style.height = (r.height + pad * 2) + "px";
+  // Mesure réelle de l'infobulle (contenu déjà posé), bornée à l'écran.
   tip.style.transform = "none";
+  tip.style.visibility = "hidden";
+  tip.style.left = "0px"; tip.style.top = "0px";
+  const tw = Math.min(tip.offsetWidth, vw - 2 * m);
+  const th = Math.min(tip.offsetHeight, vh - 2 * m);
+  let left, top;
+  // Priorité : à DROITE (items du menu, à gauche de l'écran), sinon dessous, dessus, à gauche, sinon centré.
+  if (r.right + gap + tw <= vw - m) { left = r.right + gap; top = r.top; }
+  else if (r.bottom + gap + th <= vh - m) { left = r.left; top = r.bottom + gap; }
+  else if (r.top - gap - th >= m) { left = r.left; top = r.top - gap - th; }
+  else if (r.left - gap - tw >= m) { left = r.left - gap - tw; top = r.top; }
+  else { left = (vw - tw) / 2; top = (vh - th) / 2; }
+  left = Math.max(m, Math.min(left, vw - tw - m));
+  top = Math.max(m, Math.min(top, vh - th - m));
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+  tip.style.visibility = "visible";
 }
 
 function endTour(markDone) {

@@ -281,6 +281,18 @@ func PushCommitTo(dir, url, sha, branch, token string, github bool, baseURL stri
 	return runC(dir, NetTimeout, authCfg(token, github, baseURL), args...)
 }
 
+// TagSHA renvoie le SHA du commit pointé par un tag LOCAL (vide si le tag n'existe pas).
+func TagSHA(dir, tag string) string {
+	if err := safeRef(tag); err != nil {
+		return ""
+	}
+	out, err := run(dir, LocalTimeout, "rev-list", "-n", "1", tag)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // PushTagTo publie un tag léger (pointant sur le SHA d'un commit) vers un dépôt distant arbitraire :
 // `git push <url> <sha>:refs/tags/<tag>`. Étiquette la version promue sur la vitrine, pour tout hôte
 // (GitHub comme Forgejo) via HTTPS + jeton. Auth injectée (jamais en argv).

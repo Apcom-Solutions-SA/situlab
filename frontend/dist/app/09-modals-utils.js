@@ -370,8 +370,6 @@ function connPolicyModal(name) {
   const inst = (state._settingsInstances || []).find((i) => i.name === name) || { name, role: "atelier" };
   let role = inst.role === "production" ? "production" : "atelier";
   let policy = inst.pin_policy || null;
-  let signMode = inst.sign_mode === "server" ? "server" : "local";
-  let signURL = inst.sign_server_url || "";
 
   const rows = () => PIN_ACTIONS.map((a) =>
     `<label class="set-row toggle"><div class="set-row-l">${a.label}<small>activé = votre PIN est demandé ; désactivé = autorisé dès que SituLab est déverrouillé</small></div>
@@ -391,15 +389,7 @@ function connPolicyModal(name) {
       <button data-preset="production">Préréglage Production protégée</button>
     </div>
     <div id="pol-rows">${rows()}</div>
-    <div class="set-row" style="margin-top:14px"><div class="set-row-l">Signature des commits<small>empreinte « SituLab approved »</small></div>
-      <div class="set-row-c"><div class="seg" role="group" aria-label="Signature" id="sign-seg">
-        <button data-sign="local" class="${signMode === "server" ? "" : "on"}">Logiciel</button>
-        <button data-sign="server" class="${signMode === "server" ? "on" : ""}">Serveur</button>
-      </div></div></div>
-    <div id="sign-url-row" class="${signMode === "server" ? "" : "hidden"}"><label>URL du service de signature<input id="sign-url" class="inp" value="${esc(signURL)}" placeholder="https://situememoring.com" /></label></div>
-    <div class="set-sec-d" id="sign-help">${signMode === "server"
-      ? "Serveur : la clé de signature ne quitte jamais le serveur — un agent sur le poste ne peut rien forger (audit, rate-limit, révocation)."
-      : "Logiciel : clé embarquée dans SituLab — marqueur d'authenticité « fait via SituLab » (extractible, limite assumée)."}</div>
+    <div class="set-sec-d" style="margin-top:12px">🛡 <b>Signature automatique</b> : chaque commit et chaque promotion créés via SituLab sont signés par le <b>service de garantie APCOM</b> (la clé ne quitte jamais le serveur, jamais remise à l'agent). Rien à régler ; le sceau apparaît dans l'historique.</div>
   </div>`;
 
   openModal("🏷️ Rôle & PIN — " + esc(name), body(), async () => {
@@ -414,9 +404,8 @@ function connPolicyModal(name) {
       // Si la politique correspond exactement aux défauts du rôle, on renvoie null (héritage) plutôt
       // qu'un figement explicite — ainsi un futur changement de rôle reste effectif.
       await App().SetInstancePINPolicy(name, differs ? pol : null);
-      await App().SetInstanceSignMode(name, signMode, (el("sign-url") && signMode === "server") ? el("sign-url").value.trim() : "");
       await refreshInstances(); // met à jour immédiatement le badge du header et le sélecteur (pas de redémarrage)
-      closeModal(); toast("Rôle, PIN & signature mis à jour", "ok"); renderSettings();
+      closeModal(); toast("Rôle & PIN mis à jour", "ok"); renderSettings();
     } catch (e) { toast(cleanErr(e), "err"); }
   });
   el("modal-ok").textContent = "Enregistrer";
@@ -437,15 +426,6 @@ function connPolicyModal(name) {
     policy = null; role = b.dataset.preset; // le préréglage fixe aussi le rôle cohérent
     document.querySelectorAll("#role-seg button").forEach((x) => x.classList.toggle("on", x.dataset.role === role));
     reseed();
-  };
-  el("sign-seg").onclick = (e) => {
-    const b = e.target.closest("[data-sign]"); if (!b) return;
-    signMode = b.dataset.sign;
-    document.querySelectorAll("#sign-seg button").forEach((x) => x.classList.toggle("on", x.dataset.sign === signMode));
-    el("sign-url-row").classList.toggle("hidden", signMode !== "server");
-    el("sign-help").textContent = signMode === "server"
-      ? "Serveur : la clé de signature ne quitte jamais le serveur — un agent sur le poste ne peut rien forger (audit, rate-limit, révocation)."
-      : "Logiciel : clé embarquée dans SituLab — marqueur d'authenticité « fait via SituLab » (extractible, limite assumée).";
   };
 }
 

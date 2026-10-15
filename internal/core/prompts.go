@@ -26,11 +26,17 @@ type PromptView struct {
 // les surcharges/masquages suivent le prompt à travers les mises à jour.
 func defaultPrompts() []config.Prompt {
 	return []config.Prompt{
-		{ID: "b-link-local", Title: "Relier mes dépôts locaux", Body: "Parcours mes dossiers de code sur ce poste, identifie ceux qui sont des dépôts git reliés à mon serveur, et relie-les dans SituLab (situlab local add <dossier>). Liste ce que tu as trouvé avant d'agir."},
-		{ID: "b-sync", Title: "Synchroniser un projet", Body: "Synchronise le dépôt <dossier> : récupère les nouveautés, enregistre mes modifications en cours puis envoie le tout (situlab repo sync <dossier>). Je validerai le PIN si nécessaire. Résume ce qui a changé."},
-		{ID: "b-issue", Title: "Créer une issue", Body: "Crée une issue sur <owner>/<repo> à partir de cette description : « … ». Propose un titre clair et un corps structuré (contexte, attendu, étapes), puis crée-la. Je validerai le PIN."},
-		{ID: "b-promote", Title: "Promouvoir une version en vitrine", Body: "Prépare la promotion de la version <vX.Y.Z> du projet <nom> vers la vitrine (situlab project promote). Rappelle-moi : pousser un tag ne crée PAS seul une Release GitHub (c'est la CI). Je validerai le PIN ; ne publie jamais en prod sans mon accord."},
+		// Ne décrète jamais le PIN : SituLab arbitre selon la politique de la connexion et confirme
+		// (fait / refusé / délai). Les prompts restent courts et directifs.
+		{ID: "b-map", Title: "Faire le point sur mon poste", Body: "Fais le point avec situlab map --output json : dis-moi mes KERNEL, mes spokes, les tags projet, et l'état local↔atelier↔vitrine de chaque dépôt. Résume sans jargon."},
+		{ID: "b-kernel-open", Title: "Ouvrir mon KERNEL", Body: "Fais l'ouverture du KERNEL <nom> : situlab kernel open <nom> te donne le fichier à lire (chemin absolu). Récupère d'abord les dernières notes si besoin (situlab kernel pull), lis ce fichier, puis suis ce qu'il indique."},
+		{ID: "b-link-local", Title: "Relier mes dépôts locaux", Body: "Parcours mes dossiers de code sur ce poste, identifie ceux qui sont des dépôts git, et relie-les dans SituLab (situlab local add <dossier>). Liste ce que tu as trouvé avant d'agir."},
+		{ID: "b-sync", Title: "Synchroniser un projet", Body: "Synchronise le dépôt <dossier> : récupère les nouveautés, enregistre mes modifications puis envoie le tout (situlab repo sync <dossier>). SituLab me demandera de valider si besoin. Résume ce qui a changé."},
+		{ID: "b-issue", Title: "Créer une issue", Body: "Crée une issue sur <owner>/<repo> à partir de cette description : « … ». Propose un titre clair et un corps structuré (contexte, attendu, étapes), puis crée-la."},
+		{ID: "b-promote", Title: "Promouvoir une version en vitrine", Body: "Prépare la promotion de la version <vX.Y.Z> du projet <nom> vers la vitrine (situlab project promote). Rappel : pousser un tag ne crée pas seul une Release GitHub (c'est la CI). Ne publie jamais en prod sans mon accord."},
 		{ID: "b-review", Title: "Relire une demande de fusion", Body: "Montre-moi le diff de la demande de fusion #<n> sur <owner>/<repo>, résume les changements et les risques, et propose une revue (approuver / demander des changements) que je validerai."},
+		{ID: "b-cloud-summary", Title: "Déposer un résumé dans le CORPUS", Body: "Dépose une note dans mon CORPUS : lis d'abord tes dossiers autorisés (situlab cloud allowed <cloud>), puis écris un .md de synthèse dans un dossier autorisé (situlab cloud write <fichier> --content \"…\"). Reste dans le périmètre autorisé."},
+		{ID: "b-backup-run", Title: "Lancer une sauvegarde", Body: "Liste mes plans de sauvegarde (situlab backup list), puis lance le plan <nom> (situlab backup run <nom>) et confirme-moi ce qui a été sauvegardé."},
 	}
 }
 

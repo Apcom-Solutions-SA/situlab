@@ -1,405 +1,85 @@
-# SituLab — Guide d'utilisation (humains & agents IA)
+# SituLab — carte pour agents IA (et démarrage humain)
 
-> Un seul document, deux lectures. Les humains trouveront en tête un démarrage rapide ; les agents
-> trouveront ensuite la référence complète de la ligne de commande. Il est aussi lisible **dans
-> l'application** (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.11.1**.
+> Court par choix. **SituLab EST la carte** : interroge-le (`situlab map`, `--output json`,
+> `situlab <groupe> --help`) au lieu de deviner. Ce fichier **cadre et oriente** ; il ne recopie pas la
+> référence des commandes (elle vit dans `situlab --help`, toujours à jour). Lisible aussi dans l'app
+> (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.16.0**.
 
-## Pour ton assistant IA — commence ici
+## Si tu es l'assistant IA — commence ici
 
-Si tu es l'assistant IA de l'utilisateur : ce fichier est à la fois **ton mode d'emploi** de SituLab
-**et** votre **fiche de collaboration**. Au démarrage d'une session de travail :
-1. lis ce guide pour savoir piloter SituLab (CLI `situlab`, ou outils MCP `repo_*`/`issue_*`/`git_*`) ;
-2. lis la section **« Notre collaboration »** en bas (ajoutée au moment du dépôt) : tu y trouveras
-   la façon de travailler convenue avec ton utilisateur ;
-3. **règle d'or** : tu prépares, l'humain débloque par son PIN. Ne demande jamais le PIN, ne cherche
-   pas à le contourner ; rien ne part en ligne sans sa validation.
+1. **SituLab est la porte unique** vers le **git** (Forgejo/GitHub), les **clouds souverains** (CORPUS)
+   et les **sauvegardes** (BACKUP) de l'utilisateur. Tu passes **toujours** par lui ; tu n'as **jamais**
+   ses jetons ni ses clés.
+2. **Interroge, ne devine pas.**
+   - `situlab map --output json` = l'organisation du poste (KERNEL, spokes, tags, liens
+     local↔atelier↔vitrine).
+   - `situlab <groupe> --help` = la **liste exacte** des commandes d'un domaine
+     (`repo`·`local`·`kernel`·`spoke`·`cloud`·`backup`·`project`·`issue`·`pull-request`·`release`·`admin`).
+     Ne l'apprends pas par cœur ici — demande-la.
+3. **Réflexe « ouverture KERNEL ».** Si l'humain dit *« fais l'ouverture KERNEL <nom> »* (ou un spoke) :
+   `situlab kernel open [nom]` (resp. `situlab spoke open <nom>`) te donne le **fichier d'ouverture**
+   (chemin absolu) → lis-le → suis ce qu'il indique. Si besoin d'abord : `situlab kernel pull`
+   (récupère les dernières notes, sans PIN).
+4. **Le PIN n'est pas à toi, et il n'est pas absolu.** Prépare l'action et **lance-la** : **SituLab
+   décide** s'il faut une validation (selon la politique de la connexion) et te répond — **fait**,
+   **refusé**, ou **délai écoulé** (relance). Une fenêtre s'ouvre sur le poste de l'humain ; **lui seul**
+   tape le PIN. Ne le demande jamais, ne le présume jamais.
+5. **Signature automatique.** Chaque commit / promotion que tu fais via SituLab est **signé par le
+   service de garantie APCOM** (preuve « fait via SituLab », clé jamais sur le poste). Tu n'as rien à
+   faire. **Ne retire ni n'altère jamais le trailer `SituLab-Approved:`** — cela efface la preuve.
+6. **Notre collaboration** : la section en bas (ajoutée au dépôt) donne la façon de travailler convenue
+   avec l'utilisateur. Lis-la ; tu peux l'enrichir. L'humain l'édite aussi dans *Réglages → Assistant IA*.
 
-Tu **peux enrichir** la section « Notre collaboration » de ce fichier au fil de l'eau (préférences,
-conventions, dépôts clés). L'utilisateur peut aussi l'éditer dans SituLab (Réglages → Assistant IA).
+## La carte — où est quoi
 
-**Réflexe « ouverture KERNEL ».** Si l'utilisateur dit *« fais l'ouverture KERNEL SituLab »* (ou ouvre
-un spoke) : ne devine pas quel fichier lire. Demande-le à SituLab —
-`situlab kernel open` (ou `situlab spoke open <nom>`) te donne le **fichier d'ouverture** ; lis-le, puis
-suis ce qu'il indique. Et pour comprendre l'organisation du poste (KERNEL, spokes, tags, liens
-local↔atelier↔vitrine), lance `situlab map`. SituLab **est** la carte : interroge-le plutôt que de supposer.
-
-## Pour un humain — en 30 secondes
-
-SituLab montre, pour chacun de vos dépôts Forgejo, **ce que vous avez en ligne et en local, et dans
-quel état** — sans ouvrir de navigateur.
-
-1. Lancez SituLab (double-clic). À la première ouverture, choisissez un **PIN**, puis saisissez le
-   **nom**, l'**URL** de votre instance (ex. `https://git.apcom.app`) et votre **token personnel**.
-   Le token est **chiffré par votre PIN** sur le poste ; ensuite, seul le PIN vous est redemandé.
-2. L'écran **Dépôts** se remplit et se tient à jour tout seul. Chaque carte montre le **distant**
-   (branche, versions) et votre **clone local** rattaché (branche de travail, avance/retard, modifs).
-3. Cliquez une carte pour le détail : **Aperçu** (distant vs local), **Fichiers** (naviguer, lire),
-   **Historique** (versions et commits).
-
-Rien à pousser sans votre **PIN** : les actions qui écrivent vers le distant le demandent.
-
-## Pour un agent — principes
-
-- **Sans argument**, `situlab` ouvre la fenêtre (usage humain) : un agent ne la lance jamais.
-- **Avec une commande**, c'est le mode agent. Ajoutez toujours `--output json`.
-- **Un démon résident porte la session.** La 1re commande démarre SituLab (fenêtre + démon) si
-  besoin ; les commandes suivantes lui parlent. La session déverrouillée vit dans le démon, pas
-  dans la commande (chaque invocation est un process neuf).
-- **Le PIN ne passe jamais par l'agent.** Quand une opération l'exige — déverrouiller pour lire,
-  confirmer pour écrire — une **fenêtre de saisie surgit sur le poste de l'humain** ; lui seul tape
-  le PIN. L'agent reçoit « fait » ou « refusé », jamais le PIN.
-- **Lecture = session déverrouillée. Écriture distante = PIN confirmé à chaque fois.** En
-  non-interactif (aucun humain pour la fenêtre), l'action échoue avec le code **3** — c'est voulu.
-- Les **valeurs de tokens ne sont jamais exposées**. Les tokens vivent **chiffrés par le PIN**
-  (plus de coffre OS).
-
-## Codes de sortie
-
-| Code | Sens |
+| Tu veux… | Demande à SituLab |
 |---|---|
-| 0 | Succès |
-| 1 | Erreur générique (arguments, réseau, API) |
-| 2 | Instance introuvable / non configurée |
-| 3 | PIN requis / session verrouillée en mode non-interactif (push, ou lecture sans session) |
-| 4 | git absent de la machine |
+| l'organisation du poste | `situlab map --output json` |
+| la liste exacte des commandes d'un domaine | `situlab <groupe> --help` |
+| ouvrir un KERNEL / un spoke | `situlab kernel open` · `situlab spoke open <nom>` |
+| l'état (verrou, PIN, instances, git) | `situlab status` · `situlab doctor` |
+| ce que tu as le droit de voir dans un cloud | `situlab cloud allowed <cloud>` — **à lire en premier** |
+| l'état d'origine des commits (sceau) | `situlab attest status <dossier>` |
+| piloter sans terminal (Cursor, Claude Desktop…) | serveur MCP : `situlab mcp` — mêmes capacités, mêmes garanties |
 
-**Quittance PIN (1.9.2)** : une mutation qui attend le PIN distingue désormais, pour toi, **refusé**
-(l'humain a annulé) de **délai écoulé** (personne n'a validé dans les ~120 s — relance et demande à
-l'humain de confirmer la fenêtre). En mode texte, un message stderr t'avertit dès qu'une fenêtre PIN
-peut s'ouvrir sur le poste (tu n'es pas figé — tu attends un geste humain). Le PIN ne transite jamais
-par le socket/MCP.
+## Les notions (le strict nécessaire)
 
-**Explique ton intention (1.9.8)** : joins une phrase disant *pourquoi* tu agis — en CLI avec `--intent
-"…"`, en MCP avec l'argument `intent` sur n'importe quelle mutation. La fenêtre PIN l'affiche **à côté**
-de ce que SituLab **constate** réellement (ton message est déclaratif, il n'autorise rien ; seul le PIN
-autorise). C'est un geste de courtoisie qui aide l'humain à valider en connaissance de cause.
+- **Trois accès, un noyau.** Fenêtre (humain) · CLI `situlab` (agent en shell) · MCP `situlab mcp`
+  (agent sans terminal). Mêmes opérations, même consentement PIN, même signature.
+- **Les quatre univers.** **KERNEL** = le dépôt qui *est* la mémoire. **SPOKES** = projections de
+  mission rattachées à un KERNEL. **CORPUS** = clouds de fichiers souverains, **accès IA borné par
+  dossier** (tu ne vois que l'autorisé — fail-closed). **BACKUP** = plans de sauvegarde git → cloud.
+- **local ↔ atelier ↔ vitrine.** Le clone **local** a pour `origin` l'**atelier** (lien **EXACT**, même
+  URL). La **vitrine** (production) est un dépôt **séparé**, alimenté par **promotion** (version/tag)
+  sous PIN — **jamais** par un push direct. Le local ne « connaît » que son atelier.
+- **Mémoire situative.** La méthode (un KERNEL vivant, tenu cohérent à chaque geste). Source et
+  manifeste : **manifeste.apcom.app**.
 
-## Configuration
+## Repères agent
 
-`config.json` (instances, compteur anti-bruteforce du PIN, dépôts locaux suivis) et
-`keyring.json` (tokens **chiffrés par le PIN** : Argon2id → KEK → DEK, AES-256-GCM) dans :
+- **Sans argument**, `situlab` ouvre la fenêtre (humain) : un agent ne la lance jamais. **Avec une
+  commande**, c'est le mode agent — ajoute toujours `--output json`.
+- Un **démon résident** porte la session déverrouillée ; chaque invocation CLI est un process neuf qui
+  lui parle. Lecture = session déverrouillée ; écriture distante = PIN confirmé dans la fenêtre.
+- **Codes de sortie** : `0` succès · `1` erreur générique · `2` instance introuvable · `3` PIN requis /
+  session verrouillée en non-interactif · `4` git absent.
+- Joins `--intent "pourquoi"` (CLI) ou l'argument `intent` (MCP) à une mutation : la fenêtre PIN
+  l'affiche **à côté** de ce que SituLab **constate** (déclaratif ; seul le PIN autorise).
+- **Mode lecture seule** (réglé en fenêtre) : refuse toute mutation — git **et** cloud — même pour toi.
+
+## Configuration (où vivent les données)
+
 `%AppData%\SituLab\` (Windows) · `~/.config/SituLab/` (Linux) ·
-`~/Library/Application Support/SituLab/` (macOS). **Aucun secret en clair** : le PIN n'est stocké
-nulle part (il *est* la clé), et il n'y a **plus de coffre OS** (migré automatiquement au 1er
-déverrouillage depuis une version antérieure).
+`~/Library/Application Support/SituLab/` (macOS) : `config.json` (aucun secret) +
+`keyring.json` (jetons **chiffrés par le PIN** : Argon2id → KEK → DEK, AES-256-GCM). Le PIN n'est
+stocké nulle part — il *est* la clé.
 
-## Référence des commandes
+## Démarrage humain (30 secondes)
 
-Indicatifs globaux : `--output text|json` (défaut `text`), `--instance <nom>` (défaut : instance par défaut).
+Lance SituLab, choisis un **PIN**, ajoute une connexion (nom + URL Forgejo + token, ou GitHub + PAT).
+L'écran **Dépôts** se tient à jour tout seul ; un clic ouvre le détail (Aperçu / Fichiers / Historique).
+Rien ne part en ligne sans ton **PIN**.
 
-### Système
-- `situlab version` — version.
-- `situlab doctor` — git présent ? config ? trousseau ? PIN ? session ? résidu de coffre OS ?
-
-### Session (démon)
-- `situlab status` — session verrouillée/déverrouillée, PIN défini, nombre d'instances.
-- `situlab unlock` — déverrouille la session : le démon ouvre la **fenêtre de PIN** sur le poste
-  (le PIN ne transite jamais par la CLI).
-- `situlab lock` — verrouille la session (oublie la clé en mémoire).
-- `situlab purge --confirm` — **efface TOUTES les données SituLab de ce poste** (connexions,
-  trousseau chiffré, réglages, jetons du coffre Windows). IRRÉVERSIBLE. Tourne hors de la fenêtre
-  (refuse si la fenêtre SituLab est ouverte — ferme-la d'abord). Pour repartir à blanc ou céder le
-  poste. (Aussi disponible dans la fenêtre : Réglages → Sécurité → « Effacer mes données ».)
-
-### Instances
-- `situlab instance add <nom> --url <url> --token <token>` — ajoute une instance **Forgejo/Gitea**
-  et **chiffre le token par le PIN** (session déverrouillée requise ; à défaut, le démon la demande
-  par la fenêtre de PIN).
-- `situlab instance add <nom> --provider github --token <PAT>` — ajoute un compte **GitHub** (jeton
-  d'accès personnel collé ; l'URL est fixée à github.com). GitHub ne permet pas la gestion des
-  comptes ni des jetons via l'API : les onglets Administration, Statistiques et Jetons sont propres
-  à Forgejo.
-- `situlab instance list` · `instance test <nom>` · `instance remove <nom>` · `instance default <nom>`.
-
-### Vue unifiée (le cœur)
-- `situlab dashboard` — par dépôt : distant (branche par défaut) + local rattaché (version décrite,
-  branche, avance/retard, état). Rattachement par l'URL d'origine.
-
-### Lecture distante (selon droits du token)
-- `situlab whoami`
-- `situlab repo list`
-- `situlab repo view <owner>/<repo>`
-- `situlab repo branches <owner>/<repo>`
-- `situlab repo tags <owner>/<repo>`
-- `situlab repo commits <owner>/<repo> [--ref <b>] [--limit n]`
-- `situlab repo tree <owner>/<repo> [chemin] [--ref <b>]`
-- `situlab repo file <owner>/<repo> <chemin> [--ref <b>]`
-- `situlab org list`
-- `situlab token list` — noms + portées (jamais les valeurs).
-
-### Local (git)
-- `situlab local add <chemin>` · `local list` · `local status <chemin>`
-- `situlab repo clone <owner>/<repo> <dossier>`
-
-### Boucle de travail locale (v1)
-- `situlab repo fetch <dossier>` — vérifie les nouveautés du serveur (sans PIN).
-- `situlab repo pull <dossier>` — récupère en fast-forward (sans PIN).
-- `situlab repo commit <dossier> --message "…"` — enregistre un point local (sans PIN).
-- `situlab repo diff <dossier>` — modifications non enregistrées.
-- `situlab repo clone <owner>/<repo> <dossier>` — copie un dépôt sur le poste.
-- `situlab local remove <chemin>` — cesse de suivre un dépôt local.
-- `situlab local branch <chemin> <nom>` / `local switch <chemin> <branche>` — créer / changer de branche.
-- `situlab local log <chemin> [--limit n]` · `local stash-save|stash-list|stash-pop <chemin>`.
-- `situlab local discard <chemin> [--file <f>] --confirm` — annule les modifs locales (DESTRUCTIF).
-
-### Git « complet » — gestes de dev avancés (v1.6, CLI/MCP ; locaux = sans PIN)
-Ces gestes **ne touchent pas au distant** → **aucun PIN**. En cas de conflit, la commande renvoie
-un message guidé stable (« des fichiers sont en conflit… ») **sans jamais enregistrer de marques** :
-résous les fichiers, puis `…-continue` (ou `…-abort` pour renoncer). Réservés à la CLI et au MCP
-(l'IA travaille là) ; la fenêtre reste volontairement au niveau simple.
-- **Réunir des branches** : `situlab local merge <chemin> <ref>` (+ `local merge-abort <chemin>`) ·
-  `situlab local rebase <chemin> <upstream>` (+ `local rebase-continue|rebase-abort <chemin>`).
-- **Nettoyer l'historique** : `situlab local cherry-pick <chemin> <commit>`
-  (+ `cherry-pick-continue|cherry-pick-abort <chemin>`) · `situlab local revert <chemin> <commit>`
-  (non destructif) · `situlab local reset <chemin> <ref> [--mode soft|mixed|hard]`
-  (`--mode hard` est destructif → exige `--confirm`) · `situlab local amend <chemin> [--message …]`
-  (réécrit le dernier commit — uniquement s'il n'est pas publié).
-- **Commits soignés** : `situlab local commit-paths <chemin> --message "…" --path a --path b`
-  (staging **sélectif** : n'enregistre que les chemins listés, évite les fichiers parasites).
-- **Tag local** : `situlab local tag-create <chemin> <nom> [--message …]` (publier ensuite avec
-  `push-tag`).
-- **Pousser après réécriture (distant → PIN)** : `situlab local push-force <chemin>`
-  (`--force-with-lease --force-if-includes` : « force » **sûr**, refuse d'écraser un travail
-  distant apparu entre-temps — y compris récupéré par l'auto-fetch de fond)
-  · `situlab local push-tag <chemin> <tag>`.
-
-> Les marques de conflit ne sont **jamais** enregistrées : `commit`, `amend` et `commit-paths`
-> refusent (message guidé) si des fichiers en index en contiennent — résous d'abord.
-> Le garde-fou `--confirm` du `reset --mode hard` est propre à la **CLI** (confort opérateur) ;
-> en MCP, comme `git_discard`, les gestes destructifs **locaux** reposent sur le mode lecture seule
-> et `assertWritable`, pas sur une confirmation supplémentaire (le PIN protège le **distant**).
-
-### Rôles, politique PIN & projets (v1.7)
-
-Chaque connexion a un **rôle** : **atelier** (terrain de dev) ou **production** (vitrine). Le rôle
-et la **politique PIN par connexion** (par action : envoi / issues / admin dépôt / admin comptes)
-se règlent **dans la fenêtre uniquement** — un agent ne peut pas les changer. Défauts : **atelier**
-autonome (envoi & issues sans PIN sur session déverrouillée, admin sous PIN) ; **production** tout
-sous PIN. L'exigence de PIN d'un envoi suit le **dépôt réellement poussé** (son serveur), pas la
-connexion que tu nommes : tu ne peux donc pas pousser en production via une connexion atelier.
-
-Rôle et politique sont lisibles dans `instance list` / `dashboard` (`role`). Classement à respecter :
-**tu travailles librement en atelier, tu prépares la production mais tu ne la publies jamais sans
-le PIN de l'humain.**
-
-- **Projets** (lien atelier↔production, lecture) : `situlab project list` ·
-  `situlab project status <nom>` (équilibre : version atelier vs prod, « équilibré » / « en retard de
-  N versions »). Les liens se créent dans la fenêtre.
-- **Promotion** : `situlab project promote <nom> --prod <index>` publie la version de l'atelier vers
-  une production, en **une version propre** (pas les micro-commits). Vers la production → **PIN**
-  confirmé dans la fenêtre. Jamais de jeton remis à l'agent.
-  - `--mode code|tag|release` (défaut `tag`) choisit la méthode. ⚠️ **Promouvoir ≠ publier une Release** :
-    `tag` pousse code + tag ; sur GitHub, c'est le **tag** qui déclenche la CI qui bâtit les installeurs
-    et publie la Release (vérifier Actions — la Release n'est pas créée par l'app). `release` crée en
-    plus l'objet Release (via `--notes`). `code` met à jour la branche sans tag.
-
-### Écriture distante — PIN requis
-- Le PIN se **définit dans la fenêtre** (Réglages → Sécurité) — jamais par la CLI (`situlab pin set`
-  ne fait qu'y renvoyer, pour que le PIN ne circule pas sur le socket).
-- `situlab repo push <dossier>` — pousse ; exige le PIN (saisi dans la fenêtre).
-- `situlab repo sync <dossier> [--message …]` — **synchronise en un geste** : récupère les
-  nouveautés (avance rapide), enregistre **toutes** les modifications en cours (fichiers nouveaux
-  compris — attention aux fichiers sensibles non ignorés par `.gitignore`), puis envoie ; exige le
-  PIN. En cas de changements croisés, renvoie une erreur claire (« à réunir ») plutôt qu'une sortie
-  git brute.
-- `situlab repo create <nom> [--description …] [--private] [--org <organisation>]` — crée un dépôt.
-  Sans `--org`, dans l'espace personnel ; beaucoup de serveurs l'interdisent → utiliser `--org`.
-- `situlab repo delete <owner>/<repo>` — supprime définitivement un dépôt (PIN demandé sur le poste).
-- `situlab repo setdesc <owner>/<repo> --desc "…"` — modifie la description.
-- `situlab issue list <owner>/<repo> [--state open|closed|all]` — lecture.
-- `situlab issue create <owner>/<repo> --title "…" [--body "…"]` — crée une issue.
-
-Les écritures déclenchent une demande de PIN **sur le poste** (fenêtre de SituLab) ; le PIN ne
-transite jamais par la CLI ni par l'agent.
-
-### Tokens (auth basique : identifiant + mot de passe du compte, non stockés)
-- `situlab token list` — tes tokens (noms + portées).
-- `situlab token create --user <u> --password <p> --name <n> [--scopes a,b] [--repos owner/repo,…]`
-  — crée un token ; `--repos` le restreint à ces dépôts.
-- `situlab token delete <id> --user <u> --password <p>`.
-
-### Administration (token administrateur)
-- `situlab admin users` — liste les utilisateurs.
-- `situlab admin directory` — **annuaire consolidé** : les comptes de toutes les instances Forgejo
-  réunis, avec la présence par instance (actif/suspendu/inactif/absent). Lecture seule, tolérant aux
-  instances injoignables.
-- `situlab admin user-create <identifiant> --email … --password … [--admin]`.
-
-> **Mode lecture seule** (v1.4) : activable dans la fenêtre (Réglages → Sécurité). Quand il est
-> actif, toute mutation (envoi, synchronisation, suppression, administration, annulation locale)
-> est refusée avec « mode lecture seule actif » — y compris pour les agents CLI/MCP. Seule la
-> fenêtre peut le désactiver.
-
-### Issues (écritures — PIN sur le poste)
-- `situlab issue comment <owner>/<repo> <n> --body "…"` · `issue close|reopen <owner>/<repo> <n>` · `issue edit <owner>/<repo> <n> [--title …] [--body …]`
-- `situlab issue labels <owner>/<repo> <n> --label a --label b` (remplace par noms) · `issue label-list <owner>/<repo>`
-- `situlab issue assign <owner>/<repo> <n> --user alice --user bob`
-- `situlab issue milestone <owner>/<repo> <n> --id <milestoneID|0>` · `issue milestone-list <owner>/<repo>`
-
-### Demandes de fusion (lecture + écritures — PIN)
-- `situlab pull-request list <owner>/<repo> [--state open|closed|all]`
-- `situlab pull-request detail|diff|files <owner>/<repo> <n>` (lecture)
-- `situlab pull-request create <owner>/<repo> --title "…" --head <branche> --base <branche> [--body "…"]`
-- `situlab pull-request review <owner>/<repo> <n> --event APPROVED|REQUEST_CHANGES|COMMENT [--body "…"]`
-- `situlab pull-request merge <owner>/<repo> <n> [--method merge|rebase|squash]` · `pull-request close <owner>/<repo> <n>`
-
-### Versions & tags (écritures — PIN)
-- `situlab release create <owner>/<repo> <tag> [--name …] [--body …] [--target <ref>] [--prerelease]`
-- `situlab release delete <owner>/<repo> <id>` · `release tag-create <owner>/<repo> <tag> [--target <ref>]` · `release tag-delete <owner>/<repo> <tag>`
-
-### Réglages de dépôt (écritures — PIN)
-- `situlab repo rename <owner>/<repo> <nouveau-nom>` · `repo visibility <owner>/<repo> --private=true|false`
-- `situlab repo archive <owner>/<repo> --archived=true|false` · `repo default-branch <owner>/<repo> <branche>`
-- `situlab repo delete-branch <owner>/<repo> <branche>` — supprime une branche distante (PIN ; refuse la branche par défaut).
-
-### Signature de garantie « SituLab approved »
-- **Modèle (v1.9.5) : GARANTIE LOGICIEL.** C'est **le logiciel SituLab** qui signe — une identité unique
-  « SituLab » embarquée, la même pour tout le monde (pas de certificat par utilisateur ni par organisation).
-  Chaque commit créé via SituLab est signé automatiquement ; tu n'as **rien à faire**. Limite assumée :
-  une clé embarquée est extractible → marqueur d'authenticité « fait via SituLab », pas une preuve
-  inviolable face à un attaquant local.
-- **Mode « signature serveur » (v1.9.6, agent-proof).** Réglable par connexion (en fenêtre) : l'empreinte
-  est demandée au **service de signature APCOM** ; la **clé ne quitte jamais le serveur** → tu ne peux rien
-  forger hors ligne. Le démon appelle le service avec le jeton Forgejo (jamais remis à l'agent). La
-  vérification et `attest status` ne changent pas (« approved par … Service de signature »).
-- `situlab attest status <dossier>` — état d'attestation des derniers commits (✅ « SituLab » / ⬜). Lecture.
-- *(Hérité, optionnel)* `situlab attest genkey` / `install-cert` — ancien chemin de cert d'appareil nominatif,
-  utilisé en repli uniquement si la signature logicielle n'est pas encore mintée sur ce binaire.
-- **Depuis 1.9.7 — portage IMMUABLE par TRAILER de commit.** L'attestation **locale** est écrite dans un
-  **trailer** « SituLab-Approved: » **dans le commit** (immuable, voyage avec le commit — plus de note à
-  pousser). Elle couvre un **pré-image canonique** du commit (arbre/parents/auteur/committer/message sans
-  trailer), pas le SHA. Le **mode serveur** (signe le SHA) reste en **note**. La vérification lit le trailer
-  d'abord, puis la note (commits antérieurs / serveur). `situlab attest status` est inchangé. **N'enlève ni
-  ne modifie jamais ce trailer** : cela retire le ✅.
-- **Émission (gouvernance, HORS LIGNE — pas via le démon)** : `situlab attest gen-root` (paire racine),
-  `gen-ca --root-key <f>` (autorité intermédiaire), **`gen-software --signer-key <ca.key> --issuer
-  <ca.cert.json>`** (identité de signature LOGICIELLE « SituLab », à embarquer dans le binaire — c'est
-  le chemin recommandé depuis 1.9.5), et `issue …` (ancien cert d'appareil nominatif, hérité). Les clés
-  privées restent dans des fichiers que l'humain contrôle ; le privé racine ne touche jamais un serveur.
-- La signature est **non bloquante** et apposée automatiquement sur les commits créés par SituLab. Limite T2 : voir `SECURITY.md`.
-
-### CORPUS — clouds de fichiers souverains (v1.10)
-SituLab est la **porte unique** entre toi (l'agent) et les clouds de fichiers de l'utilisateur
-(Nextcloud, kDrive). 🔴 **Tu ne vois QUE les dossiers que l'humain a explicitement autorisés** : tout
-chemin hors de ce périmètre est refusé (« dossier hors du périmètre autorisé pour l'IA »). Commence
-toujours par lire tes points d'entrée.
-- `situlab cloud list` — connexions cloud configurées (noms/types ; aucun secret). Lecture.
-- `situlab cloud allowed <cloud>` — **tes dossiers autorisés** sur cette connexion. Lecture. **À lire en premier.**
-- `situlab cloud ls <dossier> [--cloud <nom>]` — contenu d'un dossier (dans ton périmètre). Lecture.
-- `situlab cloud read <fichier> [--cloud <nom>]` — contenu texte d'un fichier (consulter un document). Lecture.
-- `situlab cloud download <fichier> <dest-locale> [--cloud <nom>]` — télécharger sur le poste. Lecture.
-- `situlab cloud mkdir <dossier> [--cloud <nom>]` — créer un dossier. Écriture (PIN selon la connexion).
-- `situlab cloud upload <fichier-local> <dossier-cloud> [--cloud <nom>]` — envoyer un fichier local. Écriture.
-- `situlab cloud write <fichier-cloud> --content "…" [--cloud <nom>]` — écrire/remplacer un fichier (ex. **déposer un résumé `.md`**). Écriture.
-- `situlab cloud delete <chemin> [--cloud <nom>]` — supprimer (PIN par défaut).
-- Connexion/retrait : `situlab cloud add <nom> --kind nextcloud|kdrive --url <webdav> --user <id>` (mot de passe demandé), `cloud remove <nom>`, `cloud default <nom>`.
-- **Réglages hors de ta portée** (fenêtre uniquement) : le choix des dossiers visibles et la politique PIN se font dans la fenêtre par l'humain. Tu ne peux ni les élargir ni les abaisser.
-
-### Sauvegardes git → cloud (v1.10)
-- `situlab backup list` — plans de sauvegarde.
-- `situlab backup add <nom> --repo <dépôt-git> --cloud <nom> --dest <dossier>` — enregistrer un plan.
-- `situlab backup run <nom>` — exécuter (bundle de l'historique → cloud ; PIN selon la connexion).
-- `situlab backup remove <nom>` — retirer un plan.
-
-### KERNEL — la mémoire, lisible (v1.11)
-Le KERNEL est le dépôt qui *est* la mémoire de l'humain. Tu peux lire son état et ses contenus, et
-l'aider à récupérer/enregistrer ses notes — mais tu ne **désignes** jamais un KERNEL : ce choix
-(ajout/retrait/actif) est réservé à l'humain **dans la fenêtre**. Nom omis = KERNEL **actif**.
-- `situlab kernel list` — KERNEL désignés (l'actif est marqué).
-- `situlab kernel status [nom]` — état lisible (à jour / notes à envoyer / notes à récupérer).
-- `situlab kernel contents [nom]` — carte du contenu (dossiers/dépôts englobés).
-- `situlab kernel pull [nom]` — récupérer les dernières notes (fast-forward ; sans PIN).
-- `situlab kernel save [nom] --message <txt>` — enregistrer : récupérer → enregistrer → envoyer
-  (**PIN** sur le poste ; message daté automatiquement si omis).
-- `situlab kernel open [nom]` — **fichier d'OUVERTURE** du KERNEL : le fichier à lire en premier pour
-  « ouvrir » la mémoire. En texte, imprime le chemin **absolu** (prêt à lire) ; en `--output json`,
-  renvoie `name/local_path/run_file/run_abs`. **Quand l'humain dit « fais l'ouverture KERNEL SituLab » :
-  appelle `situlab kernel open`, lis le fichier renvoyé, puis suis ce qu'il indique.** L'humain définit
-  ce fichier dans la fenêtre (KERNEL ▸ Fichier d'ouverture).
-
-### SPOKES — projections de mission (v1.11)
-Un spoke est un dépôt de mission dérivé d'un KERNEL. Tu peux lire et synchroniser ; la **désignation**
-(ajout/retrait, KERNEL parent, fichier run) reste réservée à la fenêtre.
-- `situlab spoke list` — spokes, leur KERNEL parent et leur fichier run.
-- `situlab spoke status <nom>` · `situlab spoke contents <nom>` — état lisible / carte du contenu.
-- `situlab spoke pull <nom>` — récupérer (fast-forward ; sans PIN).
-- `situlab spoke save <nom> --message <txt>` — enregistrer → envoyer (**PIN**).
-- `situlab spoke open <nom>` — **fichier RUN** du spoke (chemin absolu prêt à lire). Même usage que
-  `kernel open` : c'est le point d'entrée de la mission.
-
-### La CARTE SituLab — classement & liens entre dépôts (v1.11)
-SituLab tient une **couche de classement** au-dessus de git : quels dépôts sont des **KERNEL**, des
-**spokes** (et de quel KERNEL ils dérivent), et comment ils sont **tagués** (groupes projet). Il connaît
-aussi les **liens** entre dépôts. Pour tout comprendre d'un poste en un appel :
-- `situlab map` — pour **chaque dépôt appairé** : rôle (KERNEL / spoke / normal), **tag** projet, clone
-  **LOCAL** sur ce poste, dépôt **ATELIER** (source de vérité), nombre de **VITRINES** (production), et le
-  fichier d'ouverture/run s'il est défini. Utilise `--output json` pour l'exploiter.
-
-**Modèle de liens (à connaître absolument) :**
-- **LOCAL ↔ ATELIER = lien EXACT** : l'`origin` du clone local **est** le dépôt atelier (même URL).
-- **ATELIER ↔ VITRINE = lien de PRODUCTION** : la vitrine est un dépôt **séparé**, relié par **PROMOTION**
-  (version/tag), **pas** par un remote git. On n'y pousse jamais directement.
-Autrement dit : le clone local ne « connaît » que son atelier ; la vitrine se publie par promotion
-(`situlab project promote`), sous **PIN**.
-
-## Accès MCP (agents sans terminal)
-
-SituLab expose un **serveur MCP** (Model Context Protocol) local sur **stdio**, en plus de la
-CLI et de la fenêtre. C'est le 3ᵉ frontal, au-dessus du même noyau — mêmes garanties de
-sécurité : **lectures libres** (session déverrouillée), **mutations distantes sous PIN** (la
-fenêtre de SituLab s'ouvre sur le poste, l'humain confirme ; l'agent ne peut pas contourner).
-
-Lancer : `situlab mcp` (le démon SituLab, la fenêtre, doit tourner).
-
-Déclarer dans un client MCP (Cursor, Claude Desktop, …) :
-```json
-{ "mcpServers": { "situlab": { "command": "situlab", "args": ["mcp"] } } }
-```
-
-Outils exposés (parité CLI) :
-- **Lectures** : `whoami`, `instance_list`, `dashboard`, `repo_list`, `repo_view`,
-  `repo_branches`, `repo_tags`, `repo_commits`, `repo_tree`, `repo_file`, `org_list`,
-  `issue_list`, `pull_list`, `pull_detail`, `pull_diff`, `pull_files`, `label_list`,
-  `milestone_list`, `local_status`, `project_list`, `project_status` (projets & équilibre, v1.7).
-- **Local (sans PIN)** : `repo_clone`, `repo_fetch`, `repo_pull`, `repo_commit`,
-  `git_branch_create`, `git_switch`, `git_log`, `git_discard`, `git_stash_save`,
-  `git_stash_list`, `git_stash_pop`.
-- **Git complet local (v1.6, sans PIN)** : `git_merge` (+ `git_merge_abort`), `git_rebase`
-  (+ `git_rebase_continue`/`git_rebase_abort`), `git_cherry_pick`
-  (+ `git_cherry_pick_continue`/`git_cherry_pick_abort`), `git_revert`, `git_reset`
-  (mode soft|mixed|hard), `git_amend`, `git_commit_paths` (staging sélectif), `git_tag_create`.
-- **Mutations distantes (PIN requis)** : `git_push_force`, `git_push_tag`,
-  `repo_push`, `repo_sync`, `repo_create`, `repo_delete`,
-  `repo_rename`, `repo_visibility`, `repo_archive`, `repo_default_branch`,
-  `issue_create`, `issue_comment`, `issue_close`, `issue_reopen`,
-  `issue_set_labels`, `issue_set_assignees`, `issue_set_milestone`,
-  `pull_create`, `pull_merge`, `pull_review`, `pull_close`, `pull_edit`,
-  `release_create`, `release_delete`, `tag_create`, `tag_delete`, `project_promote` (publication
-  atelier→production, v1.7).
-- **CORPUS — clouds souverains (v1.10)** : `cloud_connections`, `cloud_allowed_dirs` (tes points
-  d'entrée — à lire d'abord), `cloud_list`, `cloud_read`, `cloud_download` (lectures) ;
-  `cloud_mkdir`, `cloud_write` (déposer un résumé), `cloud_upload`, `cloud_delete` (écritures, PIN
-  selon la connexion). Tu **ne vois que les dossiers autorisés** par l'humain.
-- **Sauvegardes (v1.10)** : `backup_list`, `backup_run`.
-- **KERNEL — la mémoire (v1.11)** : `kernel_list`, `kernel_status`, `kernel_contents`, `kernel_pull`
-  (lectures/récupération) ; `kernel_save` (enregistrer → envoyer, **PIN**) ; `kernel_open` (**fichier
-  d'ouverture** à lire en premier pour « ouvrir » la mémoire). La **désignation** d'un KERNEL reste
-  réservée à la fenêtre — volontairement hors de ta portée.
-- **SPOKES — projections de mission (v1.11)** : `spoke_list`, `spoke_status`, `spoke_contents`,
-  `spoke_pull`, `spoke_save` (**PIN**), `spoke_open` (fichier run). Désignation réservée à la fenêtre.
-- **Carte SituLab (v1.11)** : `situlab_map` — rôle (KERNEL/spoke/normal), tag projet et liens
-  local↔atelier↔vitrine de chaque dépôt. À lire pour comprendre l'organisation du poste.
-
-Un outil de mutation renvoie une **erreur « PIN requis / refusé »** si l'humain ne confirme pas
-— jamais contournable par l'agent. Le jeton n'est jamais remis à l'agent (ni par la CLI, ni par
-MCP) : c'est le démon qui agit.
-
-## Exemples agent
-
-```bash
-situlab instance add apcom --url https://git.apcom.app --token <TOKEN>
-situlab dashboard --output json
-situlab repo tree apcom/SituLab --output json
-situlab repo file apcom/SituLab README.md
-situlab repo push C:/work/SituLab --output json   # échoue en code 3 sans PIN humain
-```
+---
+<!-- Notre collaboration — section ajoutée au dépôt, éditable dans Réglages → Assistant IA.
+     L'agent la lit au démarrage et peut l'enrichir (préférences, conventions, dépôts clés). -->

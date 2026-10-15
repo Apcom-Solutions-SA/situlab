@@ -60,11 +60,15 @@ async function loadMatrix() {
     <div class="mx-h mx-h-vit">🌐 Vitrine</div>
     <div class="mx-h mx-h-act"></div></div>`;
 
+  // Marque de forge (GitHub / Forgejo) pour les cases distantes : on identifie d'un coup d'œil OÙ vit le
+  // dépôt (atelier/vitrine), avec le logo + l'instance en infobulle. Local = pas de forge (c'est le poste).
+  const forgeMark = (kind, c) => (kind !== "local" && c && c.instance && typeof providerMark === "function")
+    ? `<span class="mx-forge" title="${esc(c.instance)}">${providerMark(c.instance)}</span>` : "";
   const cell = (kind, c, row, idx) => {
     if (c && c.present) {
       const sub = kind === "local" ? "sur ce poste" : (c.org || c.instance || "");
       return `<button type="button" class="mx-cell on" data-open="${kind}:${idx}" title="Ouvrir le détail">
-        ${orgFolder(kind)}<span class="mx-cell-txt"><span class="mx-name">${esc(c.name || "")}</span><span class="mx-org">${esc(sub)}</span></span></button>`;
+        ${orgFolder(kind)}<span class="mx-cell-txt"><span class="mx-name">${esc(c.name || "")}</span><span class="mx-org">${forgeMark(kind, c)}${esc(sub)}</span></span></button>`;
     }
     // Case vide → action « créer », selon la colonne.
     const label = kind === "local" ? "Créer le clone" : kind === "atelier" ? "Créer l'atelier" : "Créer la vitrine";
@@ -79,7 +83,7 @@ async function loadMatrix() {
       return `<button type="button" class="mx-cell empty" data-create="vitrine:${idx}"><span class="mx-plus">＋</span><span class="mx-create-t">Créer la vitrine</span></button>`;
     }
     return vs.map((v, vi) => `<button type="button" class="mx-cell on" data-open="vitrine:${idx}:${vi}" title="Ouvrir le détail">
-      ${orgFolder("vitrine")}<span class="mx-cell-txt"><span class="mx-name">${esc(v.name || "")}</span><span class="mx-org">${esc(v.org || v.instance || "")}</span></span></button>`).join("");
+      ${orgFolder("vitrine")}<span class="mx-cell-txt"><span class="mx-name">${esc(v.name || "")}</span><span class="mx-org">${forgeMark("vitrine", v)}${esc(v.org || v.instance || "")}</span></span></button>`).join("");
   };
 
   const rowHTML = rows.map((row, i) => {
@@ -88,13 +92,32 @@ async function loadMatrix() {
     if (row.project) act = `<span class="mx-proj" title="Déjà appairé dans « ${esc(row.project)} »">✓ ${esc(row.project)}</span>`;
     else if (row.pending) act = `<button type="button" class="mx-make" data-make="${i}" title="Appairer ces dépôts (local ↔ atelier ↔ vitrine)">⇄ Appairer</button>`;
     const arch = row.project ? "" : `<button type="button" class="mx-arch" data-arch="${i}" title="Ranger ou supprimer cette suggestion"><span class="mx-arch-ico">🗄</span> Archiver</button>`;
-    return `<div class="mx-row${row.pending ? " pending" : ""}">
+    // Case de sélection pour les actions EN MASSE (seulement les lignes rangeable, pas les projets).
+    const selbox = row.project ? "" : `<input type="checkbox" class="mx-sel" data-sel="${i}" aria-label="Sélectionner pour action en masse" />`;
+    // Facettes de filtrage (1.12) : état d'appairage + présence locale + texte cherchable.
+    const fstate = row.project ? "paired" : (row.pending ? "pending" : "none");
+    const hay = [row.name, row.local && row.local.name, row.atelier && row.atelier.name, row.atelier && row.atelier.org,
+      ...(row.vitrines || []).map((v) => v.name), ...(row.vitrines || []).map((v) => v.org)].filter(Boolean).join(" ").toLowerCase();
+    return `<div class="mx-row${row.pending ? " pending" : ""}" data-fstate="${fstate}" data-flocal="${row.local && row.local.present ? "1" : "0"}" data-hay="${esc(hay)}">
       <div class="mx-col">${cell("local", row.local, row, i)}</div>
       <div class="mx-col">${cell("atelier", row.atelier, row, i)}</div>
       <div class="mx-col">${vitCell(row, i)}</div>
-      <div class="mx-col mx-col-act">${act}${arch}</div>
+      <div class="mx-col mx-col-act">${selbox}${act}${arch}</div>
     </div>`;
   }).join("");
+
+  // Barre de filtres (1.12) : recherche + facettes combinables. Pensée usage : l'utilisateur cherche
+  // « ce qui reste à faire » (à appairer), « ce qui est sur mon poste », ou un dépôt par son nom.
+  const n = { all: rows.length, pending: rows.filter((r) => r.pending).length, paired: rows.filter((r) => r.project).length, local: rows.filter((r) => r.local && r.local.present).length };
+  const filterHTML = rows.length ? `<div class="org-filters">
+    <div class="org-search"><span class="org-search-ico">⌕</span><input id="org-q" class="inp" type="search" placeholder="Rechercher un dépôt…" autocomplete="off" spellcheck="false" /></div>
+    <div class="org-chips" id="org-chips">
+      <button type="button" class="org-chip on" data-f="all">Tous <span class="org-chip-n">${n.all}</span></button>
+      <button type="button" class="org-chip" data-f="pending" title="Dépôts qu'il reste à appairer">⚠ À appairer <span class="org-chip-n">${n.pending}</span></button>
+      <button type="button" class="org-chip" data-f="local" title="Dépôts présents sur ce poste">🖥 Sur le poste <span class="org-chip-n">${n.local}</span></button>
+      <button type="button" class="org-chip" data-f="paired" title="Dépôts déjà appairés">✓ Appairés <span class="org-chip-n">${n.paired}</span></button>
+    </div>
+  </div>` : "";
 
   const body = rows.length
     ? `<div class="mx-grid">${head}${rowHTML}</div>`
@@ -112,7 +135,86 @@ async function loadMatrix() {
       <div class="mx-arch-list">${archived.map(arow).join("")}</div></details>`;
   }
 
-  box.innerHTML = bannerHTML + unreachHTML + body + archHTML;
+  const bulkHTML = rows.length ? `<div class="org-bulk hidden" id="org-bulk">
+    <span class="org-bulk-txt"><b id="org-bulk-n">0</b> sélectionné(s)</span>
+    <button type="button" class="btn btn-ghost btn-sm" id="org-selall">Tout sélectionner (visibles)</button>
+    <button type="button" class="btn btn-ghost btn-sm" id="org-deselect">Désélectionner</button>
+    <span class="org-bulk-sep"></span>
+    <button type="button" class="btn btn-primary btn-sm" id="org-bulk-arch">🗄 Archiver la sélection</button>
+    <button type="button" class="btn btn-ghost btn-sm btn-danger" id="org-bulk-del">🗑 Supprimer la sélection</button>
+  </div>` : "";
+
+  box.innerHTML = bannerHTML + unreachHTML + filterHTML + bulkHTML + body + `<div class="org-noresult hidden" id="org-noresult">Aucun dépôt ne correspond à ce filtre.</div>` + archHTML;
+
+  // --- Sélection multiple + actions EN MASSE (archiver / supprimer) ---
+  const selectedRows = () => Array.from(box.querySelectorAll(".mx-sel:checked")).map((c) => rows[+c.dataset.sel]).filter(Boolean);
+  const updateBulk = () => {
+    const n = box.querySelectorAll(".mx-sel:checked").length;
+    const bar = el("org-bulk"); if (bar) bar.classList.toggle("hidden", n === 0);
+    const nb = el("org-bulk-n"); if (nb) nb.textContent = n;
+  };
+  box.querySelectorAll(".mx-sel").forEach((c) => c.onchange = updateBulk);
+  if (el("org-selall")) el("org-selall").onclick = () => {
+    box.querySelectorAll(".mx-row:not(.hidden) .mx-sel").forEach((c) => c.checked = true); updateBulk();
+  };
+  if (el("org-deselect")) el("org-deselect").onclick = () => {
+    box.querySelectorAll(".mx-sel").forEach((c) => c.checked = false); updateBulk();
+  };
+  if (el("org-bulk-arch")) el("org-bulk-arch").onclick = async () => {
+    const sel = selectedRows(); if (!sel.length) return;
+    el("org-bulk-arch").disabled = true;
+    let ok = 0;
+    for (const row of sel) { try { await App().ArchivePairing(row.key); ok++; } catch (e) { if (isLocked(e)) return handleLock(); } }
+    toast(ok + " suggestion(s) archivée(s)", "ok"); renderOrganize();
+  };
+  if (el("org-bulk-del")) el("org-bulk-del").onclick = () => {
+    const sel = selectedRows(); if (!sel.length) return;
+    openModal(`Supprimer ${sel.length} dépôt(s) ?`, `<div class="field">
+      <div class="callout danger"><b>Action irréversible.</b> Les dépôts <b>distants</b> (atelier/vitrine) de la sélection seront supprimés du serveur. Les <b>dossiers locaux sont conservés</b> (retirés du suivi seulement).</div>
+      <ul class="arch-del-list">${sel.slice(0, 20).map((r) => `<li>${esc(r.name)}</li>`).join("")}${sel.length > 20 ? `<li class="muted">… et ${sel.length - 20} autre(s)</li>` : ""}</ul></div>`, () => {
+      pinConfirm(`Supprimer définitivement ${sel.length} dépôt(s) distants`, async (pin) => {
+        let ok = 0;
+        for (const row of sel) {
+          const hasAtl = !!(row.atelier && row.atelier.present);
+          const atelier = hasAtl ? { instance: row.atelier.instance, owner: row.atelier.org, repo: row.atelier.name } : { instance: "", owner: "", repo: "" };
+          const productions = (row.vitrines || []).map((v) => ({ instance: v.instance, owner: v.org, repo: v.name }));
+          const localPath = (row.local && row.local.present) ? row.local.local_path : "";
+          try { await App().PairingDelete(localPath, false, atelier, productions, pin); ok++; } catch (e) { /* on continue le lot */ }
+        }
+        closeModal(); toast(ok + " dépôt(s) supprimé(s)", "ok"); renderOrganize();
+      });
+    });
+    el("modal-ok").textContent = "Supprimer définitivement"; el("modal-ok").classList.add("danger-btn"); el("modal-cancel").textContent = "Annuler";
+  };
+
+  // --- Filtrage (recherche + facette) en direct, sans réseau ni re-render ---
+  const applyFilter = () => {
+    const q = ((el("org-q") && el("org-q").value) || "").trim().toLowerCase();
+    const facet = (state.orgFacet || "all");
+    let shown = 0;
+    box.querySelectorAll(".mx-row").forEach((r) => {
+      const okFacet = facet === "all"
+        || (facet === "pending" && r.dataset.fstate === "pending")
+        || (facet === "paired" && r.dataset.fstate === "paired")
+        || (facet === "local" && r.dataset.flocal === "1");
+      const okText = !q || (r.dataset.hay || "").includes(q);
+      const on = okFacet && okText;
+      r.classList.toggle("hidden", !on);
+      if (on) shown++;
+    });
+    const nr = el("org-noresult"); if (nr) nr.classList.toggle("hidden", shown > 0 || !rows.length);
+  };
+  if (el("org-q")) el("org-q").oninput = applyFilter;
+  box.querySelectorAll(".org-chip").forEach((c) => c.onclick = () => {
+    state.orgFacet = c.dataset.f;
+    box.querySelectorAll(".org-chip").forEach((x) => x.classList.toggle("on", x === c));
+    applyFilter();
+  });
+  // Restaure la facette courante (persistée pendant la session).
+  if (state.orgFacet && state.orgFacet !== "all") {
+    const cur = box.querySelector(`.org-chip[data-f="${state.orgFacet}"]`);
+    if (cur) { box.querySelectorAll(".org-chip").forEach((x) => x.classList.toggle("on", x === cur)); applyFilter(); }
+  }
 
   // --- Ouverture du détail (le detail distant a besoin de la bonne connexion) ---
   const openCell = (spec) => {

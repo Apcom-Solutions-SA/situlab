@@ -37,7 +37,7 @@ async function renderSpokes() {
     const parent = cfg.kernel || "";
     const run = cfg.run_file || "";
     const link = parent
-      ? `<span class="sp-parent">↳ <span class="sp-parent-pill">💡 ${esc(parent)}</span></span><button type="button" class="lnk" data-parent="${esc(p.name)}">modifier</button>`
+      ? `<span class="sp-parent">↳ <span class="sp-parent-pill">${NAV_ICO.kernel} ${esc(parent)}</span></span><button type="button" class="lnk" data-parent="${esc(p.name)}">modifier</button>`
       : `<button type="button" class="lnk sp-parent-warn" data-parent="${esc(p.name)}">↳ Rattacher à un KERNEL</button>`;
     const runLink = run
       ? `<span class="run-pill" title="Fichier run pour l'IA">📄 ${esc(run)}</span><button type="button" class="lnk" data-run="${esc(p.name)}">modifier</button>`
@@ -75,7 +75,7 @@ function dedupeKernels(ks) {
 
 // spokeParentModal : choisir le KERNEL parent d'un spoke, en CARTES cliquables (pas de select). onPick(name).
 function spokeParentModal(spokeName, current, kernels, onPick) {
-  const list = (kernels || []).map((k) => `<button type="button" class="kparent${config_eq(k.name, current) ? " on" : ""}" data-k="${esc(k.name)}"><span class="kparent-ico">💡</span>${esc(k.name)}</button>`).join("");
+  const list = (kernels || []).map((k) => `<button type="button" class="kparent${config_eq(k.name, current) ? " on" : ""}" data-k="${esc(k.name)}"><span class="kparent-ico">${NAV_ICO.kernel}</span>${esc(k.name)}</button>`).join("");
   openModal(`KERNEL parent — ${esc(spokeName)}`, `<div class="field">
     <p class="sub">À quel <b>KERNEL</b> rattacher ce spoke ? (un spoke projette la mission d'un KERNEL)</p>
     <div class="kparent-list">

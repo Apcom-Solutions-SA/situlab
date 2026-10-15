@@ -201,6 +201,21 @@ function kpickCardHTML(p, i) {
   </div>`;
 }
 
+// afterKernelDesignated : juste après la désignation, on PROPOSE de choisir le fichier d'ouverture —
+// sinon l'utilisateur repart sans comprendre pourquoi l'étape de mise en route reste incomplète.
+function afterKernelDesignated(path, name) {
+  renderKernel();
+  runFileModal(path, "", async (f) => {
+    try {
+      await App().SetKernelRunFile(path, f);
+      closeModal();
+      toast(f ? "Fichier d'ouverture défini" : "Vous pourrez définir le fichier d'ouverture plus tard", f ? "ok" : "info");
+      renderKernel();
+      if (typeof refreshSetup === "function") refreshSetup();
+    } catch (e) { if (isLocked(e)) return handleLock(); toast(cleanErr(e), "err"); }
+  }, "Fichier d'ouverture — " + (name || "KERNEL"));
+}
+
 // pickKernelRepo : désigner un KERNEL = CHOISIR l'un de ses DÉPÔTS APPAIRÉS (classeurs). On liste les
 // projets ; le choix d'un classeur cloné sur ce poste pré-remplit nom + chemin local + connexion.
 async function pickKernelRepo() {
@@ -226,7 +241,7 @@ async function pickKernelRepo() {
         await App().AddKernel(p.name, p.local.path, (p.atelier || {}).instance || "", "");
         closeModal();
         toast("KERNEL « " + p.name + " » désigné", "ok");
-        renderKernel();
+        afterKernelDesignated(p.local.path, p.name);
       } catch (e) {
         if (isLocked(e)) return handleLock();
         toast(cleanErr(e), "err");
@@ -266,7 +281,7 @@ function designateKernelModal(prefill) {
         closeModal();
         toast("KERNEL « " + name + " » désigné", "ok");
         state.kernelName = name;
-        renderKernel();
+        afterKernelDesignated(path, name);
       } catch (e) {
         err.textContent = cleanErr(e);
         err.classList.remove("hidden");

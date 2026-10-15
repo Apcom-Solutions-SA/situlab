@@ -231,6 +231,7 @@ func TestGatePolicy(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	d.svc.ReanchorPolicy() // policy posée hors setters (test) : ré-ancrer la signature d'intégrité
 
 	// Atelier + issues : session déverrouillée suffit — aucune modale.
 	p.calls = 0

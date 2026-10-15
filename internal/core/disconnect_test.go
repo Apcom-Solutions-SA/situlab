@@ -27,6 +27,7 @@ func TestDisconnectedInstancesAndReset(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 
 	// Avant tout PIN : trousseau absent → les deux connexions sont déconnectées (ordre de config).
 	if got := s.DisconnectedInstances(); !reflect.DeepEqual(got, []string{"a", "b"}) {

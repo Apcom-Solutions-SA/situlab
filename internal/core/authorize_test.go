@@ -31,6 +31,7 @@ func TestAuthorizePerConnection(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	if err := s.Unlock("123456"); err != nil {
 		t.Fatalf("Unlock : %v", err)
 	}
@@ -60,6 +61,7 @@ func TestAuthorizePerConnection(t *testing.T) {
 	if err := cfg2.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy modifiée hors setters (test) : ré-ancrer la signature
 	if err := s.authorize("atl", config.ActionPush, ""); !errors.Is(err, ErrPINNeeded) {
 		t.Errorf("atelier push forcé sous PIN : attendu ErrPINNeeded, obtenu %v", err)
 	}
@@ -89,6 +91,7 @@ func TestRequiresPINForPush(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	// Dépôt local dont l'origin pointe vers l'hôte de PRODUCTION.
 	dir := t.TempDir()
 	for _, args := range [][]string{{"init"}, {"remote", "add", "origin", "https://prod.example/o/r.git"}} {
@@ -122,6 +125,7 @@ func TestAuthorizeFailClosedWhenLocked(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	// SetPIN a ouvert la session : on la referme pour exercer le chemin verrouillé.
 	s.Lock()
 
@@ -155,6 +159,7 @@ func TestInstanceForHostShared(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	// Dépôt local dont l'origin pointe vers l'hôte partagé.
 	dir := t.TempDir()
 	for _, args := range [][]string{{"init"}, {"remote", "add", "origin", "https://forge.example/o/r.git"}} {
@@ -177,6 +182,7 @@ func TestInstanceForHostShared(t *testing.T) {
 	if err := cfg2.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy modifiée hors setters (test) : ré-ancrer la signature
 	if s.RequiresPINForPush("atl1", dir) {
 		t.Error("hôte servi par une seule connexion atelier : le PIN ne devrait pas être exigé")
 	}

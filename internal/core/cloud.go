@@ -224,6 +224,7 @@ func (s *Service) AddFileCloud(name, kind, rawURL, user, password string) error 
 	}
 	fc := config.FileCloud{Name: name, Kind: kind, URL: clean, User: user, Default: len(cfg.FileClouds) == 0}
 	cfg.FileClouds = append(cfg.FileClouds, fc)
+	s.resignPolicy(cfg) // la policy inclut cette connexion (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		_ = kr.DeleteToken(cloudKeyID(name)) // rollback trousseau
 		return err
@@ -247,6 +248,7 @@ func (s *Service) RemoveFileCloud(name string) error {
 	if !ok {
 		return ErrNoCloud
 	}
+	s.resignPolicy(cfg) // la policy ne référence plus cette connexion (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -308,6 +310,7 @@ func (s *Service) SetCloudAllowedDirs(name string, dirs []string) error {
 		out = append(out, nd)
 	}
 	fc.AllowedDirs = out
+	s.resignPolicy(cfg) // re-signe la policy (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -334,6 +337,7 @@ func (s *Service) SetCloudAccess(name string, allowed, denied []string) error {
 	}
 	fc.AllowedDirs = cleanCloudPaths(allowed)
 	fc.DeniedDirs = cleanCloudPaths(denied)
+	s.resignPolicy(cfg) // re-signe la policy (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -372,6 +376,7 @@ func (s *Service) SetCloudPINPolicy(name string, pol *config.CloudPINPolicy) err
 		return ErrNoCloud
 	}
 	fc.PINPolicy = pol
+	s.resignPolicy(cfg) // re-signe la policy (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -385,10 +390,12 @@ func (s *Service) SetCloudPINPolicy(name string, pol *config.CloudPINPolicy) err
 func (s *Service) RequiresPINCloud(name string, a config.CloudAction) bool {
 	s.mu.Lock()
 	s.lockedReload()
-	fc := s.cfg.ResolveCloud(name)
+	cfg := s.cfg
+	fc := cfg.ResolveCloud(name)
+	ok := s.policyOK(cfg)
 	s.mu.Unlock()
-	if fc == nil {
-		return true
+	if fc == nil || !ok {
+		return true // fail-closed : cloud inconnu OU politique falsifiée → PIN exigé (fermeture P3)
 	}
 	return fc.RequiresPINCloud(a)
 }
@@ -413,10 +420,12 @@ func (s *Service) authorizeCloud(name string, a config.CloudAction, pin string) 
 func (s *Service) CloudPathAllowed(name, p string) bool {
 	s.mu.Lock()
 	s.lockedReload()
-	fc := s.cfg.ResolveCloud(name)
+	cfg := s.cfg
+	fc := cfg.ResolveCloud(name)
+	ok := s.policyOK(cfg)
 	s.mu.Unlock()
-	if fc == nil {
-		return false
+	if fc == nil || !ok {
+		return false // fail-closed : cloud inconnu OU politique falsifiée → périmètre fermé (fermeture P3)
 	}
 	return fc.PathAllowed(p)
 }
@@ -426,10 +435,12 @@ func (s *Service) CloudPathAllowed(name, p string) bool {
 func (s *Service) CloudAllowedDirs(name string) []string {
 	s.mu.Lock()
 	s.lockedReload()
-	fc := s.cfg.ResolveCloud(name)
+	cfg := s.cfg
+	fc := cfg.ResolveCloud(name)
+	ok := s.policyOK(cfg)
 	s.mu.Unlock()
-	if fc == nil {
-		return nil
+	if fc == nil || !ok {
+		return nil // fail-closed : politique falsifiée → aucun point d'entrée annoncé (fermeture P3)
 	}
 	return append([]string(nil), fc.AllowedDirs...)
 }

@@ -121,8 +121,10 @@ func cmdPurge() *cobra.Command {
 			if !confirm {
 				return errors.New("ajoutez --confirm pour confirmer cet effacement irréversible")
 			}
-			if cl, err := ipc.Dial(ipc.SocketPath()); err == nil {
-				cl.Close()
+			// Vivacité par sonde BRUTE (sans handshake jeton) : le garde doit tenir même face à un démon
+			// d'une version antérieure qui n'a pas écrit daemon.token (sinon Dial échouerait et on
+			// effacerait tout pendant qu'une fenêtre vivante tourne — fail-open corrigé en 1.16).
+			if ipc.Alive(ipc.SocketPath()) {
 				return errors.New("fermez d'abord la fenêtre SituLab, puis relancez « situlab purge --confirm »")
 			}
 			svc0, err := core.New(version)

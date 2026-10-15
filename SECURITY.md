@@ -5,102 +5,73 @@
 ## Signaler une vulnérabilité
 
 Merci de **ne pas** ouvrir d'issue publique pour une faille de sécurité.
-Écrivez à **security@apcom.ch** (ou au contact indiqué sur apcom.ch) avec :
-une description, les étapes de reproduction, la version, et l'impact estimé.
-Nous accusons réception sous quelques jours ouvrés et tenons informé jusqu'au correctif.
+Écrivez à **gregory.liand@apcom.ch** avec : une description, les étapes de reproduction, la version
+(`situlab doctor`) et l'impact estimé. Accusé de réception sous quelques jours ouvrés, suivi jusqu'au
+correctif.
 
-## Modèle de menace (ce qui est garanti)
+## Ce qui est garanti
 
 - **Jetons chiffrés au repos** : trousseau local `keyring.json`, clé dérivée du PIN
-  (Argon2id → KEK → DEK, AES-256-GCM). Le PIN n'est stocké nulle part.
-- **Le PIN ne transite jamais par le socket ni par MCP** : il est saisi uniquement dans une
-  fenêtre sur le poste. Un agent (CLI/MCP) ne peut pas autoriser une écriture ni définir le PIN.
-- **Intention d'agent (1.9.8), purement déclarative** : un agent peut joindre une phrase « pourquoi »
-  (`--intent` / argument MCP `intent`) affichée dans la fenêtre PIN, distincte de ce que SituLab
-  **constate**. Elle est bornée en longueur et échappée à l'affichage ; elle **n'autorise rien** et ne
-  modifie aucune décision d'accès — seul le PIN humain autorise. Les gestes git **locaux** (créer/
-  supprimer une branche, fusionner, worktrees) restent sans PIN (aucun accès distant), bloqués en mode
-  lecture seule — modèle inchangé par rapport aux autres opérations locales (reset, discard).
-- **Le jeton d'instance n'est jamais remis au client** ; c'est le démon qui appelle l'API.
-  Depuis la 1.2, l'en-tête d'authentification git passe par l'**environnement** (jamais `argv`).
+  (Argon2id → KEK → DEK, AES-256-GCM). Le PIN n'est stocké nulle part. Vaut pour les jetons git **et**
+  les mots de passe d'application cloud (CORPUS).
+- **Le PIN ne transite jamais par le socket ni par MCP.** Il est saisi uniquement dans une fenêtre sur
+  le poste ; un agent (CLI/MCP) ne peut ni autoriser une écriture ni définir le PIN.
+- **Le jeton n'est jamais remis au client** : c'est le démon qui appelle l'API. L'en-tête
+  d'authentification git passe par l'environnement, jamais par `argv`.
 - **git durci** : hooks/fsmonitor/credential.helper neutralisés, transports ext/file interdits,
   `GIT_TERMINAL_PROMPT=0`, diff externe/textconv désactivés.
 - **http:// refusé** pour un hôte public (jeton en clair) ; autorisé seulement en local/privé.
-- **Rôle & politique PIN par connexion (v1.7)** : chaque connexion est *atelier* ou *production*,
-  avec une politique PIN par classe d'action. Défauts : atelier autonome (envoi/issues sans PIN),
-  production tout sous PIN. L'exigence de PIN d'un **envoi** suit le **dépôt réellement poussé**
-  (son serveur), pas la connexion nommée par l'appelant → un agent ne peut pas pousser en production
-  via une connexion atelier (fail-closed si le serveur du dépôt est inconnu ou ambigu). La création/
-  suppression de **jetons** passe aussi par la politique PIN. Rôle et politique se règlent **dans la
-  fenêtre uniquement** (jamais via socket/CLI/MCP). La **promotion** atelier→production est toujours
-  confirmée par le PIN.
+- **Rôle & politique PIN par connexion** : *atelier* (envoi/issues autonomes, admin sous PIN) ou
+  *production* (tout sous PIN). L'exigence de PIN d'un envoi suit le **serveur du dépôt réellement
+  poussé**, pas la connexion nommée par l'appelant (fail-closed si ambigu). Rôle et politique se règlent
+  **en fenêtre uniquement**. La promotion atelier → production est toujours confirmée par le PIN.
+- **Accès IA au CORPUS borné** : l'agent ne voit que les dossiers cloud explicitement autorisés
+  (allowlist + exclusions, fail-closed), appliqué à la frontière agent.
+- **Mode lecture seule** : bloque toute mutation (git et cloud) au cœur, uniformément GUI/CLI/MCP.
 
-## Limites connues (assumées, à documenter côté utilisateur)
+## Limites connues (assumées)
 
-- **Robustesse du PIN (6 chiffres).** Le trousseau au repos résiste à Argon2id, mais un PIN à
-  6 chiffres (1 million de combinaisons) reste cassable **hors ligne** si le fichier `keyring.json`
-  est volé (de quelques heures à quelques jours selon la machine). Le verrou 5 essais / 60 s ne
-  protège que l'interface, pas le fichier. → **Atténuations** : chiffrer le disque (BitLocker,
-  FileVault), ne pas laisser traîner `keyring.json`. Une phrase de passe est à l'étude pour une
-  version ultérieure.
-- **Processus de même utilisateur.** Tant que la session est déverrouillée, le jeton déchiffré
-  vit en mémoire du démon. Un programme du **même compte OS** peut lire cette mémoire. → **Parade** :
-  faire tourner les agents sous un autre compte / en bac à sable ; activer « verrouiller après
-  écriture » et un auto-verrouillage court.
-- **Autres identifiants git du poste.** Si le poste a une clé SSH ou un gestionnaire
-  d'identifiants git, un accès git **indépendant** de SituLab reste possible. L'écran
-  **Réglages → Sécurité** tente de le détecter, mais cette détection est **indicative** :
-  elle ne voit pas un agent SSH déjà chargé, une clé au nom non standard, ni les jetons
-  rangés par d'autres outils. Son absence d'alerte ne garantit donc pas qu'aucun accès
-  parallèle n'existe.
-- **Gestes git locaux sur un chemin arbitraire.** Les commandes git locales (commit, reset,
-  discard, merge…) opèrent sur le chemin fourni, même s'il n'est pas un dépôt « suivi » par SituLab.
-  La frontière protectrice reste le **mode lecture seule** (bloque toute mutation) et la politique
-  PIN pour le distant, pas une liste blanche de chemins.
-- **Mode lecture seule.** Il protège contre les **erreurs de manipulation** (une écriture
-  involontaire pendant qu'on explore). Ce n'est pas une barrière de sécurité : un programme
-  tournant sous le **même compte OS** peut modifier `config.json` et le désactiver. La vraie
-  parade reste l'isolation de compte / bac à sable (voir ci-dessus).
+- **PIN à 6 chiffres.** Le trousseau résiste à Argon2id, mais 6 chiffres restent cassables **hors ligne**
+  si `keyring.json` est volé. Le verrou 5 essais / 60 s ne protège que l'interface. → Chiffrer le disque
+  (BitLocker/FileVault) ; ne pas laisser traîner `keyring.json`.
+- **Processus de même utilisateur.** Session déverrouillée, le jeton déchiffré vit en mémoire du démon ;
+  un programme du **même compte OS** peut le lire. → Faire tourner les agents sous un autre compte / bac à
+  sable (voir la **SafeRoom**) ; auto-verrouillage court (défaut 5 min depuis 1.16).
+  *Durcissement 1.16 :* la **politique** (quand exiger le PIN, périmètre, lecture seule) est désormais
+  **signée** (clé d'appareil) et le canal du démon exige un **jeton** — une réécriture directe de
+  `config.json` ou une connexion anonyme au socket est détectée et retombe en **position fermée**. Résidu
+  assumé : la clé d'appareil (`device.key`) étant lisible par le même compte OS, un attaquant du **même
+  compte disposant d'exécution de code** peut encore forger une signature (comme il peut déjà dumper la
+  mémoire du démon déverrouillé) — c'est une **défense en profondeur**, pas une frontière contre un
+  attaquant même-compte déterminé. Le vrai socle reste le **PIN** (jamais sur disque) et le coût Argon2id.
+  *Sauvegarde :* la clé d'appareil (`device.key`) fait partie de l'**état local du poste**. Sauvegardez le
+  **dossier de configuration entier** (pas seulement `config.json`). En cas de clé renouvelée (restauration
+  partielle, migration de machine), la politique apparaît « non validée » ; on la **re-valide** depuis
+  Réglages (après avoir vérifié rôles/périmètres/PIN) — jamais automatiquement.
+- **Verrou anti-bruteforce du PIN (`pinguard.json`).** Le compteur fait autorité **en mémoire** du démon
+  (seul écrivain) : une réécriture du fichier pendant qu'il tourne n'a aucun effet. La persistance sur
+  disque n'est qu'un **confort** pour survivre à un redémarrage ; un process du même compte OS peut la
+  réinitialiser (supprimer le fichier) — limite assumée. La vraie protection hors ligne reste le **coût
+  Argon2id** (m=64 Mo, t=3, p=4), pas ce verrou d'interface.
+- **Autres identifiants git du poste.** Une clé SSH ou un gestionnaire d'identifiants permet un accès git
+  **indépendant** de SituLab. La détection (Réglages ▸ Diagnostic) est **indicative** : elle ne voit pas
+  un agent SSH chargé, une clé au nom non standard, ni les jetons d'autres outils.
+- **Signature de garantie (ci-dessous).** Non infalsifiable en local.
 
-## Signature de garantie « SituLab approved » — limite assumée (T2)
+## Signature de garantie « SituLab approved »
 
-Chaque commit créé dans SituLab porte une attestation d'origine (clé d'appareil ed25519 chiffrée par
-le PIN, certifiée par une racine APCOM épinglée), vérifiée localement. C'est une garantie **non
-bloquante** : elle rend visible qui respecte la discipline, elle ne rejette rien.
+Chaque commit créé dans SituLab porte une attestation d'origine, vérifiée localement contre une racine
+APCOM épinglée. Garantie **non bloquante** : elle rend visible qui respecte la discipline « passer par
+SituLab », elle ne rejette rien. Elle est portée par un **trailer de commit immuable** (fait partie de
+l'objet, voyage avec lui).
 
-**Ce n'est pas infalsifiable en local.** Un attaquant **déterminé sous le même compte OS** peut lire
-la clé d'appareil dans la mémoire du démon déverrouillé et forger un faux « approved ». C'est le même
-plafond que partout ailleurs dans SituLab ; on le **borne** par des certificats à **courte durée** et
-une **révocation** (serials). On ne peut pas *forger* un faux ✅ sans le certificat ; on peut seulement
-*se priver* du ✅ (commettre hors SituLab) — ce qui est le signal voulu.
-
-**Depuis 1.9.5**, le modèle par défaut est une **garantie LOGICIEL** : une identité « SituLab » unique
-**embarquée** signe (plus de cert par utilisateur). Même plafond T2 : une clé dans le binaire est
-extractible → marqueur d'authenticité « fait via SituLab », pas une preuve inviolable localement.
-⚠ Tant que la gouvernance n'a pas **minté** et embarqué l'identité logicielle (geste de cérémonie
-**hors ligne**, pas automatique), ce mode est **inactif** dans le binaire : repli sur le cert d'appareil,
-ou aucun ✅. `situlab doctor` / `attest status` indiquent l'état réel.
-
-**Depuis 1.9.6 — mode « signature serveur » (T3), par connexion.** L'empreinte peut être demandée au
-**service de signature APCOM** : la **clé privée ne quitte jamais le serveur**, donc un attaquant/agent
-**sur le poste** ne peut **rien forger hors ligne**. Le démon appelle le service avec le **jeton Forgejo**
-(jamais remis au client) ; l'autorisation = accès au dépôt visé ; en plus : **audit, rate-limit,
-révocation**. **Honnêteté** : sans **racine matérielle** (TPM/WebAuthn, option future), on ne distingue
-pas parfaitement un « vrai SituLab » d'un agent muni d'un jeton valide ; le gain réel est **la clé hors du
-poste** + audit/rate-limit/révocation. La **vérification client ne change pas** (chaîne jusqu'à la racine
-APCOM embarquée). Contrat & runbook serveur : `STACK_TECHNIQUE/SITULAB/signserver/` (KERNEL).
-
-**Depuis 1.9.7 — portage IMMUABLE par trailer de commit.** L'attestation **locale** (logiciel / cert
-d'appareil) n'est plus portée par une **note git** (effaçable, remplaçable) mais par un **trailer de
-commit** « SituLab-Approved: » : il fait **partie de l'objet commit** (inaltérable sans changer le commit)
-et **voyage avec le commit** — plus de note à pousser/récupérer, ce qui supprime le mode de panne
-« commit signé, aucun badge ». La signature couvre un **pré-image canonique** du commit (arbre, parents,
-auteur, committer, message **sans** le trailer), pas le SHA final : toute altération casse la vérification
-et un trailer ne peut pas être transplanté sur un autre commit. La **chaîne de confiance et la racine
-APCOM sont inchangées**. Le **mode serveur** (qui signe le SHA) reste porté par une **note** ; la
-vérification lit **le trailer d'abord, puis la note** (compatibilité des commits antérieurs et du serveur).
+**Limite assumée (local).** Un attaquant sous le même compte OS, session déverrouillée, peut lire la clé
+et forger un faux ✅. On ne peut pas forger sans la clé ; on peut seulement se priver du ✅ (commettre hors
+SituLab) — c'est le signal voulu. Le mode **signature serveur** (clé privée hors du poste, + audit,
+rate-limit, révocation) élève cette barre. `situlab doctor` / `attest status` indiquent l'état réel du
+binaire (signature active, racine de test, ou inactive).
 
 ## Distribution
 
-Les binaires **ne sont pas signés** à ce stade (SmartScreen sous Windows, Gatekeeper sous macOS
-peuvent avertir).
+Les binaires **ne sont pas signés** à ce stade (SmartScreen sous Windows, Gatekeeper sous macOS peuvent
+avertir).

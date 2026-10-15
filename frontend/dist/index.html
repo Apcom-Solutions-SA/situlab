@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
   <title>SituLab</title>
+  <link rel="stylesheet" href="vendor/xterm.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -149,6 +150,7 @@
         <button class="nav-item" data-view="spokes" aria-label="Spokes"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.3"/><ellipse cx="12" cy="12" rx="9.2" ry="4.3" transform="rotate(-28 12 12)"/><circle cx="20" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg></span>SPOKES</button>
         <button class="nav-item" data-view="backup" aria-label="BACKUP"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6l7-3Z"/><path d="M12 8.5v5m0 0l-2.2-2.2M12 13.5l2.2-2.2"/></svg></span>BACKUP</button>
         <div class="sidebar-foot">
+          <button class="nav-item nav-term hidden" id="nav-osterm" data-view="osterm" aria-label="SafeRoom — espace de travail isolé pour votre IA"><span class="nav-ico nav-ico-ai" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.6V3"/><circle cx="12" cy="2.3" r="1.05" fill="currentColor" stroke="none"/><rect x="4.4" y="7.4" width="15.2" height="11.2" rx="3.2"/><path d="M2.6 11.6v3.2M21.4 11.6v3.2"/><circle cx="9.2" cy="12.4" r="1.35" fill="currentColor" stroke="none"/><circle cx="14.8" cy="12.4" r="1.35" fill="currentColor" stroke="none"/><path d="M9.3 15.8h5.4"/></svg></span>SafeRoom</button>
           <button class="nav-item" data-view="help" aria-label="Aide"><span class="nav-ico" aria-hidden="true">?</span>Aide</button>
           <button class="nav-item" data-view="projects" aria-label="Dépôts git"><span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8.5" r="2.2"/><path d="M6 7.2v9.6M18 10.7c0 3.1-2.2 4.9-5.2 4.9H6"/></svg></span>Dépôts git</button>
           <button class="nav-item" data-view="settings" aria-label="Réglages"><span class="nav-ico" aria-hidden="true">⚙</span>Réglages</button>
@@ -178,6 +180,9 @@
 
   <!-- Chart.js (vendorisé, hors-ligne) pour l'analyse d'équipe — voir vendor/README.txt -->
   <script src="vendor/chart.umd.min.js"></script>
+  <!-- xterm.js (vendorisé) — terminal interactif (vrai TTY) de l'OS de travail -->
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/addon-fit.js"></script>
   <!-- main.js (1.9.9) découpé en modules chargés DANS L'ORDRE (scripts classiques, portée globale
        partagée ; le bootstrap `boot` ne se déclenche qu'au DOMContentLoaded, donc après ce dernier). -->
   <script src="app/00-core.js"></script>
@@ -196,5 +201,7 @@
   <script src="app/12-backup.js"></script>
   <script src="app/13-spokes.js"></script>
   <script src="app/14-organize.js"></script>
+  <script src="app/15-setup.js"></script>
+  <script src="app/16-osbox.js"></script>
 </body>
 </html>

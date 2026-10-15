@@ -565,6 +565,36 @@ func promotionPlan(mode string, github bool) (pushTag, makeRelease bool, explain
 // propre (pas les micro-commits). L'utilisateur décide la version, la branche source et la branche
 // cible (voir PromoteOptions). Geste DISTANT vers la production → PIN TOUJOURS requis (fail-closed).
 // L'IA ne fait jamais cela (prod bridée). Enregistre le marqueur d'équilibre après succès.
+// PublishTag publie un TAG LOCAL (version déjà créée sur le poste) vers l'ATELIER, pour aligner la
+// version affichée côté atelier sans re-promouvoir. Le CONTENU doit déjà être poussé : le tag ne fait
+// que nommer un commit existant. PIN selon la politique de la connexion (atelier autonome par défaut :
+// aucun geste). Comble le trou « Synchroniser envoie les commits mais pas les tags ».
+func (s *Service) PublishTag(instance, owner, repo, localPath, tag, pin string) error {
+	if !gitx.Available() {
+		return ErrNoGit
+	}
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return fmt.Errorf("version (tag) manquante")
+	}
+	if err := s.authorize(instance, config.ActionPush, pin); err != nil {
+		return err
+	}
+	sha := gitx.TagSHA(localPath, tag)
+	if sha == "" {
+		return fmt.Errorf("la version « %s » n'existe pas en local", tag)
+	}
+	pr, err := s.ViewRepo(instance, owner, repo)
+	if err != nil {
+		return err
+	}
+	token, github, base := s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance)
+	if _, err := gitx.PushTagTo(localPath, pr.CloneURL, tag, sha, token, github, base); err != nil {
+		return fmt.Errorf("publication de la version « %s » vers l'atelier échouée : %w", tag, err)
+	}
+	return nil
+}
+
 func (s *Service) ProjectPromote(projectName string, prodIndex int, opts PromoteOptions, pin string) (*PromoteResult, error) {
 	if !gitx.Available() {
 		return nil, ErrNoGit
@@ -672,6 +702,10 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 	if err != nil {
 		return nil, err
 	}
+	// Signer le commit de promotion (trailer immuable « SituLab-Approved: ») AVANT publication : la
+	// garantie d'origine voyage ainsi avec le commit poussé sur la vitrine et se lit dans l'historique.
+	// Best-effort : si la signature n'est pas disponible, on publie le commit d'origine (non bloquant).
+	sha = s.attestPromotionSHA(path, sha)
 
 	// 5) Publier vers la prod (fast-forward sur la base récupérée ; échoue proprement si la prod a
 	//    bougé entre-temps — on ne force pas la vitrine à l'aveugle).

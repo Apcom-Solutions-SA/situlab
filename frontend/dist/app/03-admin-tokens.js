@@ -331,7 +331,7 @@ async function copyPrompt(text, opts) {
 // une modale CRUD ; appeler ensuite wireAiInvite(prompt) après openModal pour brancher le clic.
 function aiInviteHTML(sub) {
   return `<div class="ai-invite">
-    <div class="ai-invite-txt"><span class="ai-bot">🤖</span><div><b>Pas à l'aise ? Laissez votre IA le faire.</b><div class="sub">${esc(sub || "Votre agent est là pour ça. Copiez le prompt et collez-le dans votre IA — SituLab vous demandera votre PIN au moment d'agir.")}</div></div></div>
+    <div class="ai-invite-txt"><span class="ai-bot">🤖</span><div><b>Pas à l'aise ? Laissez votre IA le faire.</b><div class="sub">${esc(sub || "Votre agent est là pour ça. Copiez le prompt et collez-le dans votre IA — SituLab gère seul la validation si elle est nécessaire.")}</div></div></div>
     <button type="button" class="btn btn-ghost btn-sm" id="ai-copy">Copier le prompt pour mon IA</button>
   </div>`;
 }
@@ -341,18 +341,22 @@ function wireAiInvite(prompt) {
   b.onclick = () => copyPrompt(typeof prompt === "function" ? prompt() : prompt);
 }
 
-// Prompts par action — concis, avec la commande CLI exacte et le rappel « le PIN reste à moi ».
+// Prompts par action — directifs, avec la commande CLI exacte. Le PIN n'est JAMAIS décrété ici :
+// c'est SituLab qui, selon la politique de la connexion, répond s'il faut une validation et confirme
+// l'exécution (ou signale le délai dépassé). L'agent ne présume rien à ce sujet.
 function aiHeader(verb) {
   const inst = curInst();
-  return `${verb} via SituLab (instance « ${inst.name || state.instance} »). Utilise la CLI \`situlab\` et ajoute \`--instance "${inst.name || state.instance}"\`. Les écritures déclencheront une demande de MON PIN dans une fenêtre — ne me demande pas le PIN, ne le contourne pas.`;
+  const name = inst.name || state.instance;
+  return `${verb} via SituLab (instance « ${name} »). Utilise la CLI \`situlab\` avec \`--instance "${name}"\`. Exécute la commande : SituLab t'indiquera lui-même si une validation est requise et te confirmera quand c'est fait.`;
 }
-function promptRepoCreate(owner) {
+function promptRepoCreate(owner, suggest) {
   const orgFlag = owner ? ` --org "${owner}"` : "";
+  const nm = (suggest || "").trim();
   return [aiHeader("Crée un dépôt distant"), "",
-    `Commande : situlab repo create "<nom-du-depot>" --description "<description>" --private${orgFlag}`,
+    `Commande : situlab repo create "${nm || "<nom-du-depot>"}" --description "<description>" --private${orgFlag}`,
+    nm ? `- Nom proposé : « ${nm} » (dérivé du dépôt existant ; ajuste si besoin).` : "- Choisis un nom cohérent avec le dépôt existant.",
     owner ? `- Ce serveur crée les dépôts dans l'organisation « ${owner} » (garde --org).` : "- Si le serveur refuse l'espace personnel, ajoute --org \"<organisation>\".",
-    "- Enlève --private si le dépôt doit être public.",
-    "- Demande-moi le nom et la description si tu ne les as pas.",
+    "- Enlève --private pour un dépôt public.",
   ].join("\n");
 }
 function promptIssueCreate(owner, repo) {

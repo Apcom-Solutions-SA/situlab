@@ -17,6 +17,7 @@ import (
 	"situlab/internal/forgejo"
 	"situlab/internal/gitx"
 	"situlab/internal/ipc"
+	"situlab/internal/osbox"
 	"situlab/internal/webdav"
 
 	wailsrt "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -65,6 +66,8 @@ type App struct {
 	initErr   error // non nil si le noyau n'a pas pu s'initialiser
 	prompter  *guiPrompter
 	daemonSrv *ipc.Server
+	ptys      *ptyManager // sessions PTY du terminal de l'OS de travail (v1.15.1)
+	bh        *bridgeHost // pont hôte ⇄ box (situlab-bridge), v1.15.1
 }
 
 // NewApp construit l'app GUI (le noyau est chargé au démarrage).
@@ -72,10 +75,12 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.ptys = newPtyManager()
 	a.svc, a.initErr = core.New(version)
 	if a.svc == nil {
 		return
 	}
+	a.svc.ImportModulesSeed() // primo-paramètres déposés par l'installateur (1er lancement), best-effort
 	// Cette fenêtre est aussi le DÉMON résident : elle sert les commandes CLI et détient
 	// la session. La modale PIN surgit ici quand une opération l'exige.
 	a.prompter = newGUIPrompter(ctx)
@@ -122,6 +127,99 @@ func (a *App) AppVersion() string { return version }
 
 // Doc renvoie la documentation embarquée (Markdown) — utile aux humains comme aux agents.
 func (a *App) Doc() string { return agentsDoc }
+
+// Modules renvoie l'état des groupes de modules d'interface (v1.13).
+func (a *App) Modules() map[string]bool { return a.svc.Modules() }
+
+// SetModule active/désactive un groupe de modules.
+func (a *App) SetModule(key string, on bool) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetModule(key, on)
+}
+
+// SetModules applique un lot d'états de modules (préréglage).
+func (a *App) SetModules(mods map[string]bool) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SetModules(mods)
+}
+
+// --- OS de travail séparé (v1.15), OPT-IN ---
+
+// OSBoxStatus : état consolidé (config + détection live).
+func (a *App) OSBoxStatus() osbox.Status { return a.svc.OSBoxStatus() }
+
+// OSBoxSetEnabled : active/désactive l'OPTION (ne crée rien ; la préparation est un geste distinct).
+func (a *App) OSBoxSetEnabled(on bool) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	if !on {
+		a.stopBridge()
+	}
+	return a.svc.OSBoxSetEnabled(on)
+}
+
+// OSBoxPrepare : installe la box (long). Lancé en ARRIÈRE-PLAN ; l'interface suit via OSBoxStatus.
+func (a *App) OSBoxPrepare() error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	go func() { _ = a.svc.OSBoxPrepare() }()
+	return nil
+}
+
+func (a *App) OSBoxStart() error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	if err := a.svc.OSBoxStart(); err != nil {
+		return err
+	}
+	go a.reprovisionBridge() // re-synchronise le canal situlab-bridge si installé (best-effort)
+	return nil
+}
+func (a *App) OSBoxStop() error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	a.stopBridge()
+	return a.svc.OSBoxStop()
+}
+func (a *App) OSBoxReset() error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	a.stopBridge()
+	return a.svc.OSBoxReset()
+}
+func (a *App) OSBoxExec(line string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.OSBoxExec(line)
+}
+
+// OSBoxExecSession : exécute une commande dans un répertoire donné et renvoie sortie + nouveau cwd
+// (persistance de `cd` par onglet de terminal).
+func (a *App) OSBoxExecSession(cwd, line string) (core.OSBoxExecResult, error) {
+	if err := a.ready(); err != nil {
+		return core.OSBoxExecResult{}, err
+	}
+	return a.svc.OSBoxExecSession(cwd, line)
+}
+
+// OSBoxInstallSoftware : installe un logiciel dans la box (carte), en arrière-plan.
+func (a *App) OSBoxInstallSoftware(id string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	go func() { _, _ = a.svc.OSBoxInstallSoftware(id) }()
+	return nil
+}
 
 // License renvoie le texte complet de la licence (Apache 2.0).
 func (a *App) License() string { return licenseText }
@@ -403,7 +501,26 @@ func (a *App) Unlock(pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.Unlock(pin)
+	if err := a.svc.Unlock(pin); err != nil {
+		return err
+	}
+	// Routine « à l'ouverture » (v1.14) : lance en arrière-plan les plans de sauvegarde autonomes
+	// (cloud sans PIN) dès que la session est ouverte. Best-effort, non bloquant.
+	go a.svc.RunDueBackups("on_open")
+	return nil
+}
+
+// shutdown : à la fermeture de la fenêtre, exécute (synchronement, best-effort) les plans de
+// sauvegarde « à la fermeture » qui n'exigent pas de PIN. L'utilisateur a choisi cette routine : on
+// accepte d'attendre la fin de l'envoi avant de quitter.
+func (a *App) shutdown(ctx context.Context) {
+	if a.ptys != nil {
+		a.ptys.closeAll() // ferme les terminaux PTY de la box
+	}
+	a.stopBridge() // ferme le pont hôte ⇄ box
+	if a.svc != nil {
+		a.svc.RunDueBackups("on_close")
+	}
 }
 
 // Lock referme la session (oublie la clé en mémoire).
@@ -479,20 +596,25 @@ func (a *App) SetReadOnly(on bool) error {
 	return a.svc.SetReadOnly(on)
 }
 
+// RevalidateSecurityPolicy ré-ancre (re-signe) la politique de sécurité LOCALE sur ce poste. FENÊTRE
+// UNIQUEMENT (jamais exposé au socket/CLI/MCP, pour qu'un appelant ne puisse pas « bénir » une
+// falsification). Récupération après une clé d'appareil renouvelée (restauration d'une sauvegarde /
+// migration de poste) ou une édition hors SituLab : la politique courante redevient de confiance. À
+// n'utiliser qu'après avoir VÉRIFIÉ les réglages de sécurité (rôles, périmètres, PIN, lecture seule).
+func (a *App) RevalidateSecurityPolicy() error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	a.svc.ReanchorPolicy()
+	return nil
+}
+
 // SetInstanceRole fixe le rôle d'une connexion (atelier|production). Fenêtre uniquement (v1.7).
 func (a *App) SetInstanceRole(name, role string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
 	return a.svc.SetInstanceRole(name, role)
-}
-
-// SetInstanceSignMode règle le mode de signature d'une connexion (local|server + URL du service). GUI only.
-func (a *App) SetInstanceSignMode(name, mode, url string) error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	return a.svc.SetInstanceSignMode(name, mode, url)
 }
 
 // SetInstancePINPolicy remplace la politique PIN d'une connexion (policy nil = défauts du rôle).
@@ -675,6 +797,14 @@ func (a *App) Push(instance, path, pin string) (string, error) {
 
 // Synchronize est le geste unique « Synchroniser » : récupérer → enregistrer → envoyer, sous une
 // seule confirmation PIN (v1.3).
+// PublishTag publie un tag LOCAL (version) vers l'atelier (le contenu étant déjà poussé).
+func (a *App) PublishTag(instance, owner, repo, localPath, tag, pin string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.PublishTag(instance, owner, repo, localPath, tag, pin)
+}
+
 func (a *App) Synchronize(instance, path, message, pin string) (*core.SyncResult, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
@@ -1364,6 +1494,36 @@ func (a *App) RunBackup(name, pin string) (string, error) {
 		a.afterWrite()
 	}
 	return out, err
+}
+
+// --- BACKUP tunnel (v1.14) ---
+
+// SaveBackupPlan crée/met à jour un plan de sauvegarde v1.14 (générique ou ciblé).
+func (a *App) SaveBackupPlan(in config.BackupPlan) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return a.svc.SaveBackupPlan(in)
+}
+
+// RunBackupPlan exécute un plan v1.14 (déclencheur « manual » depuis la fenêtre).
+func (a *App) RunBackupPlan(name, pin string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	out, err := a.svc.RunBackupPlan(name, pin, "manual")
+	if err == nil {
+		a.afterWrite()
+	}
+	return out, err
+}
+
+// BackupRuns renvoie le journal des sauvegardes.
+func (a *App) BackupRuns() ([]config.BackupRun, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.BackupRuns(), nil
 }
 
 // --- KERNEL (v1.11) : la mémoire, lisible ---

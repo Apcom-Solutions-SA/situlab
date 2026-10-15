@@ -21,7 +21,7 @@ import (
 )
 
 // version est injectée au build (-ldflags "-X main.version=0.1").
-var version = "1.11.1"
+var version = "1.16.0"
 
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -62,6 +62,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 248, G: 249, B: 251, A: 1},
 		OnStartup:        app.startup,
 		OnDomReady:       app.domReady,
+		OnShutdown:       app.shutdown,
 		Bind:             []interface{}{app},
 		DragAndDrop: &options.DragAndDrop{
 			EnableFileDrop: true, // glisser-déposer de fichiers (CORPUS) : chemins absolus fournis à Go

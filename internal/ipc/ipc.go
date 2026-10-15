@@ -17,9 +17,13 @@
 package ipc
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -65,6 +69,32 @@ type Response struct {
 // SocketPath renvoie le chemin du socket du démon (dossier de config de l'utilisateur).
 func SocketPath() string { return filepath.Join(config.Dir(), "daemon.sock") }
 
+// handshakeTimeout borne l'attente du jeton d'autorisation en tête de connexion.
+const handshakeTimeout = 10 * time.Second
+
+// tokenPath : fichier du jeton d'autorisation du démon, dans le même dossier que le socket
+// (restreint à l'utilisateur, 0600). Durcissement 1.16 (fermeture P2).
+func tokenPath(sockPath string) string {
+	return filepath.Join(filepath.Dir(sockPath), "daemon.token")
+}
+
+// newToken génère un jeton d'autorisation éphémère (régénéré à chaque session de démon).
+func newToken() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// writeTokenFile écrit le jeton de façon atomique (0600).
+func writeTokenFile(path, tok string) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(tok), 0o600); err != nil {
+		return err
+	}
+	_ = os.Chmod(tmp, 0o600)
+	return os.Rename(tmp, path)
+}
+
 func writeFrame(w io.Writer, b []byte) error {
 	if len(b) > maxFrame {
 		return ErrFrameTooLarge
@@ -99,8 +129,10 @@ type Handler func(Request) Response
 
 // Server écoute les clients locaux sur le socket.
 type Server struct {
-	ln net.Listener
-	h  Handler
+	ln    net.Listener
+	h     Handler
+	token string // jeton d'autorisation présenté par chaque client (fermeture P2, 1.16)
+	tpath string // fichier du jeton (supprimé à la fermeture)
 }
 
 // ErrAlreadyRunning : un démon répond déjà sur ce socket (ne pas le voler).
@@ -123,7 +155,17 @@ func Listen(path string, h Handler) (*Server, error) {
 		return nil, err
 	}
 	_ = os.Chmod(path, 0o600)
-	s := &Server{ln: ln, h: h}
+	// Jeton d'autorisation (fermeture P2, 1.16) : généré par session de démon et écrit AVANT d'accepter.
+	// Tout client doit le présenter en tête de connexion. Le PIN ne transite toujours pas ici. Défense
+	// en profondeur : le fichier reste lisible par le même compte OS (modèle de menace déjà assumé),
+	// mais plus aucune connexion anonyme n'est servie (ex. process sans accès au dossier de config).
+	tok := newToken()
+	tp := tokenPath(path)
+	if werr := writeTokenFile(tp, tok); werr != nil {
+		_ = ln.Close()
+		return nil, werr
+	}
+	s := &Server{ln: ln, h: h, token: tok, tpath: tp}
 	go s.loop()
 	return s, nil
 }
@@ -149,6 +191,16 @@ func (s *Server) loop() {
 
 func (s *Server) serve(c net.Conn) {
 	defer c.Close()
+	// Handshake : la PREMIÈRE frame doit porter le jeton d'autorisation (comparaison à temps
+	// constant). Sans jeton valide, on ne sert rien (fermeture P2, 1.16).
+	_ = c.SetReadDeadline(time.Now().Add(handshakeTimeout))
+	tb, herr := readFrame(c)
+	if herr != nil {
+		return
+	}
+	if subtle.ConstantTimeCompare(tb, []byte(s.token)) != 1 {
+		return
+	}
 	for {
 		// Échéance d'inactivité entre requêtes : une connexion abandonnée (client qui n'envoie
 		// plus rien) est libérée au lieu de retenir une goroutine indéfiniment.
@@ -175,8 +227,13 @@ func (s *Server) serve(c net.Conn) {
 	}
 }
 
-// Close arrête l'écoute (les connexions en cours se terminent d'elles-mêmes).
-func (s *Server) Close() error { return s.ln.Close() }
+// Close arrête l'écoute (les connexions en cours se terminent d'elles-mêmes) et retire le jeton.
+func (s *Server) Close() error {
+	if s.tpath != "" {
+		_ = os.Remove(s.tpath)
+	}
+	return s.ln.Close()
+}
 
 // Addr renvoie l'adresse d'écoute (utile aux tests).
 func (s *Server) Addr() string {
@@ -196,7 +253,33 @@ func Dial(path string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Présente le jeton d'autorisation en tête de connexion (handshake, fermeture P2, 1.16).
+	tok, rerr := os.ReadFile(tokenPath(path))
+	if rerr != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("jeton du démon introuvable : %w", rerr)
+	}
+	_ = c.SetWriteDeadline(time.Now().Add(writeTimeout))
+	if werr := writeFrame(c, tok); werr != nil {
+		_ = c.Close()
+		return nil, werr
+	}
+	_ = c.SetWriteDeadline(time.Time{})
 	return &Client{c: c}, nil
+}
+
+// Alive sonde la PRÉSENCE d'un démon sur le socket par une connexion BRUTE, sans handshake. À utiliser
+// pour la détection de vivacité (ex. refuser « purge » tant qu'une fenêtre tourne) : ce test ne doit
+// PAS dépendre du jeton d'autorisation (un démon d'une version < 1.16 n'a pas écrit daemon.token, et
+// Dial échouerait alors que le démon écoute bel et bien — fail-open du garde). Fermeture P2 oblige à
+// séparer « est-ce qu'un démon écoute ? » de « suis-je autorisé à lui parler ? ».
+func Alive(path string) bool {
+	c, err := net.DialTimeout("unix", path, dialTimeout)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }
 
 // Call envoie une requête et attend la réponse (synchrone, une à la fois par Client).

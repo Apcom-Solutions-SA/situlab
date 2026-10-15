@@ -14,10 +14,12 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -238,10 +240,42 @@ func CloudCleanPath(p string) string {
 // l'instant (planification automatique = étape suivante).
 type BackupPlan struct {
 	Name     string `json:"name"`
-	RepoPath string `json:"repo_path"` // dépôt git local à sauvegarder
-	Cloud    string `json:"cloud"`     // nom de la connexion cloud de destination
-	Dest     string `json:"dest"`      // dossier de destination dans le cloud
+	RepoPath string `json:"repo_path,omitempty"` // (legacy mono-dépôt v1.10 ; vide pour les plans v1.14)
+	Cloud    string `json:"cloud"`               // nom de la connexion cloud de destination
+	Dest     string `json:"dest"`                // dossier de destination dans le cloud
 	LastRun  string `json:"last_run,omitempty"`
+	// --- Tunnel clé-en-main (v1.14) ---
+	Type    string   `json:"type,omitempty"`    // "generic" (portée dynamique) | "targeted" (liste figée) ; vide = legacy
+	Scope   string   `json:"scope,omitempty"`   // generic : "kernels" | "spokes" | "repos" | "kernels_spokes" | "all"
+	Layer   string   `json:"layer,omitempty"`   // "local" | "atelier" | "both" (défaut "local")
+	Form    string   `json:"form,omitempty"`    // "bundle" (léger, re-clonable) | "mirror" (fichiers lisibles) ; défaut "bundle"
+	Routine string   `json:"routine,omitempty"` // "manual" | "on_open" | "on_close" (défaut "manual")
+	Repos   []string `json:"repos,omitempty"`   // targeted : chemins locaux inscrits (absolus, nettoyés)
+}
+
+// OSBox : état de l'« OS de travail séparé » (v1.15). Aucun secret. L'image et le relais sont
+// TÉLÉCHARGÉS/créés à l'activation, jamais bundlés. Machine à états : none → preparing → ready →
+// stopped → error.
+type OSBox struct {
+	Enabled bool   `json:"enabled"`            // OPT-IN : false par défaut → le module ne fait rien
+	State   string `json:"state,omitempty"`    // none | preparing | ready | stopped | error
+	Backend string `json:"backend,omitempty"`  // "wsl2" (seul moteur en v1.15)
+	Distro  string `json:"distro,omitempty"`   // nom de la distribution WSL dédiée (ex. SituLab-Box)
+	LastErr string `json:"last_err,omitempty"` // dernière erreur (affichage)
+	// Logiciels installés dans la box (ex. ["claude-code"]) — état des cartes.
+	Software []string `json:"software,omitempty"`
+}
+
+// BackupRun : une entrée du JOURNAL de sauvegarde (v1.14). Non sensible.
+type BackupRun struct {
+	Plan    string `json:"plan"`
+	When    string `json:"when"`              // RFC3339
+	OK      bool   `json:"ok"`                // succès global
+	Repos   int    `json:"repos"`             // nombre de dépôts traités
+	Failed  int    `json:"failed,omitempty"`  // nombre d'échecs
+	Form    string `json:"form,omitempty"`    // bundle | mirror
+	Trigger string `json:"trigger,omitempty"` // manual | on_open | on_close
+	Detail  string `json:"detail,omitempty"`  // résumé court / 1re erreur
 }
 
 // Kernel désigne un dépôt git local comme « mémoire » (KERNEL) de l'utilisateur (v1.11) : le dépôt
@@ -317,6 +351,7 @@ type Config struct {
 	// Clouds de fichiers souverains (CORPUS) et plans de sauvegarde git→cloud (v1.10).
 	FileClouds []FileCloud  `json:"file_clouds,omitempty"`
 	Backups    []BackupPlan `json:"backups,omitempty"`
+	BackupRuns []BackupRun  `json:"backup_runs,omitempty"` // journal des sauvegardes (v1.14), plafonné
 	// KERNEL (v1.11) : dépôts-mémoire désignés. ActiveKernel = nom du KERNEL courant.
 	Kernels      []Kernel `json:"kernels,omitempty"`
 	ActiveKernel string   `json:"active_kernel,omitempty"`
@@ -326,6 +361,75 @@ type Config struct {
 	// l'utilisateur a rangées (suggestion jugée non pertinente). On les masque de « en attente » sans
 	// rien supprimer ; l'utilisateur peut les repasser en appairage depuis l'archive.
 	ArchivedPairings []string `json:"archived_pairings,omitempty"`
+	// OS DE TRAVAIL SÉPARÉ (v1.15) — OPT-IN, désactivé par défaut. Fait travailler une IA dans une VM
+	// invitée jetable (WSL2 sous Windows) sans jamais lui donner les clés : SituLab reste la seule porte
+	// vers git/cloud. Tant que Enabled=false, AUCUNE VM/image/relais n'est créé (règle non négociable).
+	OSBox *OSBox `json:"osbox,omitempty"`
+	// MODULES d'interface (v1.13) : groupes de fonctions activables/désactivables selon le profil
+	// (utilisateur « porté » vs développeur). Clé = groupe (agents, git_advanced, spokes, corpus,
+	// backup). Un groupe ABSENT de la map est ACTIVÉ par défaut (tout est montré tant qu'on n'a pas
+	// réduit). On ne stocke donc que les groupes explicitement coupés (false) ou rallumés (true).
+	Modules map[string]bool `json:"modules,omitempty"`
+
+	// PolicySig : signature d'INTÉGRITÉ de la politique de sécurité (v1.16, fermeture P3). HMAC (clé
+	// d'appareil) sur SecurityDigest() — les champs qui décident du PIN et du périmètre (rôle +
+	// pin_policy par instance, allowed/denied_dirs + pin_policy par cloud, read_only). Écrite par
+	// SituLab à chaque changement de politique ; vérifiée avant toute décision. Une réécriture directe
+	// de config.json (hors SituLab) invalide la signature → le cœur retombe en position fermée (PIN
+	// exigé, lecture seule). N'est PAS un secret.
+	PolicySig string `json:"policy_sig,omitempty"`
+}
+
+// SecurityDigest renvoie une empreinte STABLE (indépendante de l'ordre) des champs de politique qui
+// décident du PIN et du périmètre d'accès. Base de la signature d'intégrité (PolicySig, fermeture P3).
+// Exclut PolicySig lui-même. Toute modification d'un de ces champs change l'empreinte.
+func (c *Config) SecurityDigest() []byte {
+	type instPol struct {
+		Name string     `json:"n"`
+		URL  string     `json:"u"` // l'hôte pilote RequiresPINForPush (prod via atelier) : il doit être intègre
+		Role string     `json:"r"`
+		PIN  *PINPolicy `json:"p"`
+	}
+	type cloudPol struct {
+		Name    string          `json:"n"`
+		Allowed []string        `json:"a"`
+		Denied  []string        `json:"d"`
+		PIN     *CloudPINPolicy `json:"p"`
+	}
+	is := make([]instPol, 0, len(c.Instances))
+	for _, in := range c.Instances {
+		is = append(is, instPol{strings.ToLower(strings.TrimSpace(in.Name)), strings.TrimSpace(in.URL), in.NormalizedRole(), in.PINPolicy})
+	}
+	sort.Slice(is, func(a, b int) bool { return is[a].Name < is[b].Name })
+	cs := make([]cloudPol, 0, len(c.FileClouds))
+	for _, fc := range c.FileClouds {
+		a := append([]string(nil), fc.AllowedDirs...)
+		d := append([]string(nil), fc.DeniedDirs...)
+		sort.Strings(a)
+		sort.Strings(d)
+		cs = append(cs, cloudPol{strings.ToLower(strings.TrimSpace(fc.Name)), a, d, fc.PINPolicy})
+	}
+	sort.Slice(cs, func(a, b int) bool { return cs[a].Name < cs[b].Name })
+	payload := struct {
+		I  []instPol  `json:"i"`
+		C  []cloudPol `json:"c"`
+		RO bool       `json:"ro"`
+	}{is, cs, c.ReadOnly}
+	b, _ := json.Marshal(payload)
+	h := sha256.Sum256(b)
+	return h[:]
+}
+
+// ModuleOn indique si un groupe de modules est activé. Défaut : activé (absent = true).
+func (c *Config) ModuleOn(key string) bool {
+	if c.Modules == nil {
+		return true
+	}
+	v, ok := c.Modules[key]
+	if !ok {
+		return true
+	}
+	return v
 }
 
 // ArchivePairing range une clé d'appariement (idempotent). Renvoie true si elle a été ajoutée.
@@ -633,6 +737,14 @@ func (c *Config) RemoveBackup(name string) bool {
 	}
 	c.Backups = out
 	return found
+}
+
+// AddBackupRun ajoute une entrée au journal (en tête), plafonné aux 50 dernières.
+func (c *Config) AddBackupRun(r BackupRun) {
+	c.BackupRuns = append([]BackupRun{r}, c.BackupRuns...)
+	if len(c.BackupRuns) > 50 {
+		c.BackupRuns = c.BackupRuns[:50]
+	}
 }
 
 // --- KERNEL (v1.11) ---------------------------------------------------------------------------

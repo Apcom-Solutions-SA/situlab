@@ -118,6 +118,7 @@ func TestPruneMissingLocalRepos(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
+	s.retrustPolicy() // policy posée hors setters (test) : ré-ancrer la signature
 	s.pruneMissingLocalRepos()
 	cfg2, _ := config.Load()
 	if len(cfg2.LocalRepos) != 1 || config.CleanPath(cfg2.LocalRepos[0]) != config.CleanPath(alive) {

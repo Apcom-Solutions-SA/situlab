@@ -31,6 +31,7 @@ import (
 	"situlab/internal/forgejo"
 	"situlab/internal/gitx"
 	"situlab/internal/keyring"
+	"situlab/internal/osbox"
 )
 
 // Erreurs sentinelles mappées sur des codes de sortie CLI.
@@ -66,7 +67,10 @@ const (
 	pinMinLen    = 6
 	opTimeout    = 30 * time.Second
 	repoCacheTTL = 12 * time.Second
-	sessionTTL   = 15 * time.Minute // inactivité avant re-verrouillage de la session
+	sessionTTL   = 15 * time.Minute // plafond interne (glissement) si aucun délai n'est fixé
+	// defaultLockTTL : auto-verrouillage par défaut (LockAfterMin=0). Fenêtre d'exposition des
+	// secrets déchiffrés volontairement courte (durcissement 1.16 : était 15 min).
+	defaultLockTTL = 5 * time.Minute
 )
 
 // Service est le point d'entrée unique du noyau.
@@ -79,6 +83,11 @@ type Service struct {
 	pinGuardMu sync.Mutex           // sérialise l'écriture du verrou anti-bruteforce persistant (pinguard.json)
 	repoLocks  sync.Map             // map[string]*sync.Mutex : sérialise les opérations git PAR dépôt (lockRepo)
 	version    string
+
+	// devKey : clé d'appareil (32 o, fichier 0600) qui signe l'intégrité de la POLITIQUE de sécurité
+	// (v1.16, fermeture P3). Fixée une fois au démarrage, immuable ensuite (pas de verrou requis en
+	// lecture). nil = indisponible → dégradation gracieuse (comportement d'avant 1.16).
+	devKey []byte
 
 	// Session : DEK du trousseau tenue en mémoire après déverrouillage par le PIN.
 	// Protégée par s.mu. sessUntil borne l'inactivité ; au-delà, la session est verrouillée.
@@ -95,6 +104,18 @@ type Service struct {
 	// réécrit par chaque mutation (faille corrigée en 1.1.0). Remis à zéro à chaque succès.
 	pinFails  int
 	pinLockTo int64 // instant de fin de verrou (Unix s) ; 0 = pas de verrou
+
+	// Progression LIVE de l'installation de l'OS de travail (v1.15), tenue EN MÉMOIRE (éphémère,
+	// non persistée) : alimentée étape par étape par OSBoxPrepare, lue par OSBoxStatus. osboxProg.Active
+	// sert aussi de garde anti-double-lancement. Protégée par osboxMu.
+	osboxMu   sync.Mutex
+	osboxProg osbox.Progress
+
+	// Cache de la DÉTECTION LIVE des logiciels présents dans la box (sondage wsl coûteux) : évite de
+	// relancer une commande dans la box à chaque appel d'OSBoxStatus (polling). TTL court. Protégé par osboxDetMu.
+	osboxDetMu sync.Mutex
+	osboxDetAt time.Time
+	osboxDetSW []string
 
 	// migrated : l'import depuis l'ancien coffre OS est retenté à chaque ouverture de
 	// session TANT QUE non entièrement réussi (ne passe à true que sur succès complet).
@@ -114,7 +135,9 @@ func New(version string) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{cfg: cfg, repoCache: map[string]repoCache{}, version: version}
-	s.loadPINGuard() // restaure le verrou anti-bruteforce persisté (best-effort, fail-safe)
+	s.devKey = ensureDeviceKey() // clé d'intégrité de la politique (fermeture P3)
+	s.anchorPolicy()             // signe la policy si jamais signée (mise à niveau < 1.16 / install fraîche)
+	s.loadPINGuard()             // restaure le verrou anti-bruteforce persisté (best-effort, fail-safe)
 	return s, nil
 }
 
@@ -235,6 +258,7 @@ func (s *Service) AddInstanceToken(name, provider, rawURL, token string) error {
 		inst.Provider = "github"
 	}
 	cfg.Instances = append(cfg.Instances, inst)
+	s.resignPolicy(cfg) // la policy inclut cette connexion (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		_ = kr.DeleteToken(name) // rollback trousseau (l'état mémoire n'a pas bougé)
 		return err
@@ -346,6 +370,7 @@ func (s *Service) AddInstanceLogin(name, rawURL, user, password, otp string, adm
 		_ = kr.SetPassword(dek, name, password)
 	}
 	cfg.Instances = append(cfg.Instances, config.Instance{Name: name, URL: clean, Default: len(cfg.Instances) == 0, TwoFA: otp != "", Remember: remember})
+	s.resignPolicy(cfg) // la policy inclut cette connexion (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		_ = kr.DeleteToken(name)
 		s.revokeOrphan(clean, user, password, otp, tname)
@@ -388,6 +413,7 @@ func (s *Service) RemoveInstance(name string) error {
 	if kr, err := keyring.Load(); err == nil {
 		_ = kr.DeleteToken(real) // trousseau présent : on retire l'entrée
 	}
+	s.resignPolicy(cfg) // la policy ne référence plus cette connexion (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -422,6 +448,9 @@ func (s *Service) SetInstanceRole(name, role string) error {
 	if role != config.RoleAtelier && role != config.RoleProduction {
 		return fmt.Errorf("rôle inconnu : %q (atelier|production)", role)
 	}
+	if err := s.assertPolicyIntact(); err != nil { // refus de re-signer par-dessus une policy falsifiée
+		return err
+	}
 	s.ioMu.Lock()
 	defer s.ioMu.Unlock()
 	cfg, err := config.Load()
@@ -433,37 +462,7 @@ func (s *Service) SetInstanceRole(name, role string) error {
 		return ErrNoInstance
 	}
 	in.Role = role
-	if err := cfg.Save(); err != nil {
-		return err
-	}
-	s.publish(cfg)
-	return nil
-}
-
-// SetInstanceSignMode règle le mode de signature d'une connexion (v1.9.6) : "local" (clé logicielle
-// embarquée) ou "server" (empreinte demandée au service, clé jamais sur le poste). url = base du service
-// (vide = défaut). Réglage LOCAL, FENÊTRE UNIQUEMENT (non exposé socket/CLI/MCP — doctrine PIN).
-func (s *Service) SetInstanceSignMode(name, mode, url string) error {
-	switch mode {
-	case "", "local", "server":
-	default:
-		return fmt.Errorf("mode de signature inconnu : %q (local|server)", mode)
-	}
-	s.ioMu.Lock()
-	defer s.ioMu.Unlock()
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	in := cfg.Find(name)
-	if in == nil {
-		return ErrNoInstance
-	}
-	if mode == "local" {
-		mode = "" // défaut = local
-	}
-	in.SignMode = mode
-	in.SignServerURL = strings.TrimSpace(url)
+	s.resignPolicy(cfg) // le rôle décide des défauts de PIN (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -474,6 +473,9 @@ func (s *Service) SetInstanceSignMode(name, mode, url string) error {
 // SetInstancePINPolicy remplace la politique PIN d'une connexion (nil = revenir aux défauts du
 // rôle). Réglage local, fenêtre uniquement.
 func (s *Service) SetInstancePINPolicy(name string, p *config.PINPolicy) error {
+	if err := s.assertPolicyIntact(); err != nil { // refus de re-signer par-dessus une policy falsifiée
+		return err
+	}
 	s.ioMu.Lock()
 	defer s.ioMu.Unlock()
 	cfg, err := config.Load()
@@ -485,6 +487,7 @@ func (s *Service) SetInstancePINPolicy(name string, p *config.PINPolicy) error {
 		return ErrNoInstance
 	}
 	in.PINPolicy = p
+	s.resignPolicy(cfg) // politique PIN de la connexion (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -975,7 +978,7 @@ func (s *Service) DisconnectedInstances() []string {
 }
 
 // lockTTL renvoie le délai d'auto-verrouillage réglé par l'utilisateur (config LockAfterMin) :
-// 0 ⇒ défaut 15 min ; -1 ⇒ « jamais » (durée très longue, effectivement sans expiration).
+// 0 ⇒ défaut (defaultLockTTL) ; -1 ⇒ « jamais » (durée très longue, effectivement sans expiration).
 func (s *Service) lockTTL() time.Duration {
 	m := 0
 	if c, err := config.Load(); err == nil {
@@ -985,13 +988,13 @@ func (s *Service) lockTTL() time.Duration {
 	case m < 0:
 		return 100 * 365 * 24 * time.Hour // « jamais »
 	case m == 0:
-		return sessionTTL // défaut 15 min
+		return defaultLockTTL // défaut durci (1.16)
 	default:
 		return time.Duration(m) * time.Minute
 	}
 }
 
-// LockDelay renvoie le réglage courant (minutes ; -1 = jamais ; 0 = défaut 15).
+// LockDelay renvoie le réglage courant (minutes ; -1 = jamais ; 0 = défaut 5, durci en 1.16).
 func (s *Service) LockDelay() int {
 	if c, err := config.Load(); err == nil {
 		return c.LockAfterMin
@@ -1062,6 +1065,9 @@ func (s *Service) ReadOnly() bool {
 	if err != nil {
 		return true
 	}
+	if !s.policyOK(c) {
+		return true // politique falsifiée → position fermée (lecture seule), fermeture P3
+	}
 	return c.ReadOnly
 }
 
@@ -1106,6 +1112,9 @@ func (s *Service) assertWritable() error {
 
 // SetReadOnly active/désactive le mode lecture seule.
 func (s *Service) SetReadOnly(on bool) error {
+	if err := s.assertPolicyIntact(); err != nil { // refus de re-signer par-dessus une policy falsifiée
+		return err
+	}
 	s.ioMu.Lock()
 	defer s.ioMu.Unlock()
 	cfg, err := config.Load()
@@ -1113,6 +1122,7 @@ func (s *Service) SetReadOnly(on bool) error {
 		return err
 	}
 	cfg.ReadOnly = on
+	s.resignPolicy(cfg) // read_only fait partie de la policy signée (fermeture P3)
 	if err := cfg.Save(); err != nil {
 		return err
 	}
@@ -1361,10 +1371,12 @@ func (s *Service) gatePIN(pinCode string) error {
 func (s *Service) RequiresPIN(instance string, a config.PINAction) bool {
 	s.mu.Lock()
 	s.lockedReload()
-	in := s.cfg.Resolve(instance)
+	cfg := s.cfg
+	in := cfg.Resolve(instance)
+	ok := s.policyOK(cfg) // intégrité de la politique (fermeture P3)
 	s.mu.Unlock()
-	if in == nil {
-		return true
+	if in == nil || !ok {
+		return true // fail-closed : connexion inconnue OU politique falsifiée → PIN exigé
 	}
 	return in.RequiresPIN(a)
 }
