@@ -6,6 +6,13 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 > (voir « Historique antérieur ») : il traçait les allers-retours de conception, sans valeur pour le
 > lecteur. Les versions récentes restent détaillées.
 
+## [1.16.3] — Graphe de promotion : pastilles d'écart au premier plan
+
+### Corrigé
+- **Fiche projet — graphe LOCAL↔ATELIER↔VITRINE** : les pastilles d'écart (✓ / flèche + nombre) se
+  confondaient avec les cartes de palier. La colonne-gap et ses badges passent explicitement au-dessus
+  des cartes (z-index), avec un badge opaque et détaché (ombre) pour qu'il flotte nettement.
+
 ## [1.16.2] — CI : empaquetage Windows (makensis)
 
 ### Corrigé

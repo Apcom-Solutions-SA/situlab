@@ -3,7 +3,7 @@
 > Court par choix. **SituLab EST la carte** : interroge-le (`situlab map`, `--output json`,
 > `situlab <groupe> --help`) au lieu de deviner. Ce fichier **cadre et oriente** ; il ne recopie pas la
 > référence des commandes (elle vit dans `situlab --help`, toujours à jour). Lisible aussi dans l'app
-> (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.16.2**.
+> (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.16.3**.
 
 ## Si tu es l'assistant IA — commence ici
 

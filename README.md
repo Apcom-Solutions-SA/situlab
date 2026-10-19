@@ -4,7 +4,7 @@
 lisible ce que vous avez en ligne et en local — sans ouvrir un navigateur, sans connaître git en
 profondeur — et qui garde votre mémoire de travail en ordre pour vous comme pour vos agents IA.
 
-> SituLab — © 2026 APCOM Solutions SA — version 1.16.2 — licence Apache 2.0
+> SituLab — © 2026 APCOM Solutions SA — version 1.16.3 — licence Apache 2.0
 
 ## Quatre piliers
 
@@ -67,10 +67,10 @@ valide les écritures par son PIN : voir [`docs/AGENTS.md`](docs/AGENTS.md).
 # Go ≥ 1.25 (directive go.mod), Wails v2. Toolchain système récent : rien à épingler.
 
 # Icône Windows (ressource)
-go-winres simply --icon build/appicon.png --product-version 1.16.2 --file-version 1.16.2
+go-winres simply --icon build/appicon.png --product-version 1.16.3 --file-version 1.16.3
 
 # Binaire console (indispensable pour que le mode CLI écrive de façon fiable)
-go build -tags "desktop,production" -ldflags "-X main.version=1.16.2 -s -w" -o build/bin/situlab.exe .
+go build -tags "desktop,production" -ldflags "-X main.version=1.16.3 -s -w" -o build/bin/situlab.exe .
 
 # Installateur Windows (NSIS) : depuis build/
 cd build && makensis installer.nsi   # -> build/SituLab-Setup.exe

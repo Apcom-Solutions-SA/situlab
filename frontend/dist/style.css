@@ -439,6 +439,12 @@ label small { font-weight: 500; color: var(--text-faint); }
 .pg2-name { height: 36px; display: flex; align-items: center; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pg2-name small { color: var(--text-faint); font-weight: 400; }
 .pg2-cell { height: 36px; display: flex; align-items: center; justify-content: center; position: relative; }
+/* 1.16.2 — pastilles d'écart au PREMIER PLAN : la colonne-gap et ses badges passent au-dessus des
+   cartes de palier (qui sont en z-index 1 + overflow:hidden) et du trait ; badge opaque et détaché
+   (ombre) pour qu'il flotte nettement, bien lisible dans l'étroit inter-colonne. */
+.pg2-gapcol { z-index: 6; }
+.pg2 .pg-seg { z-index: 6; }
+.pg2 .pg-seg em { background: var(--bg-surface); box-shadow: 0 1px 5px color-mix(in srgb, #000 28%, transparent); }
 /* le trait de branche traverse la boîte : plein si la branche y existe, pointillé estompé sinon */
 .pg2-on::before { content: ""; position: absolute; left: -10px; right: -10px; top: 50%; height: 2px; transform: translateY(-50%); background: var(--border-strong); }
 .pg2-off::before { content: ""; position: absolute; left: -10px; right: -10px; top: 50%; border-top: 2px dotted var(--border); transform: translateY(-50%); }
