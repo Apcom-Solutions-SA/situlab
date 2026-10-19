@@ -5,6 +5,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -69,23 +70,9 @@ func cmdKernel() *cobra.Command {
 			"(prêt à être lu) ; en --output json, renvoie name/local_path/run_file/run_abs. L'humain définit ce\n" +
 			"fichier dans la fenêtre (KERNEL ▸ Fichier d'ouverture).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ks, err := svc.Kernels()
+			k, err := resolveKernelArg(args)
 			if err != nil {
 				return err
-			}
-			name := arg0(args)
-			var k *core.KernelInfo
-			for i := range ks {
-				if (name == "" && ks[i].Active) || (name != "" && strings.EqualFold(ks[i].Name, name)) {
-					k = &ks[i]
-					break
-				}
-			}
-			if k == nil && name == "" && len(ks) > 0 {
-				k = &ks[0]
-			}
-			if k == nil {
-				return fmt.Errorf("aucun KERNEL%s", map[bool]string{true: " « " + name + " »", false: " désigné"}[name != ""])
 			}
 			info := runOpenInfo{Name: k.Name, LocalPath: k.LocalPath, RunFile: k.RunFile, RunAbs: runAbs(k.LocalPath, k.RunFile)}
 			return emit(cmd, info, func() {
@@ -126,6 +113,34 @@ func cmdKernel() *cobra.Command {
 		},
 	}
 
+	cat := &cobra.Command{
+		Use: "cat [nom]", Short: "Contenu du fichier d'OUVERTURE (lu sur le poste — utile via le pont SafeRoom)", Args: cobra.MaximumNArgs(1),
+		Long: "Imprime le CONTENU du fichier d'ouverture (celui que « kernel open » désigne). Pensé pour un\n" +
+			"agent qui ne partage pas le disque du poste (SafeRoom) : il reçoit le contenu, pas un chemin\n" +
+			"illisible chez lui. Lecture seule, sans PIN.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			k, err := resolveKernelArg(args)
+			if err != nil {
+				return err
+			}
+			if k.RunFile == "" {
+				return fmt.Errorf("%s : aucun fichier d'ouverture défini (l'humain le définit dans la fenêtre : KERNEL ▸ Fichier d'ouverture)", k.Name)
+			}
+			abs := runAbs(k.LocalPath, k.RunFile)
+			data, err := os.ReadFile(abs)
+			if err != nil {
+				return fmt.Errorf("lecture du fichier d'ouverture (%s) : %w", abs, err)
+			}
+			info := struct {
+				Name    string `json:"name"`
+				RunFile string `json:"run_file"`
+				RunAbs  string `json:"run_abs"`
+				Content string `json:"content"`
+			}{k.Name, k.RunFile, abs, string(data)}
+			return emit(cmd, info, func() { fmt.Fprint(cmd.OutOrStdout(), string(data)) })
+		},
+	}
+
 	pull := &cobra.Command{
 		Use: "pull [nom]", Short: "Récupère les dernières notes (fast-forward)", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -150,8 +165,27 @@ func cmdKernel() *cobra.Command {
 	}
 	save.Flags().StringVar(&saveMsg, "message", "", "libellé de l'enregistrement (sinon daté automatiquement)")
 
-	c.AddCommand(list, open, status, contents, pull, save)
+	c.AddCommand(list, open, status, contents, cat, pull, save)
 	return c
+}
+
+// resolveKernelArg résout le KERNEL visé par l'argument optionnel : nom donné (insensible à la casse),
+// sinon l'actif, sinon le premier désigné. Erreur explicite si aucun ne correspond.
+func resolveKernelArg(args []string) (*core.KernelInfo, error) {
+	ks, err := svc.Kernels()
+	if err != nil {
+		return nil, err
+	}
+	name := arg0(args)
+	for i := range ks {
+		if (name == "" && ks[i].Active) || (name != "" && strings.EqualFold(ks[i].Name, name)) {
+			return &ks[i], nil
+		}
+	}
+	if name == "" && len(ks) > 0 {
+		return &ks[0], nil
+	}
+	return nil, fmt.Errorf("aucun KERNEL%s", map[bool]string{true: " « " + name + " »", false: " désigné"}[name != ""])
 }
 
 // arg0 renvoie le premier argument optionnel (ou "" => KERNEL actif).

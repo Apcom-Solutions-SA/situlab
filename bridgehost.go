@@ -6,9 +6,10 @@
 // exécute la commande `situlab` correspondante SUR L'HÔTE — là où vivent les clés et où surgit le PIN.
 // La box ne détient jamais de secret : elle ne fait que *demander*.
 //
-// ⚠️ v1.15.1 : seule une liste BLANCHE de commandes est relayable (pas d'administration via le pont).
-// Transport TCP sur l'interface atteignable depuis WSL2 ; durcissement (vsock / pare-feu restreint au
-// sous-réseau WSL) prévu v1.16.
+// Pas de liste blanche : 100 % du CLI est relayable — la gouvernance reste le démon (le PIN surgit sur
+// l'écran de l'hôte pour toute action sensible), pas un filtre de commandes. Transport TCP sur
+// l'interface atteignable depuis WSL2, gardé par le jeton éphémère et autorisé par une règle de
+// pare-feu restreinte au port du pont.
 package main
 
 import (

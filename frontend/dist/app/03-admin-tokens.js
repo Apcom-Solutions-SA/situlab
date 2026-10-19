@@ -253,7 +253,7 @@ function firstPromptText(kind, exe) {
     "",
     launch,
     "- Près de mes dépôts, tu trouveras un fichier AGENTS.md : c'est à la fois le mode d'emploi pour toi ET notre fiche de collaboration. Lis-le en premier.",
-    "- Ensuite, regarde l'état de mes dépôts et dis-moi simplement ce que tu comprends et ce que tu proposes.",
+    "- Puis liste mes KERNEL (situlab kernel list) et propose-moi d'en ouvrir un, ou regarde l'état de mes dépôts — et dis-moi ce que tu comprends.",
     "- Règle d'or : ne me demande jamais mon PIN et ne cherche pas à le contourner. Rien ne part en ligne sans ma validation.",
     "",
     "Pour commencer : dis-moi ce que tu as compris de SituLab, et propose-moi ce qu'on pourrait noter dans AGENTS.md sur notre façon de travailler (tu peux l'enrichir au fil de l'eau).",

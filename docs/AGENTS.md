@@ -3,7 +3,7 @@
 > Court par choix. **SituLab EST la carte** : interroge-le (`situlab map`, `--output json`,
 > `situlab <groupe> --help`) au lieu de deviner. Ce fichier **cadre et oriente** ; il ne recopie pas la
 > référence des commandes (elle vit dans `situlab --help`, toujours à jour). Lisible aussi dans l'app
-> (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.16.0**.
+> (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.16.1**.
 
 ## Si tu es l'assistant IA — commence ici
 
@@ -16,10 +16,11 @@
    - `situlab <groupe> --help` = la **liste exacte** des commandes d'un domaine
      (`repo`·`local`·`kernel`·`spoke`·`cloud`·`backup`·`project`·`issue`·`pull-request`·`release`·`admin`).
      Ne l'apprends pas par cœur ici — demande-la.
-3. **Réflexe « ouverture KERNEL ».** Si l'humain dit *« fais l'ouverture KERNEL <nom> »* (ou un spoke) :
-   `situlab kernel open [nom]` (resp. `situlab spoke open <nom>`) te donne le **fichier d'ouverture**
-   (chemin absolu) → lis-le → suis ce qu'il indique. Si besoin d'abord : `situlab kernel pull`
-   (récupère les dernières notes, sans PIN).
+3. **Ouverture KERNEL — propose-la d'emblée.** `situlab kernel list` montre les KERNEL et l'actif
+   (`*`). S'il y en a un : **propose à l'humain de l'ouvrir** — `situlab kernel open [nom]` donne le
+   **fichier d'ouverture** (chemin absolu) → lis-le → suis-le. `situlab kernel pull` d'abord si tu veux
+   les dernières notes (sans PIN). Plusieurs KERNEL, ou aucun actif : **demande lequel ouvrir** (lui
+   seul choisit l'actif). Même logique pour un spoke (`situlab spoke open <nom>`).
 4. **Le PIN n'est pas à toi, et il n'est pas absolu.** Prépare l'action et **lance-la** : **SituLab
    décide** s'il faut une validation (selon la politique de la connexion) et te répond — **fait**,
    **refusé**, ou **délai écoulé** (relance). Une fenêtre s'ouvre sur le poste de l'humain ; **lui seul**
@@ -36,6 +37,7 @@
 |---|---|
 | l'organisation du poste | `situlab map --output json` |
 | la liste exacte des commandes d'un domaine | `situlab <groupe> --help` |
+| lister les KERNEL (actif marqué `*`) | `situlab kernel list` |
 | ouvrir un KERNEL / un spoke | `situlab kernel open` · `situlab spoke open <nom>` |
 | l'état (verrou, PIN, instances, git) | `situlab status` · `situlab doctor` |
 | ce que tu as le droit de voir dans un cloud | `situlab cloud allowed <cloud>` — **à lire en premier** |

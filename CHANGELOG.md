@@ -6,6 +6,30 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 > (voir « Historique antérieur ») : il traçait les allers-retours de conception, sans valeur pour le
 > lecteur. Les versions récentes restent détaillées.
 
+## [1.16.1] — Assistant IA : ouverture KERNEL proactive · SafeRoom paramétrée
+
+### Assistant IA (kit)
+- **Ouverture KERNEL proposée d'emblée.** `AGENTS.md` et le message de présentation orientent l'agent,
+  au premier contact, vers `situlab kernel list` puis une **proposition d'ouverture** du KERNEL (ou la
+  question « lequel ? » s'il y en a plusieurs) — au lieu d'un réflexe purement réactif.
+- **`situlab kernel cat [nom]`** : imprime le **contenu** du fichier d'ouverture (lecture seule, sans
+  PIN). Permet d'ouvrir un KERNEL depuis un agent qui ne partage pas le disque du poste (SafeRoom), là
+  où `kernel open` ne renvoie qu'un chemin illisible pour lui.
+
+### SafeRoom — pont paramétré de bout en bout
+- **Doc agent déposée dans la box** à l'installation du pont (`/root/AGENTS.md`, `/etc/situlab/AGENTS.md`)
+  + **bannière** (`/etc/motd`) : l'agent sait immédiatement qu'il pilote SituLab par le pont et comment
+   ouvrir un KERNEL. Corrige le « aucune doc trouvée / bridge non paramétré ».
+- **Raccourci `situlab`** posé dans la box (`/usr/local/bin/situlab` → relaie vers `situlab-bridge`) :
+  les commandes `situlab <cmd>` fonctionnent telles quelles dans la SafeRoom.
+- **Pare-feu mieux accompagné** (Réglages ▸ OS de travail) : explication, bouton d'autorisation
+  automatique (admin) **et** commande PowerShell à copier-coller ; message de présentation pour l'agent
+  à copier-coller.
+- Doc + raccourci + bannière rejoués à chaque (re)synchronisation du pont.
+- **Détection de la passerelle WSL robuste** : lecture de `ip route show default` en argv pur + parsing
+  côté Go (fin d'un faux « adresse de l'hôte introuvable » dû à un pipeline quoté corrompu par wsl.exe),
+  avec ré-essai ~40 s pour un démarrage à froid.
+
 ## [1.16.0] — Durcissement sécurité + SafeRoom (terminal & pont)
 
 ### Durcissement sécurité (audit interne)

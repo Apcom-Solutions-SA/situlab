@@ -5,6 +5,7 @@ package core
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,13 @@ import (
 	"situlab/internal/config"
 	"situlab/internal/osbox"
 )
+
+// agentsBoxDoc : la doc agent DÉPOSÉE DANS LA BOX à l'installation du pont (variante SafeRoom : piloter
+// SituLab via `situlab-bridge`/le raccourci `situlab`, ouvrir un KERNEL par `kernel cat`). Distincte de
+// docs/AGENTS.md (poste), qui parle du binaire `situlab` local.
+//
+//go:embed agents_box.md
+var agentsBoxDoc string
 
 // Orchestration de l'« OS de travail séparé » (v1.15), OPT-IN. Tant que config.OSBox.Enabled est faux,
 // AUCUNE VM/image n'est créée. Le cœur de sécurité (démon, keyring, PIN, périmètres) est RÉUTILISÉ tel
@@ -398,13 +406,26 @@ func (s *Service) OSBoxProvisionBridge(bin []byte, port int, token string) error
 
 	// 2) Déterminer l'IP de l'hôte VUE DEPUIS LA BOX (passerelle WSL) et écrire la configuration.
 	i := s.osboxBeginStep("Configuration du canal sécurisé (jeton + hôte)")
-	// Passerelle WSL = IP de l'hôte Windows vue depuis la box. Sur une box fraîchement démarrée la
-	// route par défaut peut n'apparaître qu'après un court instant : on réessaie quelques secondes.
-	// (On n'utilise PAS le nameserver de resolv.conf comme repli : c'est le DNS NAT interne de WSL,
-	// pas une adresse où le pont hôte écoute — cela produirait une config silencieusement cassée.)
-	gw, err := osbox.Exec(20*time.Second, "sh", "-c", "for n in 1 2 3 4 5 6 7 8 9 10; do H=$(ip route show default 2>/dev/null | awk '{print $3; exit}'); [ -n \"$H\" ] && break; sleep 1; done; printf %s \"$H\"")
-	gw = strings.TrimSpace(gw)
-	if err != nil || gw == "" {
+	// Passerelle WSL = IP de l'hôte Windows vue depuis la box. On lit `ip route show default` en argv PUR
+	// (pas de `sh -c` ni d'awk inline : un pipeline quoté passé en argument à wsl.exe est ré-encodé de
+	// façon fragile côté Windows et peut arriver corrompu dans la box — cause d'un « adresse introuvable »
+	// alors que la route existe) et on extrait la passerelle CÔTÉ GO.
+	// (On n'utilise PAS le nameserver de resolv.conf comme repli : c'est le DNS NAT interne de WSL, pas
+	// une adresse où le pont hôte écoute — cela produirait une config silencieusement cassée.)
+	// Démarrage à froid : eth0 / la route par défaut peuvent n'apparaître qu'après un instant → on réessaie.
+	var gw string
+	deadline := time.Now().Add(40 * time.Second)
+	for {
+		out, _ := osbox.Exec(10*time.Second, "ip", "route", "show", "default")
+		if gw = parseDefaultGateway(out); gw != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if gw == "" {
 		s.osboxEndStep(i, "fail", "impossible de déterminer l'adresse de l'hôte (passerelle WSL) depuis la box — réseau de la box pas encore prêt ; réessayez via « Tester la liaison »")
 		return errors.New("adresse hôte introuvable depuis la box")
 	}
@@ -412,6 +433,29 @@ func (s *Service) OSBoxProvisionBridge(bin []byte, port int, token string) error
 	if out, err := osbox.ExecStdin(20*time.Second, []byte(cfg), "sh", "-c", "mkdir -p /etc/situlab && cat > /etc/situlab/bridge.json && chmod 600 /etc/situlab/bridge.json"); err != nil {
 		s.osboxEndStep(i, "fail", osboxErrDetail(out, err))
 		return err
+	}
+	s.osboxEndStep(i, "ok", "")
+
+	// 2b) Déposer la doc agent, un raccourci `situlab` et une bannière. Sans cela un agent dans la box
+	// ne trouve aucune doc et cherche un binaire `situlab` absent → il conclut « non paramétré ». Le
+	// raccourci relaie `situlab <cmd>` au poste ; la doc explique l'ouverture KERNEL via `kernel cat`.
+	// Rejoué à chaque provision (install ET re-synchronisation) pour rester présent.
+	i = s.osboxBeginStep("Doc agent + raccourci situlab + bannière")
+	wrapper := "#!/bin/sh\n# SafeRoom : relaie toute commande `situlab` au poste via le pont.\nexec /usr/local/bin/situlab-bridge \"$@\"\n"
+	motd := "SituLab Bridge — SafeRoom. Pilote SituLab par le pont : `situlab <commande>`.\n" +
+		"Doc agent : /root/AGENTS.md · Ouvrir un KERNEL : `situlab kernel list` puis `situlab kernel cat`.\n"
+	for _, st := range []struct {
+		data []byte
+		sh   string
+	}{
+		{[]byte(wrapper), "cat > /usr/local/bin/situlab && chmod +x /usr/local/bin/situlab"},
+		{[]byte(agentsBoxDoc), "mkdir -p /etc/situlab && cat > /etc/situlab/AGENTS.md && cp -f /etc/situlab/AGENTS.md /root/AGENTS.md"},
+		{[]byte(motd), "cat > /etc/motd"},
+	} {
+		if out, err := osbox.ExecStdin(20*time.Second, st.data, "sh", "-c", st.sh); err != nil {
+			s.osboxEndStep(i, "fail", osboxErrDetail(out, err))
+			return err
+		}
 	}
 	s.osboxEndStep(i, "ok", "")
 
@@ -494,6 +538,20 @@ func osboxErrDetail(out string, err error) string {
 		msg += " — " + out
 	}
 	return msg
+}
+
+// parseDefaultGateway extrait l'IP de passerelle d'une sortie « ip route show default »
+// (ex. « default via 192.168.32.1 dev eth0 proto kernel »). Renvoie "" si absente.
+func parseDefaultGateway(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		for i := 0; i+1 < len(f); i++ {
+			if f[i] == "via" {
+				return f[i+1]
+			}
+		}
+	}
+	return ""
 }
 
 // Recettes déclaratives (extensibles sans retoucher l'app). Exécutées DANS la box.

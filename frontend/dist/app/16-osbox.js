@@ -12,6 +12,14 @@ const OSBOX_CARDS = [
 
 let osboxPollTimer = null;
 
+// Textes à copier-coller pour le pont (portée module : utilisés dans le rendu ET les handlers).
+const BRIDGE_FW_CMD = "New-NetFirewallRule -DisplayName 'SituLab Bridge' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 51774 -Profile Any";
+const BRIDGE_AGENT_MSG = [
+  "Tu es dans la SafeRoom. Tu pilotes SituLab par le pont : tape « situlab <commande> » (relayé sur mon poste ; le PIN surgit chez moi, jamais chez toi).",
+  "Commence par lire /root/AGENTS.md.",
+  "Puis « situlab kernel list » et propose-moi d'ouvrir un KERNEL avec « situlab kernel cat ».",
+].join("\n");
+
 async function renderOSBoxPanel() {
   const box = el("osbox-panel"); if (!box) return;
   let st;
@@ -79,10 +87,19 @@ async function renderOSBoxPanel() {
     const bridgeBlock = hasBridge ? `
       <div class="osb-bridge">
         <div class="osb-bridge-h">🔗 SituLab Bridge <span class="osb-done">installé ✓</span></div>
-        <div class="sub">Dans le terminal, l'agent tape <code>situlab-bridge connect</code> pour se relier, puis p.ex. <code>situlab-bridge repo list</code>. Si la liaison échoue, autorisez le pont dans le pare-feu Windows (une seule fois) :</div>
+        <div class="sub">Dans la SafeRoom, l'agent tape <code>situlab &lt;commande&gt;</code> (relayé vers ce poste ; le PIN surgit ici). La doc <code>/root/AGENTS.md</code> et le raccourci <code>situlab</code> sont posés dans la box à l'installation.</div>
         <div class="osb-bridge-act">
-          <button class="btn btn-ghost btn-sm" id="osb-fw" ${st.busy ? "disabled" : ""}>🛡 Autoriser dans le pare-feu (admin)</button>
+          <button class="btn btn-primary btn-sm" id="osb-agent-msg">Copier le message pour l'agent 🤖</button>
           <button class="btn btn-ghost btn-sm" id="osb-bridge-test" ${st.busy || !st.running ? "disabled" : ""}>↻ Tester la liaison</button>
+        </div>
+        <div class="osb-bridge-fw">
+          <div class="sub"><b>Si la liaison échoue</b> : le pare-feu Windows bloque le pont. Autorisez-le une seule fois.</div>
+          <div class="osb-bridge-act">
+            <button class="btn btn-ghost btn-sm" id="osb-fw" ${st.busy ? "disabled" : ""}>🛡 Autoriser automatiquement (admin)</button>
+            <button class="btn btn-ghost btn-sm" id="osb-fw-copy">Copier la commande pare-feu</button>
+          </div>
+          <div class="sub">Manuel : PowerShell <b>ouvert en administrateur</b>, puis collez —</div>
+          <pre class="filebox" style="user-select:text;white-space:pre-wrap">${esc(BRIDGE_FW_CMD)}</pre>
         </div>
       </div>` : "";
     content = `
@@ -118,6 +135,8 @@ async function renderOSBoxPanel() {
   if (el("osb-fw")) el("osb-fw").onclick = async () => {
     try { await App().OSBoxBridgeAuthorizeFirewall(); toast("Autorisation pare-feu demandée (validez l'invite Windows), puis « Tester la liaison ».", "ok"); } catch (e) { toast(cleanErr(e), "err"); }
   };
+  if (el("osb-fw-copy")) el("osb-fw-copy").onclick = () => copyPrompt(BRIDGE_FW_CMD, { close: false, title: "Commande pare-feu (PowerShell admin)" });
+  if (el("osb-agent-msg")) el("osb-agent-msg").onclick = () => copyPrompt(BRIDGE_AGENT_MSG, { close: false, title: "Message pour l'agent SafeRoom" });
   if (el("osb-bridge-test")) el("osb-bridge-test").onclick = async () => {
     try { await App().OSBoxBridgeInstall(); toast("Test de liaison en cours…", "ok"); startOsboxPoll(); setTimeout(renderOSBoxPanel, 300); } catch (e) { toast(cleanErr(e), "err"); }
   };
