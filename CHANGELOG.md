@@ -6,6 +6,16 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 > (voir « Historique antérieur ») : il traçait les allers-retours de conception, sans valeur pour le
 > lecteur. Les versions récentes restent détaillées.
 
+## [1.16.2] — CI : empaquetage Windows (makensis)
+
+### Corrigé
+- **Build des installateurs — job windows** : localisation robuste de `makensis` après
+  `choco install nsis`. Le PATH de l'étape d'installation n'étant pas repris et le binaire n'étant ni
+  dans `Program Files(x86)\NSIS` ni dans `Program Files\NSIS`, `$makensis` pointait un chemin
+  inexistant et l'empaquetage échouait (« term not recognized »). On cherche désormais le shim
+  Chocolatey et le dossier lib du paquet, avec repli par recherche récursive et échec explicite si
+  introuvable. Correctif CI uniquement — aucun changement applicatif.
+
 ## [1.16.1] — Assistant IA : ouverture KERNEL proactive · SafeRoom paramétrée
 
 ### Assistant IA (kit)

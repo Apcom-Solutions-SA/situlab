@@ -70,11 +70,28 @@ jobs:
           # NSIS (Unicode) lit l'UTF-8 seulement s'il y a un BOM, sinon il garble les accents français
           # (ex. la question de désinstallation). Set-Content par défaut en pwsh = UTF-8 SANS BOM.
           (Get-Content build/installer.nsi) -replace '!define VERSION ".*"', '!define VERSION "${{ steps.ver.outputs.v }}"' | Set-Content build/installer.nsi -Encoding utf8BOM
-          # makensis : via le shim PATH de Chocolatey si présent, sinon le chemin d'install (NSIS est
-          # 32 bits → Program Files (x86)). Robuste quel que soit le runner.
+          # makensis : le PATH de l'étape « choco install » n'est pas repris ici, et l'emplacement
+          # varie (shim Chocolatey, dossier lib du paquet, ou install NSIS). On cherche dans une liste
+          # de chemins connus, puis en dernier recours par recherche récursive, et on ÉCHOUE
+          # explicitement si rien n'est trouvé (plutôt que de lancer un chemin inexistant).
           $makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
-          if (-not $makensis) { $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
-          if (-not (Test-Path $makensis)) { $makensis = "$env:ProgramFiles\NSIS\makensis.exe" }
+          if (-not $makensis) {
+            $cands = @(
+              "$env:ChocolateyInstall\bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe",
+              "$env:ChocolateyInstall\lib\nsis\tools\makensis.exe",
+              "C:\ProgramData\chocolatey\lib\nsis\tools\makensis.exe",
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+              "$env:ProgramFiles\NSIS\makensis.exe"
+            )
+            $makensis = $cands | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          }
+          if (-not $makensis) {
+            $roots = @("$env:ChocolateyInstall", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") | Where-Object { $_ -and (Test-Path $_) }
+            $found = Get-ChildItem -Path $roots -Filter makensis.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $makensis = $found.FullName }
+          }
+          if (-not $makensis) { throw "makensis introuvable après l'installation de NSIS (Chocolatey)" }
           Write-Host "makensis = $makensis"
           cd build
           & $makensis installer.nsi
