@@ -254,11 +254,12 @@ type ProjectLocal struct {
 // ProjectBoard : état « 3 colonnes » d'un projet — Local (ce poste) · Atelier (dev) · Production(s).
 // C'est le cœur du tableau de bord Projets (v1.8) : voir d'un coup l'alignement local↔atelier↔prod.
 type ProjectBoard struct {
-	Name    string        `json:"name"`
-	Icon    string        `json:"icon"`
-	Atelier RepoLine      `json:"atelier"`     // dépôt atelier + version distante (dernier tag)
-	Local   *ProjectLocal `json:"local"`       // clone local de l'atelier ; nil = pas sur ce poste
-	Prods   []ProdLine    `json:"productions"` // productions + équilibre par versions
+	Name        string        `json:"name"`
+	Icon        string        `json:"icon"`
+	Atelier     RepoLine      `json:"atelier"`      // dépôt atelier + version distante (dernier tag)
+	AtelierTags []string      `json:"atelier_tags"` // tags de l'atelier (du + récent au + ancien) : évite au front de les re-demander (dé-doublonnage du graphe)
+	Local       *ProjectLocal `json:"local"`        // clone local de l'atelier ; nil = pas sur ce poste
+	Prods       []ProdLine    `json:"productions"`  // productions + équilibre par versions
 }
 
 // ProjectBoards calcule l'état 3 colonnes de TOUS les projets. Best-effort : une connexion KO
@@ -293,11 +294,26 @@ func (s *Service) ProjectBoards() ([]ProjectBoard, error) {
 // ProjectBoards (tous les projets, en parallèle) et ProjectBoardOne (un seul, au clic sur un classeur).
 func (s *Service) boardFor(p config.Project, localIdx map[string]string) ProjectBoard {
 	b := ProjectBoard{Name: p.Name, Icon: p.Icon}
-	atelierTags, av, aerr := s.latestTags(p.Atelier)
-	b.Atelier = RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo, Version: av}
-	if aerr != nil {
-		b.Atelier.Error = cleanClientErr(aerr)
+
+	// Perf (1.16.4) : les tags de l'atelier et de CHAQUE vitrine sont des appels réseau INDÉPENDANTS.
+	// On les récupère en parallèle au lieu d'enchaîner atelier puis vitrines en file (c'était une cause
+	// directe de la lenteur d'ouverture d'un projet, surtout avec une vitrine GitHub lente). La lecture
+	// du clone local (disque) se fait pendant que le réseau tourne. Chaque goroutine écrit SA case (pas
+	// de course) ; les caches partagés restent protégés par s.mu — même modèle que ProjectBoards.
+	type tagRes struct {
+		tags   []string
+		latest string
+		err    error
 	}
+	atCh := make(chan tagRes, 1)
+	go func() { t, l, e := s.latestTags(p.Atelier); atCh <- tagRes{t, l, e} }()
+	prodCh := make([]chan tagRes, len(p.Productions))
+	for i, pr := range p.Productions {
+		prodCh[i] = make(chan tagRes, 1)
+		go func(i int, pr config.RepoRef) { t, l, e := s.latestTags(pr); prodCh[i] <- tagRes{t, l, e} }(i, pr)
+	}
+
+	// Clone local (lecture disque) en parallèle du réseau.
 	if path := s.localCloneForIdx(p.Atelier, localIdx); path != "" {
 		if sum, err := gitx.SummaryOf(path); err == nil && sum.IsRepo {
 			b.Local = &ProjectLocal{
@@ -306,9 +322,30 @@ func (s *Service) boardFor(p config.Project, localIdx map[string]string) Project
 			}
 		}
 	}
-	idx := tagIndex(atelierTags)
-	for _, pr := range p.Productions {
-		b.Prods = append(b.Prods, s.prodLine(pr, idx, av, p.Promotions))
+
+	at := <-atCh
+	b.Atelier = RepoLine{Instance: p.Atelier.Instance, Owner: p.Atelier.Owner, Repo: p.Atelier.Repo, Version: at.latest}
+	b.AtelierTags = at.tags
+	if at.err != nil {
+		b.Atelier.Error = cleanClientErr(at.err)
+	}
+	idx := tagIndex(at.tags)
+	for i, pr := range p.Productions {
+		r := <-prodCh[i]
+		line := ProdLine{RepoLine: RepoLine{Instance: pr.Instance, Owner: pr.Owner, Repo: pr.Repo}}
+		if r.err != nil {
+			line.Error = cleanClientErr(r.err)
+		} else {
+			line.Version = r.latest
+			line.Balanced = r.latest != "" && r.latest == at.latest
+			if j, ok := idx[r.latest]; ok {
+				line.Behind = j
+			}
+		}
+		if p.Promotions != nil {
+			line.Promoted = p.Promotions[pr.Key()].Version
+		}
+		b.Prods = append(b.Prods, line)
 	}
 	return b
 }

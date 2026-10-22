@@ -59,7 +59,9 @@ func (m *ptyManager) start(ctx context.Context, id string, cols, rows int) error
 	}
 	_ = p.Resize(cols, rows)
 
-	c := p.Command("wsl.exe", "-d", osbox.BoxDistro)
+	// Shell de LOGIN dans le home (1.16.4) : charge /etc/profile → /etc/profile.d/situlab.sh (prompt
+	// lisible, couleurs, locale, bannière). Sans « -l », on tombait sur un shell nu au prompt par défaut.
+	c := p.Command("wsl.exe", "-d", osbox.BoxDistro, "--cd", "~", "--", "bash", "-l")
 	if err := c.Start(); err != nil {
 		_ = p.Close()
 		return err

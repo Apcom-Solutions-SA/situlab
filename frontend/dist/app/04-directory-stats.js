@@ -401,9 +401,10 @@ async function refreshWhoami() {
     state.isAdmin = !!u.is_admin;
     state.login = u.login;
     const gh = curIsGitHub();
-    // Header allégé (1.12) : le changement de compte ne se fait plus ici (il vit dans Réglages ▸
-    // Connexions git) ; on n'affiche donc plus l'identité dans la barre, seulement la présence en ligne.
-    if (w) w.innerHTML = `<span class="dot"></span><span class="whoami-state">en ligne</span>`;
+    // Header allégé (1.16.4) : plus de badge « en ligne » ici — les pastilles Git ✓ / Cloud ✓ portent
+    // seules l'état des connexions. On conserve toute la logique state.online (elle pilote l'écran de
+    // reconnexion) ; seul l'indicateur visuel disparaît.
+    if (w) w.innerHTML = "";
     if (live) live.classList.remove("off");
     // Admin et Tokens sont propres à Forgejo (API absente sur GitHub) ; leurs accès vivent désormais
     // dans Réglages → Connexions git (1.11). On garde les toggles best-effort si les éléments existent.
@@ -413,7 +414,9 @@ async function refreshWhoami() {
     if (isLocked(e)) { handleLock(); return; }
     state.online = false;
     state.offlineReason = isAuthError(e) ? "auth" : "net";
-    if (w) w.innerHTML = `<span class="dot off"></span><span class="whoami-state">${state.offlineReason === "auth" ? "déconnecté" : "hors ligne"}</span>`;
+    // Plus de badge texte dans le header (1.16.4) : l'état hors-ligne est porté par les pastilles
+    // Git ✓ / Cloud ✓ et par l'écran de reconnexion (state.online). On vide simplement la zone.
+    if (w) w.innerHTML = "";
     if (live) live.classList.add("off");
   }
   // Bascule d'état (en ligne ⇄ hors ligne) : si l'écran courant est bridé, on le (dé)verrouille

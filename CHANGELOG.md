@@ -6,6 +6,38 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 > (voir « Historique antérieur ») : il traçait les allers-retours de conception, sans valeur pour le
 > lecteur. Les versions récentes restent détaillées.
 
+## [1.16.4] — Réglages allégés, SafeRoom au premier plan, flux git plus complet
+
+### Ajouté
+- **Dépôts git — filtre « Branche locale »** : trier les clones selon la branche sur ce poste
+  (branche par défaut / branche de travail `work/*` / HEAD détaché). Zéro réseau.
+- **Panneau git — « rebaser ici »** : rejoue la branche courante au sommet d'une autre (réaligner une
+  branche de travail sur l'atelier à jour). Geste local, conflit guidé (`GitRebase` enfin exposé).
+- **SafeRoom — bande du pont au sommet** : message pour l'agent, test de liaison et autorisation
+  pare-feu sont désormais là où l'on travaille (collage dans le terminal du dessous), plus dans les
+  Réglages. Chargée après le terminal (n'en retarde pas l'affichage).
+
+### Modifié
+- **SafeRoom — terminal bien plus lisible** : shell de login (prompt « SafeRoom » contrasté, couleurs,
+  locale UTF-8, bannière, alias) provisionné dans la box ; palette ANSI haut contraste, police plus
+  grande et interligne aéré côté xterm.
+- **Réglages — Assistant IA** épuré : suppression de la bibliothèque de prompts et des Notes de
+  collaboration ; on conserve la Carte de contextualisation et « Brancher mon agent ».
+- **Réglages — OS de travail** allégé (le pont a migré vers la SafeRoom) ; mention situememoring.com
+  retirée de l'onglet Versions.
+- **Header** : suppression du badge « en ligne » (redondant avec les pastilles Git ✓ / Cloud ✓).
+
+### Performance
+- **Fiche projet** : les versions de l'atelier et des vitrines sont récupérées **en parallèle** (au
+  lieu d'enchaîner les appels) et le graphe réutilise les tags déjà fournis par le board — ouverture
+  d'un projet nettement plus rapide, surtout avec une vitrine GitHub lente.
+
+### Corrigé
+- **Branches — cohérence graphe ↔ panneau** : une branche présente seulement sur l'atelier ne
+  « disparaît » plus du panneau Local ; elle est signalée avec un renvoi vers l'onglet Atelier.
+- **Diagnostic** : retrait de l'avertissement « Autres accès git » (et de la détection associée) ;
+  `SECURITY.md` mis en cohérence (la limite réelle reste documentée).
+
 ## [1.16.3] — Graphe de promotion : pastilles d'écart au premier plan
 
 ### Corrigé

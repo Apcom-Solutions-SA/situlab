@@ -912,6 +912,27 @@ func (a *App) GitMergeAbort(path string) (string, error) {
 	return a.svc.GitMergeAbort(path)
 }
 
+// GitRebase rejoue la branche courante au sommet de upstream (local, pas de PIN). Exposé au panneau
+// git des Projets : réaligner une branche de travail sur l'atelier à jour (reprise après absence).
+func (a *App) GitRebase(path, upstream string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitRebase(path, upstream)
+}
+func (a *App) GitRebaseContinue(path string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitRebaseContinue(path)
+}
+func (a *App) GitRebaseAbort(path string) (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	return a.svc.GitRebaseAbort(path)
+}
+
 // GitDeleteBranch supprime une branche locale. force=false laisse git refuser une branche non
 // fusionnée (le front prévient alors et re-propose avec force=true).
 func (a *App) GitDeleteBranch(path, name string, force bool) (string, error) {

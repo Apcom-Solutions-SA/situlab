@@ -1872,6 +1872,19 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 /* terminal pleine hauteur dans la page (sans titre superflu) */
 .ost-shell.ost-fill { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .ost-shell.ost-fill .ost-termbox { flex: 1; height: auto; min-height: 0; }
+/* SafeRoom : bande du pont (sommet) + terminal qui remplit le reste (1.16.4) */
+.ost-view { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.ost-view .ost-shell.ost-fill { flex: 1; min-height: 0; }
+.ost-bridgebar { flex: 0 0 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
+  padding: 8px 12px; margin-bottom: 8px; background: var(--ink-900, #0c0f14);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md); font-size: 12.5px; }
+.ost-bridgebar .ost-bb-t { font-weight: 700; white-space: nowrap; }
+.ost-bridgebar .ost-bb-d { color: var(--muted, #8893a3); flex: 1 1 220px; min-width: 160px; }
+.ost-bridgebar .ost-bb-act { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+/* badge ALPHA — fonction expérimentale, aucune sécurité garantie (1.16.4) */
+.alpha-pill { background: #a8530022; color: #ff9d2e; border: 1px solid #ff9d2e66;
+  font-weight: 800; letter-spacing: .06em; font-size: 10.5px; padding: 1px 7px; border-radius: 999px;
+  vertical-align: middle; margin-left: 6px; }
 /* mode plein écran : recouvre header + menu SituLab (seul le cadre natif de la fenêtre reste) */
 .ost-full { position: fixed; inset: 0; z-index: 9000; background: #0a0d12; display: flex; flex-direction: column; }
 .ost-full .ost-shell { flex: 1; min-height: 0; border: none; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }

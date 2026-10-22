@@ -29,13 +29,17 @@ async function renderOSBoxPanel() {
   if (!st.enabled) {
     stopOsboxPoll();
     box.innerHTML = `
-      <div class="set-sec-d">Faites travailler une IA (Claude Code…) dans un <b>système Linux séparé et jetable</b> — sans jamais l'installer sur votre machine ni lui confier vos clés. <b>SituLab reste sa seule porte</b> vers vos dépôts et vos clouds (avec PIN). L'IA ne voit aucun de vos fichiers hôte.</div>
+      <div class="set-sec-d">Faites travailler une IA (Claude Code…) dans un <b>système Linux séparé et jetable</b> — sans l'installer sur votre machine ni lui confier vos clés. <b>SituLab reste sa seule porte</b> vers vos dépôts et vos clouds (avec PIN). L'isolation des fichiers hôte est <b>best-effort</b> (voir l'avertissement <b>ALPHA</b> ci-dessus) : la garantie forte est l'absence de clés dans la box.</div>
       <div class="callout ${st.available ? "" : "warn"}">${st.available ? "✓ Votre poste est compatible (WSL2)." : "⚠ " + esc(st.available_hint || "Poste non compatible pour l'instant.")}</div>
       <label class="set-row toggle"><div class="set-row-l">Activer un OS de travail séparé <small>désactivé par défaut — aucune VM n'est créée tant que vous ne lancez pas l'installation</small></div>
         <span class="switch"><input id="osb-enable" type="checkbox" ${st.available ? "" : "disabled"} /><span class="track"></span></span></label>`;
     if (el("osb-enable")) el("osb-enable").onchange = async (e) => {
       try { await App().OSBoxSetEnabled(e.target.checked); renderOSBoxPanel(); } catch (err) { toast(cleanErr(err), "err"); }
     };
+    // OS de travail désactivé → l'entrée SafeRoom n'a plus de sens : on la retire du menu principal.
+    // (Cette branche fait un return anticipé ; sans cet appel, le menu resterait visible après la
+    // désactivation puisque le refreshOsboxNav de fin de fonction n'est jamais atteint.)
+    if (typeof refreshOsboxNav === "function") refreshOsboxNav();
     return;
   }
 
@@ -84,31 +88,17 @@ async function renderOSBoxPanel() {
         ? `<div class="callout danger"><b>La dernière opération a échoué.</b> Vous pouvez réessayer via le bouton « Installer ».</div>${osboxStepsHTML(st)}`
         : "";
     const hasBridge = (st.software || []).includes("situlab-bridge");
-    const bridgeBlock = hasBridge ? `
-      <div class="osb-bridge">
-        <div class="osb-bridge-h">🔗 SituLab Bridge <span class="osb-done">installé ✓</span></div>
-        <div class="sub">Dans la SafeRoom, l'agent tape <code>situlab &lt;commande&gt;</code> (relayé vers ce poste ; le PIN surgit ici). La doc <code>/root/AGENTS.md</code> et le raccourci <code>situlab</code> sont posés dans la box à l'installation.</div>
-        <div class="osb-bridge-act">
-          <button class="btn btn-primary btn-sm" id="osb-agent-msg">Copier le message pour l'agent 🤖</button>
-          <button class="btn btn-ghost btn-sm" id="osb-bridge-test" ${st.busy || !st.running ? "disabled" : ""}>↻ Tester la liaison</button>
-        </div>
-        <div class="osb-bridge-fw">
-          <div class="sub"><b>Si la liaison échoue</b> : le pare-feu Windows bloque le pont. Autorisez-le une seule fois.</div>
-          <div class="osb-bridge-act">
-            <button class="btn btn-ghost btn-sm" id="osb-fw" ${st.busy ? "disabled" : ""}>🛡 Autoriser automatiquement (admin)</button>
-            <button class="btn btn-ghost btn-sm" id="osb-fw-copy">Copier la commande pare-feu</button>
-          </div>
-          <div class="sub">Manuel : PowerShell <b>ouvert en administrateur</b>, puis collez —</div>
-          <pre class="filebox" style="user-select:text;white-space:pre-wrap">${esc(BRIDGE_FW_CMD)}</pre>
-        </div>
-      </div>` : "";
+    // 1.16.4 : la liaison du pont (message agent, test, pare-feu) a quitté cette page — elle vit au
+    // SOMMET de la SafeRoom, là où l'on travaille. Ici, un simple pointeur quand le pont est présent.
+    const bridgeHint = hasBridge ? `
+      <div class="sub" style="margin-top:6px">🔗 <b>SituLab Bridge</b> installé ✓ — la liaison (message agent, test, pare-feu) se gère depuis le sommet de la <button class="lnk" data-osterm="1">SafeRoom</button>.</div>` : "";
     content = `
       <div class="osb-state-row">État : <span class="pill ${stateChip[1]}-pill">${stateChip[0]}</span>
         ${st.running && !st.busy ? `<button class="btn btn-ghost btn-sm" data-osterm="1">⌨ Ouvrir la SafeRoom</button>` : ""}</div>
       ${progBlock}
       <div class="osb-sw-h">Logiciels</div>
       <div class="osb-cards">${cards}</div>
-      ${bridgeBlock}
+      ${bridgeHint}
       <div class="sub" style="margin-top:6px">L'agent n'accède à vos git/clouds que via SituLab (validation PIN sur ce poste).</div>`;
     if (st.busy) startOsboxPoll(); else stopOsboxPoll();
     actions = st.busy
@@ -132,14 +122,6 @@ async function renderOSBoxPanel() {
   if (el("osb-stop")) el("osb-stop").onclick = async () => { try { await App().OSBoxStop(); renderOSBoxPanel(); } catch (e) { toast(cleanErr(e), "err"); } };
   if (el("osb-reset")) el("osb-reset").onclick = osboxConfirmReset;
   box.querySelectorAll("[data-osterm]").forEach((b) => b.onclick = () => navTo("osterm"));
-  if (el("osb-fw")) el("osb-fw").onclick = async () => {
-    try { await App().OSBoxBridgeAuthorizeFirewall(); toast("Autorisation pare-feu demandée (validez l'invite Windows), puis « Tester la liaison ».", "ok"); } catch (e) { toast(cleanErr(e), "err"); }
-  };
-  if (el("osb-fw-copy")) el("osb-fw-copy").onclick = () => copyPrompt(BRIDGE_FW_CMD, { close: false, title: "Commande pare-feu (PowerShell admin)" });
-  if (el("osb-agent-msg")) el("osb-agent-msg").onclick = () => copyPrompt(BRIDGE_AGENT_MSG, { close: false, title: "Message pour l'agent SafeRoom" });
-  if (el("osb-bridge-test")) el("osb-bridge-test").onclick = async () => {
-    try { await App().OSBoxBridgeInstall(); toast("Test de liaison en cours…", "ok"); startOsboxPoll(); setTimeout(renderOSBoxPanel, 300); } catch (e) { toast(cleanErr(e), "err"); }
-  };
   if (typeof refreshOsboxNav === "function") refreshOsboxNav(); // maj entrée « Terminal » de la sidebar
   box.querySelectorAll("[data-osinstall]").forEach((b) => b.onclick = async () => {
     const id = b.dataset.osinstall;
@@ -209,17 +191,30 @@ function osTermState() {
 }
 
 function osTermTheme() {
-  return { background: "#0a0d12", foreground: "#e6ebf2", cursor: "#4fe0b5", cursorAccent: "#0a0d12",
-    selectionBackground: "rgba(79,224,181,.25)", black: "#0a0d12", brightBlack: "#5b6472",
-    green: "#4fe0b5", brightGreen: "#6ff0c8", cyan: "#49c5d6", blue: "#6aa6ff", red: "#ff6b6b", yellow: "#ffcf6a" };
+  // Palette ANSI complète et à FORT contraste (1.16.4) : fond sombre neutre, avant-plan quasi blanc,
+  // 8 couleurs + 8 vives lisibles sur fond foncé (vert SafeRoom, bleu chemin, ambre invite). Sélection
+  // bien visible. Objectif : un terminal « top » et surtout très lisible en toutes circonstances.
+  return {
+    background: "#0a0d12", foreground: "#eef2f8", cursor: "#5bf0c2", cursorAccent: "#0a0d12",
+    selectionBackground: "rgba(91,240,194,.32)",
+    black: "#10141b", brightBlack: "#6b7686",
+    red: "#ff7b72", brightRed: "#ff9d96",
+    green: "#5bf0c2", brightGreen: "#7df7d2",
+    yellow: "#ffcf6a", brightYellow: "#ffdd8a",
+    blue: "#7cb0ff", brightBlue: "#9cc4ff",
+    magenta: "#d7a0ff", brightMagenta: "#e4bcff",
+    cyan: "#5bd3e6", brightCyan: "#84e2f0",
+    white: "#dfe6f0", brightWhite: "#ffffff",
+  };
 }
 
 function osTermNew(name) {
   const t = state.osTerm || (state.osTerm = { sessions: [], active: null, seq: 0 });
   t.seq++;
   const term = new window.Terminal({
-    cursorBlink: true, fontFamily: "var(--font-mono), monospace", fontSize: 13, scrollback: 4000,
-    theme: osTermTheme(), allowProposedApi: true,
+    cursorBlink: true, fontFamily: "var(--font-mono), ui-monospace, 'Cascadia Mono', Consolas, monospace",
+    fontSize: 14, lineHeight: 1.25, letterSpacing: 0.2, fontWeightBold: "700", scrollback: 6000,
+    minimumContrastRatio: 4.5, cursorStyle: "bar", theme: osTermTheme(), allowProposedApi: true,
   });
   const fit = new window.FitAddon.FitAddon(); term.loadAddon(fit);
   const wrap = document.createElement("div"); wrap.className = "ost-xterm";
@@ -237,6 +232,74 @@ function osTermShellHTML() {
     </div>`;
 }
 
+// bridgeBarHTML : bande COMPACTE du pont SituLab, au SOMMET de la SafeRoom — là où l'action se passe :
+// on copie le message et on le colle dans le terminal du dessous une fois l'agent lancé, on teste /
+// autorise la liaison au moment où l'on travaille dans la box (1.16.4 : déplacée depuis Réglages ▸ OS
+// de travail). Vide si le pont n'est pas installé.
+function bridgeBarHTML(st) {
+  if (!st || !(st.software || []).includes("situlab-bridge")) return "";
+  const busy = !!st.busy, stopped = !st.running;
+  return `<div class="ost-bridgebar">
+    <span class="ost-bb-t">🔗 SituLab Bridge <span class="osb-done">✓</span></span>
+    <span class="ost-bb-d">Collez le message dans le terminal ci-dessous, une fois l'agent lancé.</span>
+    <span class="ost-bb-act">
+      <button class="btn btn-primary btn-sm" id="osb-agent-msg">Copier le message pour l'agent 🤖</button>
+      <button class="btn btn-ghost btn-sm" id="osb-bridge-test" ${busy || stopped ? "disabled" : ""}>↻ Tester la liaison</button>
+      <button class="btn btn-ghost btn-sm" id="osb-fw" ${busy ? "disabled" : ""}>🛡 Pare-feu (admin)</button>
+      <button class="btn btn-ghost btn-sm" id="osb-fw-copy">Copier la commande pare-feu</button>
+    </span>
+  </div>`;
+}
+
+// wireBridgeBar : câble les boutons de la bande du pont (mêmes actions qu'auparavant dans Réglages).
+function wireBridgeBar(reRender) {
+  if (el("osb-agent-msg")) el("osb-agent-msg").onclick = () => copyPrompt(BRIDGE_AGENT_MSG, { close: false, title: "Message pour l'agent SafeRoom" });
+  if (el("osb-fw-copy")) el("osb-fw-copy").onclick = () => copyPrompt(BRIDGE_FW_CMD, { close: false, title: "Commande pare-feu (PowerShell admin)" });
+  if (el("osb-fw")) el("osb-fw").onclick = async () => {
+    try { await App().OSBoxBridgeAuthorizeFirewall(); toast("Autorisation pare-feu demandée (validez l'invite Windows), puis « Tester la liaison ».", "ok"); } catch (e) { toast(cleanErr(e), "err"); }
+  };
+  if (el("osb-bridge-test")) el("osb-bridge-test").onclick = async () => {
+    try { await App().OSBoxBridgeInstall(); toast("Test de liaison en cours…", "ok"); bridgeTestPoll(reRender); }
+    catch (e) { toast(cleanErr(e), "err"); }
+  };
+}
+
+// bridgeTestPoll : OSBoxBridgeInstall s'exécute en arrière-plan (goroutine) ; le verdict n'arrive que
+// via OSBoxStatus (steps + busy). On POLLE jusqu'à la fin de l'opération puis on affiche succès/échec —
+// sinon la bande compacte (sans la liste d'étapes du panneau Réglages) ne rendrait aucun retour.
+function bridgeTestPoll(reRender) {
+  let tries = 0;
+  const tick = () => {
+    if (state.view !== "osterm" && !state.osTermFull) return; // l'utilisateur a quitté la SafeRoom
+    App().OSBoxStatus().then((st) => {
+      const slot = el("ost-bridgebar-slot"); // garde les boutons (dés)activés à jour pendant le test
+      if (slot) { slot.innerHTML = bridgeBarHTML(st); wireBridgeBar(reRender); }
+      if (st.busy && tries++ < 45) { setTimeout(tick, 800); return; }
+      const steps = st.steps || [];
+      const failed = steps.find((s) => s.status === "fail");
+      if (failed) toast("Liaison KO — " + (failed.detail || failed.label || st.last_err || "échec"), "err");
+      else if (steps.length) toast("Liaison OK ✓ — la box joint SituLab.", "ok");
+      else if (st.last_err) toast("Liaison KO — " + st.last_err, "err");
+    }).catch((e) => toast(cleanErr(e), "err"));
+  };
+  setTimeout(tick, 600);
+}
+
+// refreshBridgeBar : (re)remplit la bande du pont APRÈS le terminal (OSBoxStatus sonde wsl : on ne
+// bloque jamais l'affichage du terminal avec cet appel). best-effort.
+function refreshBridgeBar() {
+  App().OSBoxStatus().then((st) => {
+    const slot = el("ost-bridgebar-slot"); if (!slot) return;
+    const had = slot.innerHTML;
+    slot.innerHTML = bridgeBarHTML(st);
+    wireBridgeBar(refreshBridgeBar);
+    // La bande réduit la hauteur disponible APRÈS que le terminal se soit ajusté : on le re-ajuste
+    // (sinon il déborde → scroll vertical qui masque la ligne de saisie). Seulement si la hauteur a
+    // pu changer (apparition/disparition/variation de la bande).
+    if (had !== slot.innerHTML) { try { osTermFitActive(); } catch (_) {} }
+  }).catch(() => {});
+}
+
 async function renderOSTerm() {
   osTermState();
   if (!state._osTermResizeBound) {
@@ -246,9 +309,12 @@ async function renderOSTerm() {
   }
   if (state.osTermFull) { osTermEnterFull(); return; }
   const view = el("view");
-  view.innerHTML = osTermShellHTML();
+  // La bande du pont est un SLOT vide au départ : le terminal s'affiche tout de suite, la bande se
+  // remplit juste après (refreshBridgeBar, best-effort), sans retarder l'ouverture de la SafeRoom.
+  view.innerHTML = `<div class="ost-view"><div id="ost-bridgebar-slot"></div>${osTermShellHTML()}</div>`;
   osTermPaintTabs();
   osTermMountActive();
+  refreshBridgeBar();
 }
 
 // Plein écran : le terminal recouvre header + menu SituLab (seul le cadre natif de la fenêtre reste).

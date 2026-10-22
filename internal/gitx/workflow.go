@@ -81,30 +81,3 @@ func StashList(dir string) (string, error) {
 func StashPop(dir string) (string, error) {
 	return run(dir, LocalTimeout, "stash", "pop")
 }
-
-// GlobalCredentialHelpers renvoie les gestionnaires d'identifiants git configurés hors du dépôt,
-// dans les scopes --system ET --global (ex. « manager », « wincred »). Le scope système est
-// essentiel sous Windows : Git Credential Manager s'y installe par défaut, et un diagnostic qui ne
-// lirait que --global le manquerait. Utile au diagnostic : si un tel helper (ou une clé SSH) existe,
-// la confirmation par PIN de SituLab ne suffit plus à empêcher un accès git depuis le poste.
-func GlobalCredentialHelpers() []string {
-	var hs []string
-	seen := map[string]bool{}
-	// Chaque scope est interrogé séparément : s'il est absent, git sort en erreur et on l'ignore.
-	// Un scope explicite (--system/--global) ne lit que le FICHIER correspondant : le
-	// « -c credential.helper= » du durcissement (valeur de niveau commande) en est d'office exclu,
-	// il n'y a donc pas de valeur vide à filtrer de ce côté.
-	for _, scope := range []string{"--system", "--global"} {
-		out, err := run("", LocalTimeout, "config", scope, "--get-all", "credential.helper")
-		if err != nil {
-			continue
-		}
-		for _, l := range strings.Split(out, "\n") {
-			if l = strings.TrimSpace(l); l != "" && !seen[l] {
-				seen[l] = true
-				hs = append(hs, l)
-			}
-		}
-	}
-	return hs
-}

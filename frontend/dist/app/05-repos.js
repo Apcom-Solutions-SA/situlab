@@ -113,6 +113,12 @@ async function renderRepos(live) {
           <option value="in">Dans un projet</option>
           <option value="out">Hors projet</option>
         </select>
+        <select id="repo-branch" class="select" aria-label="Filtrer par branche locale" title="Branche du clone sur ce poste">
+          <option value="">Branche : toutes</option>
+          <option value="main">Sur la branche par défaut</option>
+          <option value="work">Sur une branche de travail (work/*)</option>
+          <option value="detached">HEAD détaché</option>
+        </select>
         <div class="seg sm" id="repo-view" role="group" aria-label="Présentation">
           <button data-v="grid" title="Grille"${state.repoView === "grid" ? ' class="on"' : ""}>▦ Grille</button>
           <button data-v="list" title="Liste"${state.repoView === "list" ? ' class="on"' : ""}>☰ Liste</button>
@@ -130,6 +136,8 @@ async function renderRepos(live) {
     el("repo-state").onchange = (e) => { state.repoState = e.target.value; paintRepos(); };
     el("repo-project").value = state.repoProject || "";
     el("repo-project").onchange = (e) => { state.repoProject = e.target.value; paintRepos(); };
+    el("repo-branch").value = state.repoBranch || "";
+    el("repo-branch").onchange = (e) => { state.repoBranch = e.target.value; paintRepos(); };
     el("new-repo").onclick = createRepoModal;
     el("repo-tabs").onclick = (ev) => {
       const b = ev.target.closest("[data-tab]"); if (!b || b.disabled) return;
@@ -207,7 +215,7 @@ function paintRepos() {
   });
 
   // 3) Filtres État + Projet appliqués au dépôt représentatif.
-  const base = aggregated.filter((r) => matchRepoState(r, state.repoState) && matchRepoProject(r, state.repoProject));
+  const base = aggregated.filter((r) => matchRepoState(r, state.repoState) && matchRepoProject(r, state.repoProject) && matchRepoBranch(r, state.repoBranch));
 
   // 4) Onglets d'EMPLACEMENT : Ce poste / Atelier / Vitrine. On n'affiche que les onglets qui ont
   //    du contenu (le rôle de la connexion courante décide atelier↔vitrine) + un onglet « Tous ».
@@ -247,6 +255,25 @@ function matchRepoState(r, f) {
   const s = r.state || "nolocal";
   if (f === "attention") return s === "detached" || s === "unreadable";
   return s === f;
+}
+
+// matchRepoBranch : filtre « Branche locale » — sur quelle branche se trouve le clone de CE poste.
+// Zéro réseau (champs local_branch/detached/default_branch déjà portés par le dashboard). Un filtre
+// actif exclut les dépôts sans clone local (il n'y a pas de branche locale à comparer). Pour un dépôt
+// à plusieurs clones, on retient la correspondance si AU MOINS un clone correspond.
+function matchRepoBranch(r, f) {
+  if (!f) return true;
+  const clones = (r._clones && r._clones.length) ? r._clones : (r.local_path ? [r] : []);
+  if (!clones.length) return false;
+  const def = r.default_branch || "";
+  return clones.some((c) => {
+    if (f === "detached") return !!c.detached;
+    if (c.detached) return false;
+    const b = c.local_branch || "";
+    if (f === "work") return b.indexOf("work/") === 0;
+    if (f === "main") return b !== "" && (b === def || b === "main" || b === "master");
+    return false;
+  });
 }
 
 // matchRepoProject : filtre « Projet » — "in" = appartient à un projet, "out" = n'y appartient pas.

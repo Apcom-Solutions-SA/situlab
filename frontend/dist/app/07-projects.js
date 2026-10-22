@@ -155,16 +155,12 @@ async function fillProjectGraph(b, idx) {
       branches = (br || []).map((x) => ({ name: x.name, has_local: false, has_remote: true, author: x.author, ahead: 0, behind: 0 }));
     }
   } catch (e) { if (!el("pg-" + idx)) return; box.innerHTML = `<div class="muted" style="padding:8px 2px">Branches indisponibles : ${esc(cleanErr(e))}</div>`; return; }
-  // Tags RÉELLEMENT publiés sur l'atelier (API) : sert à signaler honnêtement un tag LOCAL non poussé
-  // (git describe local montrerait sinon une version que l'atelier n'a pas). `known` reste faux si on
-  // n'a pas pu lire les tags (hors-ligne) → on ne marque alors JAMAIS « non poussé » par prudence.
-  let atlTags = new Set(), atlTagsKnown = false;
-  try {
-    if (b.atelier) {
-      for (const t of (await App().RepoTags(b.atelier.instance, b.atelier.owner, b.atelier.repo)) || []) if (t.name) atlTags.add(t.name);
-      atlTagsKnown = true;
-    }
-  } catch (_) {}
+  // Tags RÉELLEMENT publiés sur l'atelier : servent à signaler honnêtement un tag LOCAL non poussé
+  // (git describe local montrerait sinon une version que l'atelier n'a pas). Perf (1.16.4) : ils sont
+  // déjà fournis par le board (b.atelier_tags) — plus d'appel RepoTags redondant ici. `known` reste
+  // faux si l'atelier n'a pas pu être lu (atelier.error) → on ne marque alors JAMAIS « non poussé ».
+  let atlTags = new Set(), atlTagsKnown = !!(b.atelier && !b.atelier.error);
+  (b.atelier_tags || []).forEach((n) => { if (n) atlTags.add(n); });
   if (el("pg-" + idx)) box.innerHTML = projectGraphHTML(b, branches, atlTags, atlTagsKnown);
 }
 
@@ -548,7 +544,13 @@ async function fillLocalTab(b) {
   if (bbox) {
     try {
       const m = await App().BranchMatrix(path);
-      const branches = ((m && m.branches) || []).filter((x) => x.has_local);
+      const allBranches = (m && m.branches) || [];
+      const branches = allBranches.filter((x) => x.has_local);
+      // Cohérence avec le graphe du haut (1.16.4) : ce graphe montre TOUTES les branches (local ∪
+      // atelier), ce panneau ne liste que les branches LOCALES. Une branche présente seulement sur
+      // l'atelier (créée/poussée par un collègue, pas encore récupérée ici) semblait donc « manquer ».
+      // On ne la masque plus en silence : on la signale et on renvoie vers l'onglet Atelier.
+      const remoteOnly = allBranches.filter((x) => !x.has_local && x.has_remote);
       // Présence VITRINE par branche : best-effort réseau. On distingue HONNÊTEMENT « absente » (serveur
       // lu, branche non trouvée) de « inconnu » (serveur non joignable) — jamais de faux « absente ».
       const prods = (b.productions || []).filter((p) => !p.error);
@@ -562,9 +564,15 @@ async function fillLocalTab(b) {
       }
       const vitState = (name) => !prods.length ? "none" : (vitNames.has(name) ? "present" : (vitOk ? "absent" : "unknown"));
       if (!el("gp-branches")) return;
-      bbox.innerHTML = branches.length
+      const note = remoteOnly.length
+        ? `<div class="muted gp-remoteonly-note" style="padding:6px 2px;margin-top:4px">
+             ＋ ${remoteOnly.length} branche${remoteOnly.length > 1 ? "s" : ""} seulement sur l'atelier (pas encore sur ce poste) —
+             <button type="button" class="lnk" data-gptab="atelier">voir dans l'onglet Atelier ›</button>
+           </div>`
+        : "";
+      bbox.innerHTML = (branches.length
         ? branches.map((br) => branchRowHTML(br, vitState(br.name))).join("")
-        : `<div class="muted" style="padding:6px 2px">Aucune branche locale.</div>`;
+        : `<div class="muted" style="padding:6px 2px">Aucune branche locale.</div>`) + note;
     } catch (e) { if (el("gp-branches")) bbox.innerHTML = `<div class="muted" style="padding:6px 2px">Branches indisponibles : ${esc(cleanErr(e))}</div>`; }
   }
   const wbox = el("gp-worktrees");
@@ -696,6 +704,7 @@ function branchRowHTML(br, vitrine) {
   const acts = br.current ? "" : `
     <button class="lnk" data-gpswitch="${esc(br.name)}">basculer</button>
     <button class="lnk" data-gpmerge="${esc(br.name)}" title="fusionner « ${esc(br.name)} » dans la branche courante">fusionner ici</button>
+    <button class="lnk" data-gprebase="${esc(br.name)}" title="rebaser la branche courante sur « ${esc(br.name)} » (historique linéaire)">rebaser ici</button>
     <button class="lnk danger" data-gpdel="${esc(br.name)}" data-merged="${br.merged ? "1" : "0"}" data-atelier="${br.has_remote ? "1" : "0"}" data-vitrine="${esc(vitrine)}" data-ahead="${br.ahead || 0}">supprimer</button>`;
   return `<div class="gp-row">
     <div class="gp-row-main">${scope}<span class="gp-bname">⎇ ${esc(br.name)}</span> ${ver}${cur}${badge}</div>
@@ -747,6 +756,7 @@ function bindGitPanel(b, refresh) {
       return;
     }
     const mg = ev.target.closest("[data-gpmerge]"); if (mg) return mergeBranchFlow(path, mg.dataset.gpmerge, reload);
+    const rb = ev.target.closest("[data-gprebase]"); if (rb) return rebaseBranchFlow(path, rb.dataset.gprebase, reload);
     const dl = ev.target.closest("[data-gpdel]");
     if (dl) return deleteBranchFlow(path, dl.dataset.gpdel, {
       merged: dl.dataset.merged === "1",
@@ -793,6 +803,29 @@ function mergeBranchFlow(path, branch, reload) {
     }
   });
   el("modal-ok").textContent = "Fusionner";
+}
+
+// rebaseBranchFlow : rejouer la branche COURANTE au sommet de `base` (git rebase base) — réaligner une
+// branche de travail sur l'atelier à jour, en gardant un historique linéaire. Geste 100 % local (pas de
+// PIN). Conflit → message guidé + « annuler le rebase » (retour à l'état d'avant).
+function rebaseBranchFlow(path, base, reload) {
+  openModal("Rebaser la branche courante", `<div class="field">
+    <div class="callout">Rebaser la branche <b>courante</b> de ce dossier sur <b>⎇ ${esc(base)}</b>.</div>
+    <p class="sub">Les commits de la branche courante sont <b>rejoués au sommet</b> de « ${esc(base)} » (historique linéaire). En cas de conflit, SituLab vous guidera. À réserver à une branche de travail non partagée.</p></div>`, async () => {
+    try { await App().GitRebase(path, base); closeModal(); toast("Branche rebasée sur « " + base + " »", "ok"); reload(); }
+    catch (e) {
+      closeModal();
+      const msg = cleanErr(e);
+      if (/conflit|conflict/i.test(msg)) {
+        openModal("Conflit de rebase", `<div class="field"><div class="callout warn">Le rebase a rencontré un <b>conflit</b>. Résolvez les fichiers en conflit puis poursuivez le rebase, ou annulez pour revenir à l'état d'avant.</div></div>`, async () => {
+          try { await App().GitRebaseAbort(path); closeModal(); toast("Rebase annulé", "ok"); reload(); }
+          catch (e2) { toast(cleanErr(e2), "err"); }
+        });
+        el("modal-ok").textContent = "Annuler le rebase"; el("modal-ok").classList.add("danger-btn");
+      } else { toast(msg, "err"); }
+    }
+  });
+  el("modal-ok").textContent = "Rebaser";
 }
 
 // deleteBranchFlow : supprimer une branche LOCALE, avec un message CONSCIENT DE LA PORTÉE (où la branche

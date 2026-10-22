@@ -444,6 +444,27 @@ func (s *Service) OSBoxProvisionBridge(bin []byte, port int, token string) error
 	wrapper := "#!/bin/sh\n# SafeRoom : relaie toute commande `situlab` au poste via le pont.\nexec /usr/local/bin/situlab-bridge \"$@\"\n"
 	motd := "SituLab Bridge — SafeRoom. Pilote SituLab par le pont : `situlab <commande>`.\n" +
 		"Doc agent : /root/AGENTS.md · Ouvrir un KERNEL : `situlab kernel list` puis `situlab kernel cat`.\n"
+	// Confort du terminal SafeRoom (1.16.4) : prompt très lisible, couleurs, locale UTF-8, alias usuels
+	// et une bannière d'accueil. Posé en /etc/profile.d → chargé par le shell de LOGIN lancé par le PTY.
+	// C.UTF-8 est disponible sans locale-gen (pas de warning de locale). Rejoué à chaque provision.
+	profile := "# SituLab SafeRoom — confort du terminal (prompt lisible, couleurs, locale)\n" +
+		"export LANG=${LANG:-C.UTF-8}\n" +
+		"export LC_ALL=${LC_ALL:-C.UTF-8}\n" +
+		"export CLICOLOR=1\n" +
+		"alias ls='ls --color=auto'\n" +
+		"alias ll='ls -alF --color=auto'\n" +
+		"alias la='ls -A --color=auto'\n" +
+		"alias grep='grep --color=auto'\n" +
+		"alias ..='cd ..'\n" +
+		"# Prompt : « SafeRoom » vert vif, user gris, chemin bleu, invite ambre — contraste élevé, gras.\n" +
+		"PS1='\\[\\e[1;38;5;82m\\]SafeRoom\\[\\e[0m\\] \\[\\e[38;5;244m\\]\\u@\\h\\[\\e[0m\\] \\[\\e[1;38;5;39m\\]\\w\\[\\e[0m\\] \\[\\e[1;38;5;208m\\]\\$\\[\\e[0m\\] '\n" +
+		"# Bannière d'accueil, une fois par session interactive.\n" +
+		"if [ -z \"$SITULAB_WELCOMED\" ] && [ -t 1 ]; then\n" +
+		"  export SITULAB_WELCOMED=1\n" +
+		"  printf '\\n\\e[1;38;5;82m  SafeRoom — SituLab Bridge\\e[0m\\n'\n" +
+		"  printf '  Pilotez SituLab par le pont : \\e[1msitulab <commande>\\e[0m  (le PIN surgit sur le poste).\\n'\n" +
+		"  printf '  Doc agent : \\e[1mcat /root/AGENTS.md\\e[0m   ·   KERNEL : \\e[1msitulab kernel list\\e[0m puis \\e[1msitulab kernel cat\\e[0m\\n\\n'\n" +
+		"fi\n"
 	for _, st := range []struct {
 		data []byte
 		sh   string
@@ -451,6 +472,7 @@ func (s *Service) OSBoxProvisionBridge(bin []byte, port int, token string) error
 		{[]byte(wrapper), "cat > /usr/local/bin/situlab && chmod +x /usr/local/bin/situlab"},
 		{[]byte(agentsBoxDoc), "mkdir -p /etc/situlab && cat > /etc/situlab/AGENTS.md && cp -f /etc/situlab/AGENTS.md /root/AGENTS.md"},
 		{[]byte(motd), "cat > /etc/motd"},
+		{[]byte(profile), "mkdir -p /etc/profile.d && cat > /etc/profile.d/situlab.sh && chmod 644 /etc/profile.d/situlab.sh"},
 	} {
 		if out, err := osbox.ExecStdin(20*time.Second, st.data, "sh", "-c", st.sh); err != nil {
 			s.osboxEndStep(i, "fail", osboxErrDetail(out, err))

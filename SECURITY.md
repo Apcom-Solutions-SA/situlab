@@ -36,7 +36,8 @@ correctif.
   (BitLocker/FileVault) ; ne pas laisser traîner `keyring.json`.
 - **Processus de même utilisateur.** Session déverrouillée, le jeton déchiffré vit en mémoire du démon ;
   un programme du **même compte OS** peut le lire. → Faire tourner les agents sous un autre compte / bac à
-  sable (voir la **SafeRoom**) ; auto-verrouillage court (défaut 5 min depuis 1.16).
+  sable ; auto-verrouillage court (défaut 5 min depuis 1.16). *(La SafeRoom aide à cloisonner l'agent mais
+  n'est pas un bac à sable étanche aujourd'hui — voir « OS de travail — ALPHA » plus bas.)*
   *Durcissement 1.16 :* la **politique** (quand exiger le PIN, périmètre, lecture seule) est désormais
   **signée** (clé d'appareil) et le canal du démon exige un **jeton** — une réécriture directe de
   `config.json` ou une connexion anonyme au socket est détectée et retombe en **position fermée**. Résidu
@@ -53,9 +54,23 @@ correctif.
   disque n'est qu'un **confort** pour survivre à un redémarrage ; un process du même compte OS peut la
   réinitialiser (supprimer le fichier) — limite assumée. La vraie protection hors ligne reste le **coût
   Argon2id** (m=64 Mo, t=3, p=4), pas ce verrou d'interface.
-- **Autres identifiants git du poste.** Une clé SSH ou un gestionnaire d'identifiants permet un accès git
-  **indépendant** de SituLab. La détection (Réglages ▸ Diagnostic) est **indicative** : elle ne voit pas
-  un agent SSH chargé, une clé au nom non standard, ni les jetons d'autres outils.
+- **Autres identifiants git du poste.** Une clé SSH ou un gestionnaire d'identifiants déjà présent sur la
+  machine permet un accès git **indépendant** de SituLab : la confirmation par PIN ne cloisonne un dépôt
+  que si le poste n'a pas d'autre moyen de s'authentifier. SituLab ne cherche pas à inventorier ces accès
+  (une énumération serait de toute façon incomplète : agent SSH chargé, clé au nom non standard, jetons
+  d'autres outils). La seule garantie de cloisonnement reste l'**isolement OS** : faire tourner les agents
+  sous un autre compte / en bac à sable.
+- **OS de travail « SafeRoom » (WSL) — ALPHA, aucune sécurité garantie.** La box pose bien `wsl.conf`
+  (`automount=false`, `interop=false`, `appendWindowsPath=false`) et SituLab **vérifie** l'étanchéité à
+  l'installation. Mais l'agent y tourne en **root** : cette isolation est **auto-respectée, pas imposée**.
+  Un agent root peut la défaire **à chaud** (remonter le disque hôte par `mount -t drvfs`, ré-enregistrer
+  le handler `binfmt_misc` pour réactiver l'interop, réécrire `wsl.conf`). La barrière est donc **« soft »**.
+  La **seule garantie forte** de la SafeRoom est qu'elle **ne détient aucune clé** : toute action distante
+  passe par SituLab (PIN sur le poste), donc une box même subvertie ne peut ni pousser ni exfiltrer de
+  credential. **Ne placez aucun secret dans la box.** Un durcissement « hard » (utilisateur non-root
+  dédié, pare-feu sortant, home sans secret) est un **chantier distinct non livré** ; tant qu'il ne l'est
+  pas, la fonction est marquée **ALPHA** dans l'interface. Hors périmètre, à documenter : exploit du noyau
+  WSL, compromission de l'hôte Windows.
 - **Signature de garantie (ci-dessous).** Non infalsifiable en local.
 
 ## Signature de garantie « SituLab approved »

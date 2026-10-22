@@ -20,7 +20,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -617,16 +616,15 @@ func (s *Service) cachedRepos(ctx context.Context, instance string, cl *forgejo.
 
 // Doctor décrit l'état de l'environnement.
 type Doctor struct {
-	GitAvailable  bool     `json:"git_available"`
-	GitVersion    string   `json:"git_version"`
-	ConfigPath    string   `json:"config_path"`
-	KeyringPath   string   `json:"keyring_path"`
-	Instances     int      `json:"instances"`
-	PINSet        bool     `json:"pin_set"`
-	Unlocked      bool     `json:"unlocked"`
-	VaultResidual int      `json:"vault_residual"`  // tokens restant dans l'ancien coffre OS (doit être 0)
-	OtherGitCreds []string `json:"other_git_creds"` // autres identifiants git détectés (clé SSH, credential helper) : la confirmation PIN ne protège qu'en leur absence
-	SignTestRoot  bool     `json:"sign_test_root"`  // la signature de garantie utilise encore la racine de TEST (à remplacer par la vraie racine de gouvernance)
+	GitAvailable  bool   `json:"git_available"`
+	GitVersion    string `json:"git_version"`
+	ConfigPath    string `json:"config_path"`
+	KeyringPath   string `json:"keyring_path"`
+	Instances     int    `json:"instances"`
+	PINSet        bool   `json:"pin_set"`
+	Unlocked      bool   `json:"unlocked"`
+	VaultResidual int    `json:"vault_residual"` // tokens restant dans l'ancien coffre OS (doit être 0)
+	SignTestRoot  bool   `json:"sign_test_root"` // la signature de garantie utilise encore la racine de TEST (à remplacer par la vraie racine de gouvernance)
 }
 
 // Doctor diagnostique la machine.
@@ -646,29 +644,8 @@ func (s *Service) Doctor() Doctor {
 		d.GitVersion, _ = gitx.Version()
 	}
 	d.VaultResidual = s.vaultResidual()
-	d.OtherGitCreds = detectGitCredSources()
 	d.SignTestRoot = attest.UsingTestRoot()
 	return d
-}
-
-// detectGitCredSources repère les identifiants git du poste autres que SituLab (clés SSH,
-// gestionnaire d'identifiants global). Leur présence est signalée : la confirmation par PIN
-// ne protège un dépôt que si le poste n'a PAS d'autre moyen de s'authentifier à git.
-func detectGitCredSources() []string {
-	var out []string
-	if home, err := os.UserHomeDir(); err == nil {
-		for _, k := range []string{"id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"} {
-			if fi, err := os.Stat(filepath.Join(home, ".ssh", k)); err == nil && !fi.IsDir() {
-				out = append(out, "clé SSH ~/.ssh/"+k)
-			}
-		}
-	}
-	if gitx.Available() {
-		if h := gitx.GlobalCredentialHelpers(); len(h) > 0 {
-			out = append(out, "gestionnaire d'identifiants git : "+strings.Join(h, ", "))
-		}
-	}
-	return out
 }
 
 // AddLocalRepo enregistre un dépôt local à suivre (après vérification que c'en est un).

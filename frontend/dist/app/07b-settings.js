@@ -1,54 +1,9 @@
-// renderPromptLib : la bibliothèque de prompts (accordéons éditables). Les prompts par défaut portent un
-// badge ; les personnalisations de l'utilisateur sont conservées à travers les mises à jour (stockées en config).
-async function renderPromptLib() {
-  const box = el("prompt-lib"); if (!box) return;
-  box.innerHTML = `<div class="skeleton"></div>`;
-  let rows = [];
-  try { rows = (await App().Prompts()) || []; } catch (_) { box.innerHTML = ""; return; }
-  box.innerHTML = rows.map((p) => `
-    <details class="plib-item">
-      <summary><span class="plib-title">${esc(p.title)}</span> ${p.builtin ? `<span class="pill sm">${p.overridden ? "modifié" : "par défaut"}</span>` : `<span class="pill sm">perso</span>`}</summary>
-      <pre class="plib-body">${esc(p.body)}</pre>
-      <div class="plib-actions">
-        <button class="btn btn-ghost btn-sm" data-pcopy="${esc(p.id)}">Copier</button>
-        <button class="btn btn-ghost btn-sm" data-pedit="${esc(p.id)}">Modifier</button>
-        ${p.builtin && p.overridden ? `<button class="btn btn-ghost btn-sm" data-preset="${esc(p.id)}">Réinitialiser</button>` : ""}
-        <button class="lnk danger" data-pdel="${esc(p.id)}">${p.builtin ? "Masquer" : "Supprimer"}</button>
-      </div>
-    </details>`).join("") || `<div class="muted">Aucun prompt.</div>`;
-  const byId = {}; rows.forEach((r) => byId[r.id] = r);
-  box.querySelectorAll("[data-pcopy]").forEach((b) => b.onclick = () => copyPrompt(byId[b.dataset.pcopy].body, { title: byId[b.dataset.pcopy].title }));
-  box.querySelectorAll("[data-pedit]").forEach((b) => b.onclick = () => promptEditModal(byId[b.dataset.pedit]));
-  box.querySelectorAll("[data-preset]").forEach((b) => b.onclick = async () => { try { await App().ResetPrompt(b.dataset.preset); renderPromptLib(); } catch (e) { toast(cleanErr(e), "err"); } });
-  box.querySelectorAll("[data-pdel]").forEach((b) => b.onclick = () => {
-    const p = byId[b.dataset.pdel];
-    openModal(p.builtin ? "Masquer ce prompt ?" : "Supprimer ce prompt ?", `<div class="field"><div class="callout">« ${esc(p.title)} »${p.builtin ? " sera masqué (réversible via « réinitialiser » plus tard)." : " sera supprimé."}</div></div>`, async () => {
-      try { await App().DeletePrompt(p.id); closeModal(); renderPromptLib(); } catch (e) { toast(cleanErr(e), "err"); }
-    });
-  });
-}
-
-// promptEditModal : créer (p=null) ou modifier un prompt. Un prompt par défaut modifié devient une
-// surcharge (conservée) sans toucher l'original livré.
-function promptEditModal(p) {
-  const isNew = !p;
-  openModal(isNew ? "Nouveau prompt" : "Modifier le prompt", `<div class="field">
-    <label>Titre<input id="pe-title" class="inp" value="${esc(p ? p.title : "")}" /></label>
-    <label>Prompt<textarea id="pe-body" rows="6" style="width:100%;resize:vertical">${esc(p ? p.body : "")}</textarea></label>
-    <div class="inline-error hidden" id="pe-err"></div></div>`, async () => {
-    const er = el("pe-err");
-    try { await App().SavePrompt(p ? p.id : "", el("pe-title").value, el("pe-body").value); closeModal(); renderPromptLib(); }
-    catch (e) { if (er) { er.textContent = cleanErr(e); er.classList.remove("hidden"); } }
-  });
-  el("modal-ok").textContent = "Enregistrer";
-}
-
 async function renderSettings() {
   const theme = readTheme();
   const zoom = readZoom();
   const mods = state.modules || {};
   const MODULE_GROUPS = [
-    { k: "agents", label: "Accès IA (agents)", d: "Assistant IA, bibliothèque de prompts, configuration CLI/MCP." },
+    { k: "agents", label: "Accès IA (agents)", d: "Assistant IA et configuration CLI/MCP." },
     { k: "git_advanced", label: "Git avancé", d: "Étapes git séparées, matrice des branches, outils git locaux, réglages de dépôt." },
     { k: "spokes", label: "SPOKES", d: "Le menu des projections de mission." },
     { k: "corpus", label: "CORPUS (clouds)", d: "Le menu des clouds de fichiers souverains." },
@@ -138,23 +93,16 @@ async function renderSettings() {
           <div class="ia-card-d">Message de première connexion + configuration MCP (Cursor, Claude Desktop…) prêts à coller.</div>
           <div class="ia-card-act"><button class="btn btn-primary btn-sm" id="agent-config">Configurer mon agent IA</button></div>
         </div>
-        <div class="ia-card ia-card-wide">
-          <div class="ia-card-h">🤝 Notes de collaboration <span class="muted">(reprises dans AGENTS.md)</span></div>
-          <textarea id="agent-notes" rows="4" placeholder="Ex. : réponds en français ; propose toujours un plan avant d'agir ; mes dépôts de prod sont sur l'organisation apcom…" style="width:100%;margin-top:6px;resize:vertical"></textarea>
-          <div class="ia-card-act" style="margin-top:8px"><button class="btn btn-primary btn-sm" id="agent-save">Enregistrer</button></div>
-        </div>
       </div>
-      <div class="plib-h" style="margin-top:16px"><b>📋 Bibliothèque de prompts</b> <span class="muted">— des messages prêts à coller dans votre IA. Les vôtres sont conservés lors des mises à jour.</span></div>
-      <div id="prompt-lib"></div>
-      <button class="btn btn-ghost btn-sm" id="prompt-add" style="margin-top:8px">＋ Ajouter un prompt</button>
     </section>
 
-    <section class="set-sec set-panel" data-panel="osbox"><div class="set-sec-h">🖥 OS de travail séparé</div>
+    <section class="set-sec set-panel" data-panel="osbox"><div class="set-sec-h">🖥 OS de travail séparé <span class="pill alpha-pill" title="Fonction expérimentale — aucune sécurité garantie">ALPHA</span></div>
+      <div class="callout warn" style="margin-bottom:10px">⚠ <b>ALPHA — aucune sécurité garantie.</b> La cage WSL n'est <b>pas étanche</b> et l'agent y tourne en <b>root</b> : il peut, s'il le décide, contourner l'isolation (remonter le disque hôte, réactiver l'interop Windows). La <b>seule garantie forte</b> reste que la box <b>ne détient aucune clé</b> — toute action distante passe par SituLab (PIN sur ce poste). <b>N'y placez aucun secret.</b></div>
       <div id="osbox-panel"><div class="skeleton"></div></div>
     </section>
 
     <section class="set-sec set-panel" data-panel="diag"><div class="set-sec-h">🩺 Diagnostic</div>
-      <div class="set-sec-d">L'état de SituLab sur ce poste en un coup d'œil : git, PIN, session, connexions, coffre, signature, et les accès git qui échappent à la confirmation PIN.</div>
+      <div class="set-sec-d">L'état de SituLab sur ce poste en un coup d'œil : git, PIN, session, connexions, coffre, signature.</div>
       <div id="diag-creds"><div class="muted">Vérification…</div></div>
     </section>
 
@@ -163,7 +111,6 @@ async function renderSettings() {
         <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-check">Vérifier les mises à jour ↗</button></div></div>
       <div class="set-row"><div class="set-row-l">Téléchargements (votre OS)</div>
         <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-site">situememoring.com ↗</button><button class="btn btn-ghost btn-sm" id="ver-gh">GitHub ↗</button></div></div>
-      <div class="set-note">Les installeurs et l'historique complet des versions sont publiés sur situememoring.com (lecture en direct des Releases GitHub).</div>
     </section>
 
     <section class="set-sec set-panel" data-panel="lic"><div class="set-sec-h">⚖️ Licence</div>
@@ -199,8 +146,6 @@ async function renderSettings() {
   if (el("sc-add-cloud")) el("sc-add-cloud").onclick = () => addCloudModal(renderSettings);
   const agv = el("agents-view");
   if (agv) agv.onclick = async () => { try { infoModal("AGENTS.md", `<div class="md-render" style="max-height:60vh;overflow:auto">${mdToHTML(await App().Doc())}</div>`); } catch (_) {} };
-  renderPromptLib();
-  if (el("prompt-add")) el("prompt-add").onclick = () => promptEditModal(null);
 
   document.querySelectorAll("[data-th]").forEach((b) => b.onclick = () => { writeTheme(b.dataset.th); applyTheme(b.dataset.th); renderSettings(); });
   document.querySelectorAll("[data-zoom]").forEach((b) => b.onclick = () => { writeZoom(b.dataset.zoom); applyZoom(b.dataset.zoom); renderSettings(); });
@@ -311,14 +256,9 @@ async function renderSettings() {
     }
     const pd = el("purge-data");
     if (pd) pd.onclick = purgeDataModal;
-    // Assistant IA : fiche de collaboration éditable + dépôt + configuration.
-    const an = el("agent-notes");
-    if (an) {
-      App().AgentNotes().then((v) => { an.value = v || ""; }).catch(() => {});
-      el("agent-save").onclick = async () => { try { await App().SetAgentNotes(an.value); toast("Fiche de collaboration enregistrée", "ok"); } catch (e) { toast(cleanErr(e), "err"); } };
-      el("agent-deposit").onclick = installDirectives;
-      el("agent-config").onclick = aiAgentModal;
-    }
+    // Assistant IA : dépôt de la carte de contextualisation + configuration de l'agent.
+    if (el("agent-deposit")) el("agent-deposit").onclick = installDirectives;
+    if (el("agent-config")) el("agent-config").onclick = aiAgentModal;
   } catch (e) {}
   renderDiagnostic();
 }
@@ -345,12 +285,6 @@ async function renderDiagnostic() {
   rows.push(doc.sign_test_root
     ? row("warn", "Signature de garantie", "Racine de TEST embarquée — la vraie racine de gouvernance n'est pas installée (les sceaux ne sont pas vérifiables réellement).")
     : row("ok", "Signature de garantie", "Automatique : chaque commit et chaque promotion créés via SituLab sont signés par le service APCOM (clé jamais sur le poste). Le sceau se lit dans l'historique."));
-  // N'apparaît QUE si SituLab a réellement détecté un accès git concurrent sur ce poste : on dit alors
-  // OÙ il est, À QUOI il donne accès, et POURQUOI on conseille de le retirer (un agent IA l'emprunterait
-  // hors du contrôle de SituLab). Rien de détecté → simple ✅, pas d'avertissement anxiogène.
-  rows.push((doc.other_git_creds || []).length
-    ? row("warn", "Autres accès git sur ce poste", `Détecté : <b>${doc.other_git_creds.map(esc).join(", ")}</b>. Ces identifiants (clé SSH, gestionnaire d'identifiants git) donnent un accès <b>direct à vos dépôts distants</b>, <b>indépendant</b> de SituLab et <b>hors validation</b>. Un agent IA lancé sur ce poste pourrait les emprunter. Pour un cloisonnement strict, retirez-les ou faites tourner vos agents sous un autre compte / bac à sable.`)
-    : row("ok", "Autres accès git", "Aucun identifiant git concurrent détecté — les écritures passent bien par SituLab."));
   dc.innerHTML = `<div class="diag-list">${rows.join("")}</div>`;
   // Liens « Connexions » → onglet correspondant des Réglages (navigation contextuelle).
   dc.querySelectorAll("[data-gototab]").forEach((b) => b.onclick = () => { const t = document.querySelector(`.set-navbtn[data-settab="${b.dataset.gototab}"]`); if (t) t.click(); });
