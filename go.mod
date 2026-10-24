@@ -6,7 +6,7 @@ require (
 	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/spf13/cobra v1.8.1
 	github.com/wailsapp/wails/v2 v2.16.0
-	github.com/zalando/go-keyring v0.2.5
+	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
@@ -14,12 +14,11 @@ require (
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
-	github.com/alessio/shellescape v1.4.1 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/creack/pty v1.1.24 // indirect
-	github.com/danieljoos/wincred v1.2.0 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
