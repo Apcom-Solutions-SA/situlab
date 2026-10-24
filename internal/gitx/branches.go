@@ -221,6 +221,9 @@ func TagsFor(dir, ref string) []string {
 // "<tag>-<N>-g<abbrev>", ce qui donne l'écart même quand la pointe est pile sur le tag (--abbrev=0
 // le perdrait). Le nom de tag peut contenir des tirets → on découpe par la DROITE. "" , 0 si aucun tag.
 func nearestTagAhead(dir, ref string) (string, int) {
+	if safeRevision(ref) != nil { // jamais de réf en « -option » passée à git describe
+		return "", 0
+	}
 	out, err := run(dir, LocalTimeout, "describe", "--tags", "--long", ref)
 	if err != nil {
 		return "", 0
@@ -242,6 +245,9 @@ func nearestTagAhead(dir, ref string) (string, int) {
 // nearestTag renvoie le nom du tag le plus proche d'une réf (ex. v1.2.0), ou "" si
 // aucun tag n'est joignable. --abbrev=0 donne le nom pur, sans suffixe technique.
 func nearestTag(dir, ref string) string {
+	if safeRevision(ref) != nil { // jamais de réf en « -option » passée à git describe
+		return ""
+	}
 	if out, err := run(dir, LocalTimeout, "describe", "--tags", "--abbrev=0", ref); err == nil {
 		return strings.TrimSpace(out)
 	}

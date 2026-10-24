@@ -108,6 +108,13 @@ func (s *Service) RunBackup(name string) (string, error) {
 		return "", ErrNoBackup
 	}
 	plan := *bp
+	// Plan v1.14 (generique/cible : Type!="", RepoPath vide) → moteur complet (multi-depots, journal,
+	// retention, progression). RunBackupPlan delegue a RunBackup quand Type=="", donc pas de recursion :
+	// chacun ne traite QUE le type que l'autre ne gere pas. Couvre d'un seul point les 3 surfaces
+	// (fenetre, CLI, MCP, demon) qui appelaient encore RunBackup directement.
+	if plan.Type != "" {
+		return s.RunBackupPlan(name, "manual")
+	}
 
 	// Pas de PIN pour une sauvegarde (routine additive) — voir authorizeBackupCloud.
 	if err := s.authorizeBackupCloud(plan.Cloud); err != nil {
@@ -135,14 +142,23 @@ func (s *Service) RunBackup(name string) (string, error) {
 		return "", err
 	}
 
-	remote := path.Join("/"+strings.Trim(config.CloudCleanPath(plan.Dest), "/"), fname)
+	destDir := "/" + strings.Trim(config.CloudCleanPath(plan.Dest), "/")
+	remote := path.Join(destDir, fname)
 	cl, _, err := s.fileCloudClientFor(plan.Cloud)
 	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), backupUploadTimeout)
 	defer cancel()
+	// Creer la hierarchie du dossier de destination (sinon PUT -> 409 si le parent n'existe pas),
+	// puis confirmer l'envoi — comme backupBundle (moteur v1.14).
+	if err := s.cloudEnsureDir(ctx, cl, destDir); err != nil {
+		return "", err
+	}
 	if err := cl.Put(ctx, remote, content); err != nil {
+		return "", fmt.Errorf("envoi : %w", err)
+	}
+	if err := s.verifyUploaded(ctx, cl, destDir, fname, int64(len(content))); err != nil {
 		return "", err
 	}
 

@@ -72,6 +72,22 @@ function serverPageURL(inst, kind) {
   return u + "/user/settings";
 }
 
+// repoWebURL : URL web d'un dépôt pour « Ouvrir en ligne ». Priorité à html_url (fourni par l'API),
+// sinon on la CONSTRUIT depuis la base de l'instance courante + owner/repo — le détail ouvert DEPUIS UN
+// PROJET n'a pas de html_url (il valait ""), d'où un bouton mort. GitHub : base web (github.com), jamais
+// l'API. Renvoie "" si rien d'exploitable (safeOpenURL ignore alors proprement).
+function repoWebURL(d) {
+  if (!d) return "";
+  if (d.html_url) return d.html_url;
+  const r = (state.repos || []).find((x) => x.full_name === d.full_name);
+  if (r && r.html_url) return r.html_url;
+  const inst = curInst();
+  let base = (inst && inst.url ? inst.url : "").replace(/\/+$/, "");
+  if (inst && (inst.provider === "github" || /github\.com/i.test(base))) base = "https://github.com";
+  if (base && d.owner && d.repo) return base + "/" + encodeURIComponent(d.owner) + "/" + encodeURIComponent(d.repo);
+  return "";
+}
+
 // serverLinkBtn : bouton « gérer sur le serveur ↗ » ouvrant la page du fournisseur dans le navigateur.
 // Via data-openurl + écouteur délégué (la CSP script-src 'self' interdit les onclick inline).
 function serverLinkBtn(inst, kind, label) {
@@ -104,6 +120,15 @@ async function renderTokens() {
   const title = `<div class="view-head view-head-row"><div><div class="view-title">Jetons Forgejo</div>
     <div class="view-sub">Vos jetons sur « ${esc(state.instance)} ». Un jeton hérite de vos droits.</div></div>
     ${serverLinkBtn(curInst(), "tokens", "Gérer sur le serveur")}</div>`;
+  // Changement de connexion : la session « jetons » (identité, mot de passe/OTP retenus en vol, drapeaux
+  // de déverrouillage) appartient à UNE instance. On peut arriver ici directement depuis la carte d'une
+  // AUTRE connexion (lien « jetons ») : sans réinitialiser, on s'authentifierait sous le mauvais compte
+  // avec des identifiants d'une instance tierce. On réaligne donc l'identité et on repart propre.
+  if (state.tokInstance !== state.instance) {
+    state.tokInstance = state.instance;
+    state.tokStored = false; state._tokTried = false; state.tokPwd = null; state.tokOtp = null;
+    try { const me = await App().Whoami(state.instance); if (me && me.login) state.login = me.login; } catch (e) {}
+  }
   const twoFA = needs2FA();
   // Compte SANS 2FA : le mot de passe mémorisé (chiffré par le PIN) donne l'accès direct —
   // le PIN suffit, pas de re-saisie. On tente une fois ; échec → panneau.
@@ -204,6 +229,10 @@ function tokenCreateModal(preset) {
     // v1.5.0 : plus de PIN ici — l'authentification est le mot de passe Forgejo (+ 2FA).
     try {
       const val = await App().TokenCreate(state.instance, state.login, state.tokPwd || "", otp, tkname, scopes, repos, "");
+      // 2FA : conserver le code qui VIENT d'être accepté pour le rafraîchissement de liste qui suit —
+      // sinon renderTokens rejouerait l'ANCIEN code de déverrouillage (expiré) et renverrait l'utilisateur
+      // à l'écran 2FA juste après une création réussie.
+      if (otp) state.tokOtp = otp;
       closeModal();
       renderTokens();
       openModal("Jeton créé", `<div class="field"><div class="callout warn">⚠ Copiez ce jeton maintenant : pour votre sécurité, il ne sera plus jamais réaffiché. Perdu, il faudra le supprimer et en créer un autre.</div>
@@ -229,6 +258,7 @@ function tokenDeleteConfirm(id, name) {
     const er = el("td-err");
     try {
       await App().TokenDelete(state.instance, state.login, state.tokPwd || "", otp, id, "");
+      if (otp) state.tokOtp = otp; // conserver le code 2FA accepté pour le rafraîchissement de liste
       closeModal(); toast("Token supprimé", "ok"); renderTokens();
     } catch (e) { er.textContent = cleanErr(e); er.classList.remove("hidden"); if (ciOtp) ciOtp.clear(); }
   });
@@ -462,6 +492,13 @@ function userMgmtHeader(active) {
 function wireUserMgmtTabs() { document.querySelectorAll(".um-tab").forEach((t) => t.onclick = () => navTo(t.dataset.umv)); }
 
 async function renderAdmin() {
+  // Identité alignée sur l'instance COURANTE : on peut arriver ici directement depuis la carte d'une
+  // AUTRE connexion (lien « utilisateurs »). Sans réaligner, le gate admin et le login refléteraient une
+  // instance tierce (droits mal évalués, actions sous le mauvais compte). Rafraîchi seulement au changement.
+  if (state.admInstance !== state.instance) {
+    state.admInstance = state.instance;
+    try { const me = await App().Whoami(state.instance); if (me) { state.login = me.login; state.isAdmin = !!me.is_admin; } } catch (e) {}
+  }
   // Réservé aux administrateurs : sinon, message doux plutôt qu'une erreur sèche.
   if (!state.isAdmin) {
     el("view").innerHTML = `<div class="view-head"><div class="view-title">Administration</div></div>` +

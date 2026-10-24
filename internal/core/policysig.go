@@ -43,13 +43,31 @@ var ErrPolicyTampered = errors.New("politique de sécurité non validée sur ce 
 // deviceKeyPath : fichier de la clé d'appareil (même dossier restreint que le reste de l'état).
 func deviceKeyPath() string { return filepath.Join(config.Dir(), "device.key") }
 
-// ensureDeviceKey lit la clé d'appareil (32 octets) ou la crée si absente. Best-effort : en cas
-// d'échec d'E/S, renvoie nil (le cœur retombe alors sur le comportement d'avant 1.16, sans blocage).
+// ensureDeviceKey lit la clé d'appareil (32 octets) ou la crée si absente/corrompue.
+//   - Fichier valide (32 o) → on l'utilise.
+//   - Fichier ABSENT ou PRÉSENT MAIS INVALIDE (crash pendant l'écriture, troncature antivirus…) → on
+//     (re)crée une clé fraîche par remplacement ATOMIQUE. Regénérer invalide toute PolicySig existante,
+//     donc la politique retombe en position FERMÉE (direction sûre) — au lieu de l'ancien fail-OPEN où
+//     un device.key à 0 octet rendait policySigValid toujours vrai (intégrité désactivée en silence).
+//   - Erreur de lecture TRANSITOIRE (verrou/permission) → nil (dégradation gracieuse, sans clobber).
 func ensureDeviceKey() []byte {
 	p := deviceKeyPath()
-	if b, err := os.ReadFile(p); err == nil && len(b) == 32 {
+	b, err := os.ReadFile(p)
+	switch {
+	case err == nil && len(b) == 32:
 		return b
+	case err == nil || os.IsNotExist(err):
+		// Présent-mais-invalide, ou absent : on pose une clé fraîche de façon atomique.
+		return writeDeviceKeyAtomic(p)
+	default:
+		return nil // erreur de lecture transitoire : ne pas écraser une clé peut-être bonne
 	}
+}
+
+// writeDeviceKeyAtomic écrit une nouvelle clé d'appareil par temp+fsync+rename (jamais de fichier
+// partiel même en cas de crash), puis RELIT le fichier pour adopter la clé réellement persistée (course
+// multi-process au tout premier lancement). Renvoie la clé effective, ou nil sur échec d'E/S.
+func writeDeviceKeyAtomic(p string) []byte {
 	if err := os.MkdirAll(config.Dir(), 0o700); err != nil {
 		return nil
 	}
@@ -57,21 +75,29 @@ func ensureDeviceKey() []byte {
 	if _, err := rand.Read(k); err != nil {
 		return nil
 	}
-	// Création EXCLUSIVE (O_EXCL) : si deux process démarrent ensemble au tout premier lancement, un
-	// SEUL crée la clé ; les autres relisent le fichier persisté — sinon chacun garderait une clé
-	// distincte en mémoire et signerait config.json avec une clé que le fichier ne contient pas, d'où
-	// un fail-closed permanent au redémarrage suivant.
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	tmp, err := os.CreateTemp(config.Dir(), "device-*.tmp")
 	if err != nil {
-		if b, rerr := os.ReadFile(p); rerr == nil && len(b) == 32 { // course perdue : on adopte la clé persistée
-			return b
-		}
 		return nil
 	}
-	_, werr := f.Write(k)
-	_ = f.Close()
-	if werr != nil {
+	tn := tmp.Name()
+	defer os.Remove(tn)
+	if _, err := tmp.Write(k); err != nil {
+		tmp.Close()
 		return nil
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return nil
+	}
+	if err := tmp.Close(); err != nil {
+		return nil
+	}
+	_ = os.Chmod(tn, 0o600)
+	if err := os.Rename(tn, p); err != nil {
+		return nil
+	}
+	if fb, e := os.ReadFile(p); e == nil && len(fb) == 32 {
+		return fb // adopter la clé réellement sur disque (une autre instance a pu gagner la course)
 	}
 	return k
 }
@@ -130,6 +156,14 @@ func (s *Service) assertPolicyIntact() error {
 		return ErrPolicyTampered
 	}
 	return nil
+}
+
+// SecurityPolicyTampered dit si la politique sur disque est signée MAIS invalide (ErrPolicyTampered) :
+// l'UI s'en sert pour proposer la RE-VALIDATION explicite (RevalidateSecurityPolicy). Toute autre
+// situation — intègre, jamais signée, clé indisponible, config illisible — renvoie false : on ne signale
+// « à re-valider » que le cas réel (clé d'appareil renouvelée, mise à niveau, édition hors SituLab).
+func (s *Service) SecurityPolicyTampered() bool {
+	return errors.Is(s.assertPolicyIntact(), ErrPolicyTampered)
 }
 
 // ReanchorPolicy re-pose la signature d'intégrité sur la policy COURANTE du disque. Usage LOCAL/FENÊTRE

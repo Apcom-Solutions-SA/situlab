@@ -9,7 +9,9 @@ import "strings"
 // outPath. Un bundle est un fichier unique, autonome et restaurable par `git clone <bundle>` — idéal
 // pour une sauvegarde miroir déposée dans un cloud de fichiers.
 func Bundle(dir, outPath string) error {
-	_, err := run(dir, LocalTimeout, "bundle", "create", outPath, "--all")
+	// BundleTimeout (genereux) et non LocalTimeout : empaqueter tout l'historique d'un vrai depot depasse
+	// 20 s (pack-objects complet, d'autant plus avec un antivirus scannant le .bundle).
+	_, err := run(dir, BundleTimeout, "bundle", "create", outPath, "--all")
 	return err
 }
 

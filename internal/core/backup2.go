@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path"
 	"path/filepath"
@@ -18,6 +19,14 @@ import (
 	"situlab/internal/gitx"
 	"situlab/internal/webdav"
 )
+
+// shortPathHash : empreinte courte et STABLE d'un chemin, pour desambiguiser des dossiers de sauvegarde
+// de depots homonymes (meme nom de feuille) sans collision.
+func shortPathHash(p string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(filepath.Clean(p)))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
 
 // Moteur de sauvegarde « tunnel clé-en-main » (v1.14). Un plan décrit QUOI sauvegarder (portée
 // dynamique « générique » ou liste figée « ciblée »), SOUS QUELLE FORME (bundle git léger, ou miroir
@@ -33,10 +42,13 @@ type backupTarget struct {
 }
 
 // SaveBackupPlan crée ou met à jour un plan v1.14 (tunnel). Configuration (pas un geste de sécurité).
-func (s *Service) SaveBackupPlan(in config.BackupPlan) error {
+// oldName (facultatif) = nom AVANT édition : s'il diffère du nouveau nom, c'est un RENOMMAGE — on
+// remplace l'ancienne entrée au lieu d'en créer une seconde (sinon le renommage laissait un doublon).
+func (s *Service) SaveBackupPlan(oldName string, in config.BackupPlan) error {
 	if err := s.assertWritable(); err != nil {
 		return err
 	}
+	oldName = strings.TrimSpace(oldName)
 	in.Name = strings.TrimSpace(in.Name)
 	in.Cloud = strings.TrimSpace(in.Cloud)
 	if in.Name == "" || in.Cloud == "" {
@@ -83,6 +95,18 @@ func (s *Service) SaveBackupPlan(in config.BackupPlan) error {
 	}
 	if cfg.FindCloud(in.Cloud) == nil {
 		return ErrNoCloud
+	}
+	// Renommage : l'ancien et le nouveau nom diffèrent. On refuse d'écraser un AUTRE plan existant, puis on
+	// supprime l'ancienne entrée (en préservant son dernier run) — le remplacement ci-dessous recrée le plan
+	// sous le nouveau nom, sans doublon.
+	if oldName != "" && oldName != in.Name {
+		if cfg.FindBackup(in.Name) != nil {
+			return errors.New("un plan porte déjà ce nom")
+		}
+		if ex := cfg.FindBackup(oldName); ex != nil {
+			in.LastRun = ex.LastRun
+			cfg.RemoveBackup(oldName)
+		}
 	}
 	if ex := cfg.FindBackup(in.Name); ex != nil {
 		in.LastRun = ex.LastRun
@@ -149,6 +173,19 @@ func (s *Service) resolveBackupTargets(plan config.BackupPlan) []backupTarget {
 			add(p)
 		}
 	}
+	// Desambiguiser les noms de dossier en COLLISION (depots de meme nom de feuille : site, api, web…) :
+	// sinon deux depots ecriraient dans le MEME dossier cloud et rotateBundles supprimerait les bundles de
+	// l'autre (PERTE de donnees). On suffixe les seuls noms en collision par un hash court et stable du
+	// chemin, pour que chaque depot ait son propre dossier (et son propre prefixe de rotation).
+	cnt := map[string]int{}
+	for _, t := range ts {
+		cnt[t.Name]++
+	}
+	for i := range ts {
+		if cnt[ts[i].Name] > 1 {
+			ts[i].Name = ts[i].Name + "-" + shortPathHash(ts[i].Path)
+		}
+	}
 	return ts
 }
 
@@ -165,6 +202,19 @@ func (s *Service) RunBackupPlan(name, trigger string) (string, error) {
 	if plan.Type == "" { // plan hérité mono-dépôt → ancien chemin
 		return s.RunBackup(name)
 	}
+	// Anti-concurrence : pas deux exécutions simultanées du MÊME plan (ex. « Sauvegarder maintenant »
+	// pendant un on_close) — sinon la rotation de l'une supprimerait le bundle frais de l'autre.
+	s.bkMu.Lock()
+	if s.bkRun == nil {
+		s.bkRun = map[string]bool{}
+	}
+	if s.bkRun[name] {
+		s.bkMu.Unlock()
+		return "", fmt.Errorf("sauvegarde « %s » déjà en cours", name)
+	}
+	s.bkRun[name] = true
+	s.bkMu.Unlock()
+	defer func() { s.bkMu.Lock(); delete(s.bkRun, name); s.bkMu.Unlock() }()
 	// Suivi VISUEL permanent : on signale le début, chaque dépôt, puis la fin — quel que soit le chemin
 	// de sortie (le defer garantit un dernier événement « terminé » qui efface l'indicateur côté UI).
 	s.bkEnter()
@@ -175,10 +225,13 @@ func (s *Service) RunBackupPlan(name, trigger string) (string, error) {
 	// seules à l'ouverture/fermeture ou sur action manuelle (besoin utilisateur 1.17).
 	if err := s.authorizeBackupCloud(plan.Cloud); err != nil {
 		fin.Detail = cleanClientErr(err)
+		s.recordBackupRun(name, plan, trigger, 0, 0, fin.Detail) // trace au Journal (plus de echec silencieux)
 		return "", err
 	}
 	if !gitx.Available() {
-		return "", errors.New("git indisponible sur ce poste")
+		fin.Detail = "git indisponible sur ce poste"
+		s.recordBackupRun(name, plan, trigger, 0, 0, fin.Detail)
+		return "", errors.New(fin.Detail)
 	}
 	targets := s.resolveBackupTargets(plan)
 	fin.Total = len(targets)
@@ -190,6 +243,7 @@ func (s *Service) RunBackupPlan(name, trigger string) (string, error) {
 	cl, _, err := s.fileCloudClientFor(plan.Cloud)
 	if err != nil {
 		fin.Detail = cleanClientErr(err)
+		s.recordBackupRun(name, plan, trigger, len(targets), len(targets), fin.Detail)
 		return "", err
 	}
 	// PANNE cloud : on teste la joignabilité AVANT de bundler quoi que ce soit, pour remonter une
@@ -476,7 +530,10 @@ func (s *Service) recordBackupRun(name string, plan config.BackupPlan, trigger s
 	}
 	now := time.Now().Format(time.RFC3339)
 	cfg.AddBackupRun(config.BackupRun{
-		Plan: name, When: now, OK: failed == 0 && repos > 0,
+		// OK = au moins un dépôt sauvegardé (aligné sur fin.OK = done>0). Un run PARTIEL (des réussites ET
+		// des échecs) a donc OK=true ET Failed>0 — l'état « partiel » (⚠) de la carte devient atteignable,
+		// au lieu de n'afficher que ✓ (tout) ou ✕ (rien).
+		Plan: name, When: now, OK: repos > failed,
 		Repos: repos, Failed: failed, Form: plan.Form, Trigger: trigger, Detail: detail,
 	})
 	if b := cfg.FindBackup(name); b != nil {

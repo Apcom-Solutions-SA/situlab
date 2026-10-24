@@ -58,6 +58,7 @@ const GIT_GUIDE = [
   ]},
   { k: "sign", label: "🛡 Signature", intro: "La garantie d'origine « SituLab approved » — qui a fait le commit, via SituLab.", items: [
     { t: "Le sceau « certified »", what: "Chaque commit créé via SituLab porte une <b>attestation d'origine immuable</b> (dans le commit lui-même), vérifiée localement contre la racine APCOM. Un agent ne peut pas la forger.", in: "Le <b>sceau vert</b> dans l'onglet Historique (infobulle « Signé via SituLab »).", viz: GV.seal },
+    { t: "Vert, ambre ou rouge", what: "<b>Vert</b> = origine <b>vérifiée</b> sur ce poste (seule vraie garantie). <b>Ambre</b> = sceau <b>déclaré mais pas encore vérifié</b> (vu en ligne sans copie locale) — à confirmer, pas une preuve. <b>Rouge</b> = sceau <b>invalide ou révoqué</b> : origine NON garantie.", in: "La couleur du sceau et le bandeau de résumé en haut de l'Historique." },
   ]},
 ];
 

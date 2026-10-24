@@ -254,9 +254,11 @@ func (r *remote) Orgs(instance string) ([]forgejo.Org, error) {
 	return v, r.call(daemon.OpOrgList, daemon.Args{Instance: instance}, &v)
 }
 
-func (r *remote) Tokens(instance string) ([]forgejo.Token, error) {
+// Tokens liste les jetons via une AUTH BASIQUE (user+mot de passe +2FA) — Forgejo n'autorise pas la
+// gestion des jetons par jeton, seulement par identifiants (comme create/delete).
+func (r *remote) Tokens(instance, user, password, otp string) ([]forgejo.Token, error) {
 	var v []forgejo.Token
-	return v, r.call(daemon.OpTokensList, daemon.Args{Instance: instance}, &v)
+	return v, r.call(daemon.OpTokensList, daemon.Args{Instance: instance, User: user, Password: password, OTP: otp}, &v)
 }
 
 func (r *remote) Clone(instance, owner, repo, dir string) (string, error) {

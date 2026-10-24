@@ -30,8 +30,9 @@ import (
 
 // Timeouts par classe d'opération.
 const (
-	LocalTimeout = 20 * time.Second  // status, describe, log… (local, rapide)
-	NetTimeout   = 180 * time.Second // clone, push, fetch… (réseau)
+	LocalTimeout  = 20 * time.Second  // status, describe, log… (local, rapide)
+	NetTimeout    = 180 * time.Second // clone, push, fetch… (réseau)
+	BundleTimeout = 15 * time.Minute  // bundle create --all : empaquette TOUTE la base d'objets (I/O lourde, gros dépôts)
 )
 
 const maxChanged = 100 // plafond de fichiers modifiés listés (au-delà : tronqué)
@@ -123,7 +124,10 @@ func runC(dir string, timeout time.Duration, extraEnv []string, args ...string) 
 		cmd.Dir = dir
 	}
 	// LC_ALL=C : messages d'erreur en anglais (parsing fiable sur poste non anglais).
-	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "LC_ALL=C")
+	// GIT_EDITOR/GIT_SEQUENCE_EDITOR=true : neutralise l'editeur. `rebase/cherry-pick --continue` lance
+	// sinon un editeur (backend merge, git >=2.26) ; l'app est fenetree sans TTY -> l'op se fige/echoue.
+	// Tous les commits SituLab passent par -m, donc ce reglage ne change aucun comportement voulu.
+	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "LC_ALL=C", "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
 	cmd.Env = append(cmd.Env, extraEnv...) // en-tête d'auth (jeton) : environnement, pas argv
 	hideProcess(cmd)
 

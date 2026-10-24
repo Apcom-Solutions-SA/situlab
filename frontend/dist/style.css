@@ -414,9 +414,12 @@ label small { font-weight: 500; color: var(--text-faint); }
 /* Tunnel de connexion (1.9.4) : cartes de choix serveur/rôle avec logos. */
 .conn-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
 @media (max-width: 480px) { .conn-cards { grid-template-columns: 1fr; } }
-.conn-card { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 18px 12px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-surface); cursor: pointer; transition: border-color var(--t-fast), box-shadow var(--t-fast); }
-.conn-card:hover { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.conn-logo { margin-bottom: 4px; color: var(--text); }
+/* Cartes de CHOIX d'onboarding (grille .conn-cards) : scopées pour ne pas entrer en collision avec les
+   cartes de CONNEXION des Réglages (même nom .conn-card/.conn-logo, mise en page opposée, définies plus
+   bas). Le scope .conn-cards leur donne la priorité à l'intérieur de la grille. */
+.conn-cards .conn-card { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 18px 12px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-surface); cursor: pointer; transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.conn-cards .conn-card:hover { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.conn-cards .conn-logo { margin-bottom: 4px; color: var(--text); background: none; width: auto; height: auto; }
 .cc-ico { font-size: 30px; line-height: 1; }
 .cc-ico.cc-vitrine { color: var(--vitrine); }
 .cc-name { font-weight: 700; font-size: var(--fs-md); }
@@ -555,6 +558,11 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .md-render pre.md-code { background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px; overflow: auto; }
 .md-render pre.md-code code { background: none; padding: 0; }
 .md-render a { color: var(--accent); cursor: pointer; }
+.md-render ol { margin: .4em 0; padding-left: 1.5em; }
+.md-render blockquote { border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--text-soft); padding: 6px 12px; margin: .6em 0; border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.md-render table.md-table { border-collapse: collapse; margin: .6em 0; width: 100%; }
+.md-render table.md-table td { border: 1px solid var(--border); padding: 6px 10px; font-size: var(--fs-sm); vertical-align: top; }
+.md-render table.md-table tr:first-child td { background: var(--bg-raised); font-weight: 700; }
 .html-render { width: 100%; height: 60vh; border: 1px solid var(--border); border-radius: var(--r-md); background: #fff; }
 /* Historique d'un fichier : liste des commits + diff coloré du commit choisi. */
 .fh-list { max-height: 30vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md); margin-bottom: 10px; }
@@ -578,6 +586,8 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .cmt:last-child::before { bottom: auto; height: 16px; }
 .cmt::after { content: ""; position: absolute; left: 0; top: 16px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 3px solid var(--bg-surface); box-sizing: border-box; transition: background var(--t-fast); }
 .cmt.signed::after { background: var(--ok); }
+.cmt.claimed::after { background: var(--warn); }
+.cmt.bad::after { background: var(--danger); box-shadow: 0 0 0 3px var(--bg-surface), 0 0 0 5px color-mix(in srgb, var(--danger) 30%, transparent); }
 .cmt-head { display: flex; align-items: center; gap: 8px; }
 .cmt-subject { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .cmt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 10px; color: var(--text-faint); font-size: var(--fs-xs); margin-top: 3px; }
@@ -591,6 +601,10 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .att-badge { display: inline-flex; align-items: center; flex: none; }
 .seal { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--ok); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .att-badge.ok .seal { filter: drop-shadow(0 0 3px var(--ok-soft)); }
+/* « Déclaré » (trailer présent, pas encore vérifié cryptographiquement) : ambre, jamais vert. */
+.att-badge.claimed .seal { stroke: var(--warn); opacity: .92; }
+/* « Invalide / révoqué » (vérification locale échouée) : rouge, bouclier barré — signal d'alerte. */
+.att-badge.bad .seal { stroke: var(--danger); filter: drop-shadow(0 0 3px var(--danger-soft)); }
 .seal.lg { width: 20px; height: 20px; }
 .att-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: var(--fs-xs); font-weight: 400; }
 
@@ -1744,6 +1758,10 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 /* Détail — résumé/état de signature SituLab */
 .att-note { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-soft); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 8px 11px; margin-bottom: 10px; }
 .att-note.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); background: var(--ok-soft); }
+.att-note.claimed { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-soft); }
+.att-note.claimed .seal { stroke: var(--warn); }
+.att-note.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 42%, transparent); background: var(--danger-soft); }
+.att-note.bad .seal { stroke: var(--danger); }
 .att-note .seal-sm { display: inline-flex; align-items: center; }
 .att-note .seal-sm .seal { width: 16px; height: 16px; }
 .att-note .seal-ph { font-size: 14px; opacity: .8; }

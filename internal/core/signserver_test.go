@@ -4,13 +4,16 @@
 package core
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"situlab/internal/attest"
 	"situlab/internal/config"
 	"situlab/internal/gitx"
 	"situlab/internal/keyring"
@@ -41,6 +44,18 @@ func TestAttestCommitServerMode(t *testing.T) {
 	if !gitx.Available() {
 		t.Skip("git indisponible")
 	}
+	// Le cœur refuse désormais (fail-closed) de sceller une attestation qu'il ne sait pas vérifier
+	// lui-même. Le faux service doit donc renvoyer une VRAIE attestation signée par une clé d'appareil
+	// certifiée par la racine de TEST — ce qui exige la racine de test embarquée (build de release = skip).
+	if !attest.UsingTestRoot() {
+		t.Skip("racine réelle embarquée — le mode serveur de bout en bout nécessite la racine de test")
+	}
+	devPub, devPriv, err := attest.GenerateDeviceKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := attest.IssueCert(testRootPriv(), devPub, "Grégory Liand <gl-lig@pm.me>", time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour), "SER-SRV-1")
+
 	var gotAuth, gotPre, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -48,7 +63,10 @@ func TestAttestCommitServerMode(t *testing.T) {
 		var in map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		gotPre = in["preimage_b64"]
-		_, _ = w.Write([]byte(`{"attestation":{"v":2,"cert":{},"sig":"zz","ts":"t"}}`))
+		// Signer EXACTEMENT le pré-image reçu → l'attestation vérifiera contre le même pré-image côté cœur.
+		pre, _ := base64.StdEncoding.DecodeString(gotPre)
+		att := attest.SignPreimage(devPriv, cert, pre)
+		_ = json.NewEncoder(w).Encode(map[string]any{"attestation": att})
 	}))
 	defer srv.Close()
 
@@ -57,7 +75,7 @@ func TestAttestCommitServerMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := config.Load()
-	cfg.Instances = []config.Instance{{Name: "atl", URL: "https://git.example", Role: config.RoleAtelier, SignMode: "server", SignServerURL: srv.URL}}
+	cfg.Instances = []config.Instance{{Name: "atl", URL: "https://git.example", Role: config.RoleAtelier, SignServerURL: srv.URL}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}

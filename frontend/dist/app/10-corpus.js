@@ -328,8 +328,26 @@ function importFlow(fc) {
 }
 
 function deleteFlow(fc, e) {
-  // Suppression = geste destructif → confirmation + PIN (par défaut).
-  pinConfirmOrSession(fc, "delete", `Supprimer « ${e.path} » du cloud ${esc(fc.name)}. Ce geste est définitif.`, (pin) => App().CloudDelete(fc.name, e.path, pin), () => loadCorpusDir());
+  if (state.readOnly) { toast("Mode lecture seule actif — désactivez-le dans Réglages", "err"); return; }
+  // Geste DESTRUCTIF. Si la politique de la connexion exige le PIN, la modale PIN fait office de
+  // confirmation. Sinon, on NE supprime PAS en un clic muet : on demande une confirmation explicite
+  // (auparavant, politique « sans PIN » ⇒ suppression immédiate sans aucune question).
+  if (cloudNeedsPIN(fc, "delete")) {
+    pinConfirm(`Supprimer « ${e.path} » du cloud ${esc(fc.name)}. Ce geste est définitif.`,
+      async (pin) => { await App().CloudDelete(fc.name, e.path, pin); loadCorpusDir(); });
+    return;
+  }
+  confirmDelete({
+    title: "Supprimer cet élément du cloud ?",
+    lead: `<b>${esc(e.path)}</b> sera supprimé du cloud « ${esc(fc.name)} ». <b>Définitif.</b>`,
+    items: ["« " + esc(e.path) + " » sur « " + esc(fc.name) + " »"],
+    safe: ["Les autres fichiers du cloud ne sont pas touchés"],
+    confirmLabel: "Supprimer",
+    onConfirm: async () => {
+      try { await App().CloudDelete(fc.name, e.path, ""); loadCorpusDir(); }
+      catch (err) { if (isLocked(err)) return handleLock(); toast(cleanErr(err), "err"); }
+    },
+  });
 }
 
 // runCloudWrite : exécute une écriture cloud en respectant la politique PIN de la connexion.

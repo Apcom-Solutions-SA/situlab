@@ -235,14 +235,19 @@ func (s *Service) PairingDelete(localPath string, wipeLocal bool, atelier config
 	if err := s.assertWritable(); err != nil {
 		return err
 	}
+	// ORDRE CRITIQUE : on supprime d'abord les VITRINES (dérivées, republiables par promotion depuis
+	// l'atelier), puis l'ATELIER en DERNIER. L'atelier est la source de vérité (historique complet) et
+	// n'est PAS reconstructible depuis une vitrine (promotion = écrasement/filtrage). Si une suppression
+	// échoue en cours de route (PIN, réseau, droits), la source survit ainsi le plus longtemps possible —
+	// jamais « source détruite, vitrines orphelines ».
 	refs := make([]config.RepoRef, 0, 1+len(productions))
-	if atelier.Owner != "" && atelier.Repo != "" {
-		refs = append(refs, atelier)
-	}
 	for _, p := range productions {
 		if p.Owner != "" && p.Repo != "" {
 			refs = append(refs, p)
 		}
+	}
+	if atelier.Owner != "" && atelier.Repo != "" {
+		refs = append(refs, atelier)
 	}
 	for _, r := range refs {
 		if err := s.DeleteRepo(r.Instance, r.Owner, r.Repo, pin); err != nil {

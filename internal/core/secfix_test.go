@@ -25,6 +25,7 @@ func TestPINLockSurvivesConfigWrites(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save config : %v", err)
 	}
+	s.ReanchorPolicy() // la config vient d'être écrite directement : re-signer pour ne pas être fail-closed (lecture seule)
 
 	for i := 0; i < pinMaxFails; i++ {
 		if err := s.Unlock("000000"); err == nil {

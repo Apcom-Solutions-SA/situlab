@@ -17,7 +17,7 @@
 #   - macOS : `wails build` produit le .app (pas de souci de console sur mac) → on en fait un .dmg.
 #   - LINUX : `wails build` produit le binaire natif (cgo + WebKit2GTK) → archive tar.gz.
 #
-# Toolchain commune : Go 1.25 (plancher directive go.mod), Wails CLI v2.16.0 (dernière lignée v2).
+# Toolchain commune : Go 1.27.3 (plancher directive go.mod, corrige GO-2026-6809), Wails CLI v2.16.0.
 # ─────────────────────────────────────────────────────────────────────────────
 name: build-installers
 
@@ -30,7 +30,7 @@ permissions:
   contents: write # nécessaire pour créer la Release et y attacher les artefacts
 
 env:
-  GO_VERSION: "1.27.2" # plancher = directive go.mod (go 1.27.2) — inclut les correctifs stdlib go1.27.2
+  GO_VERSION: "1.27.3" # plancher = directive go.mod (go 1.27.3) — inclut le correctif GO-2026-6809 (crypto/x509)
   WAILS_VERSION: "v2.16.0"
 
 jobs:
@@ -49,6 +49,16 @@ jobs:
           V="${GITHUB_REF_NAME#v}"
           [ "${GITHUB_REF#refs/tags/}" != "${GITHUB_REF}" ] || V="0.0.0-dev"
           echo "v=$V" >> "$GITHUB_OUTPUT"
+
+      # Métadonnées Windows (icône + version du fichier) : on RÉGÉNÈRE le .syso au niveau du tag AVANT de
+      # compiler. Les rsrc_windows_*.syso versionnés sont figés (une version passée) ; sans cette étape,
+      # go build embarquerait cette version périmée dans les propriétés de l'exe (régression « syso figé »).
+      - name: Métadonnées Windows (go-winres → .syso au niveau du tag)
+        shell: bash
+        run: |
+          go install github.com/tc-hib/go-winres@latest
+          "$(go env GOPATH)/bin/go-winres" simply --icon build/appicon.png \
+            --product-version "${{ steps.ver.outputs.v }}" --file-version "${{ steps.ver.outputs.v }}"
 
       # SituLab pilote le git du système : WebView2 est présent par défaut sur les runners
       # windows-latest, aucune dépendance système à installer pour compiler.

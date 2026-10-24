@@ -125,8 +125,12 @@ function createUserModal() {
     if (!login || !email || !pwd) { er.textContent = "Identifiant, e-mail et mot de passe initial sont nécessaires."; er.classList.remove("hidden"); return; }
     pinConfirm(`Créer le compte « ${login} »`, async (pin) => {
       await App().AdminCreateUser(state.instance, login, email, pwd, admin, pin);
-      closeModal();
-      openModal("Compte créé", `<div class="field"><div class="callout">Transmettez à la personne son identifiant « ${esc(login)} » et le mot de passe provisoire que vous venez de saisir. <b>Elle devra le changer à sa première connexion.</b></div></div>`, () => { closeModal(); renderAdmin(); });
+      // pinConfirm referme la modale PIN de façon CENTRALE juste après ce callback : on DIFFÈRE donc
+      // l'ouverture de la modale de confirmation (sinon ce closeModal central la refermerait aussitôt —
+      // régression 1.17 : la modale « Compte créé » n'apparaissait plus).
+      setTimeout(() => {
+        openModal("Compte créé", `<div class="field"><div class="callout">Transmettez à la personne son identifiant « ${esc(login)} » et le mot de passe provisoire que vous venez de saisir. <b>Elle devra le changer à sa première connexion.</b></div></div>`, () => { closeModal(); renderAdmin(); });
+      }, 0);
     });
   });
   el("modal-ok").textContent = "Continuer";
@@ -310,7 +314,7 @@ function statsRenderReport(rep) {
     <div class="kpi"><div class="kpi-n">${t.repos || 0}</div><div class="kpi-l">dépôts actifs</div></div>
   </div>`;
   out.innerHTML = `
-    <div class="report-head"><div><b>État au ${esc(fmtDate(rep.created_at))}</b> <span class="muted">· ${esc(fmtDay(rep.since))} → ${esc(fmtDay(rep.until))} · ${rep.repos_scanned} dépôts analysés</span></div>
+    <div class="report-head"><div><b>État au ${esc(fmtDate(rep.created_at))}</b> <span class="muted">· ${esc(fmtDay(rep.since))} → ${esc(fmtDay(rep.until))} · ${rep.repos_scanned} dépôts analysés</span>${(rep.partial || rep.repos_failed) ? `<span class="chip-wip" title="Certains dépôts n'ont pas pu être lus entièrement : les chiffres sont un minimum, pas un total exact.">⚠ incomplet${rep.repos_failed ? ` · ${rep.repos_failed} dépôt(s) ignoré(s)` : ""}</span>` : ""}</div>
       <button class="btn btn-ghost btn-sm" id="stats-print">Exporter / imprimer</button></div>
     ${kpis}
     <div class="chart-grid">

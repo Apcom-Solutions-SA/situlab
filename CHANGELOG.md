@@ -6,6 +6,62 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 > (voir « Historique antérieur ») : il traçait les allers-retours de conception, sans valeur pour le
 > lecteur. Les versions récentes restent détaillées.
 
+## [1.18.0] — Béton armé : première version de production (sécurité, robustesse, UX durcies)
+
+> **Note de mise à niveau.** La politique de sécurité est signée plus strictement (l'empreinte couvre
+> désormais le type/l'URL/l'utilisateur de chaque cloud). Au PREMIER lancement de la 1.18, la signature
+> précédente n'est plus reconnue : SituLab retombe en **position fermée** (PIN exigé, lecture seule) et
+> demande de **re-valider la politique dans Réglages** (bouton « revalider »). Geste unique, puis tout
+> reprend normalement.
+
+### Sécurité
+- **Sceau d'origine = garantie VÉRIFIÉE uniquement.** L'historique n'affiche plus le sceau vert sur la
+  simple présence du trailer (forgeable, insensible à la révocation). Trois états honnêtes : **vert**
+  (vérifié cryptographiquement en local), **ambre** (déclaré mais non encore vérifié — copie locale
+  requise), **rouge** (invalide ou révoqué). La vérification locale fait autorité et rétrograde une
+  prétention invalide.
+- **Attestation serveur vérifiée avant d'être scellée** : le poste refuse (fail-closed) de poser un
+  sceau qu'il ne sait pas vérifier lui-même (chaîne → racine épinglée, fenêtre, révocation, signature).
+- **Frontière de l'agent verrouillée** (fail-closed) : accès cloud/sauvegarde bornés aux seuls dépôts
+  suivis, jamais au dossier de configuration ; chemin cloud final (et non seulement le dossier) gardé.
+- **Intégrité de la politique renforcée** : écriture atomique de la clé d'appareil, régénération
+  fail-closed sur clé corrompue, empreinte de politique couvrant les champs anti-redirection de cloud.
+- **Verrouillage « après chaque écriture » complet** : les mutations lancées depuis la fenêtre
+  reverrouillent la session comme le fait le démon (le jeton ne reste plus déchiffré en mémoire).
+- **PIN faux signalé** : la modale de confirmation vérifie le PIN (throttlé) et reste ouverte pour
+  ressaisie au lieu de se refermer en silence.
+- **Secrets hors ligne de commande** : `token create/delete`, `admin user-create` et `token list` (CLI)
+  demandent le mot de passe en saisie masquée et avertissent si un secret est passé en option.
+- **Divers** : verrou anti-PIN trivial, icône de projet validée + échappée (anti-XSS), trousseau
+  préservé à la reconnexion (sceau et mot de passe mémorisés intacts), `go vet` Windows, Go **1.27.3**
+  (correctif GO-2026-6809 crypto/x509), **govulncheck bloquant** en CI.
+
+### Corrigé
+- **Gestes git** : tous les gestes locaux et les pushs prennent le verrou par dépôt (plus de course avec
+  le fetch de fond). Rebase en conflit : bouton **Poursuivre** en plus d'Annuler.
+- **Suppression d'un appairage** : les vitrines d'abord, l'atelier (source) en dernier — plus de
+  « source détruite, vitrines orphelines ».
+- **Rapports d'équipe** : les dépôts inaccessibles sont comptés et le rapport marqué incomplet.
+- **Versions** : `LatestTag` choisit la vraie dernière version sémantique sur GitHub ; le bouton
+  « Publier » n'émet plus de tag parasite nommé d'après un commit.
+- **Projets/détail** : carte repeinte en entier après fetch/geste (compteurs à jour), « Ouvrir en
+  ligne » fonctionne depuis un projet, tableaux Markdown rendus (AGENTS.md).
+- **Jetons/identité** : identité et session réalignées sur la connexion courante ; le code 2FA accepté
+  est réutilisé pour le rafraîchissement ; `token list` passe par l'auth basique (Forgejo).
+- **Sauvegardes** : « 0 archive » survit à l'édition, état « partiel » atteignable, renommage sans
+  doublon, bonne méthode choisie par type de plan (plus d'erreur masquée).
+- **Corpus/Organiser** : suppression cloud confirmée même sans PIN ; suppression en lot qui ne tait plus
+  les échecs.
+- **Démarrage** : première peinture non bloquée par le réseau ; organisations réelles proposées à la
+  création d'un dépôt ; connexion en échec n'envoie plus en silence vers l'écran 2FA.
+
+### Modifié
+- **Tunnel de sauvegarde** : l'étape « couche » (sans effet réel) est retirée — pas de contrôle trompeur.
+
+### Retiré
+- Code mort : champ `sign_mode`, liaison `App.ListTokens` et son chemin par jeton (remplacé par l'auth
+  basique), fonction orpheline d'état des spokes.
+
 ## [1.17.0] — Agent IA en menu principal, Réglages réorganisés, fenêtre PIN avec compte à rebours
 
 ### Ajouté

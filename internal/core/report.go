@@ -59,7 +59,8 @@ type TeamReport struct {
 		Repos     int `json:"repos"`
 	} `json:"totals"`
 	ReposScanned int  `json:"repos_scanned"`
-	Partial      bool `json:"partial,omitempty"` // au moins un dépôt dépassait la borne de pagination → chiffres incomplets
+	ReposFailed  int  `json:"repos_failed,omitempty"` // dépôts ignorés (inaccessibles) : chiffres sous-estimés
+	Partial      bool `json:"partial,omitempty"`      // chiffres INCOMPLETS : pagination tronquée OU dépôt(s) ignoré(s)
 }
 
 // reportsDir est le dossier où les rapports sont enregistrés.
@@ -115,7 +116,11 @@ func (s *Service) AnalyzeTeam(instance string, logins []string, since, until str
 		}
 		commits, partial, err := cl.ListCommitsRange(ctx, repoOwner(r.FullName), r.Name, "", since, until)
 		if err != nil {
-			continue // un dépôt inaccessible ne fait pas échouer l'ensemble
+			// Un dépôt inaccessible ne fait pas échouer l'ensemble, mais on le COMPTE et on marque le
+			// rapport comme incomplet : sinon des chiffres sous-estimés passeraient pour exhaustifs.
+			rep.ReposFailed++
+			rep.Partial = true
+			continue
 		}
 		if partial {
 			rep.Partial = true // ce dépôt dépassait la borne de pagination : chiffres incomplets

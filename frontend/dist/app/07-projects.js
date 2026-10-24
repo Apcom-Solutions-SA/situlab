@@ -21,14 +21,20 @@ function providerMark(instance) {
 const PROJECT_ICONS = ["🗂️", "🚀", "🌐", "🛠️", "📦", "💡", "🧩", "🎨", "📊", "🔮", "🏷️", "🧪", "📝", "⚙️", "🔒", "🌱",
   "🖥️", "📱", "☁️", "🔧", "📚", "🗃️", "🧠", "⭐", "🔥", "🏔️", "🌲", "🏭", "🛰️", "🧰", "🔗", "📡"];
 
-// isCustomIcon : une icône maison est une image encodée en data URL (sinon c'est un emoji).
-function isCustomIcon(ic) { return typeof ic === "string" && ic.indexOf("data:image/") === 0; }
+// isCustomIcon : une icône maison est une image (PNG/JPEG/WEBP/GIF) encodée en data URL base64 — et RIEN
+// d'autre. On valide le FORMAT COMPLET (type + alphabet base64 strict), pas seulement le préfixe : une
+// valeur « data:image/… » bricolée (guillemet, fragment HTML, charge active) ne doit jamais atterrir
+// telle quelle dans un attribut src. Le cadreur produit toujours du data:image/png;base64, conforme ;
+// une valeur non conforme (config falsifiée, import douteux) retombe en « pas d'icône maison ».
+const CUSTOM_ICON_RE = /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+function isCustomIcon(ic) { return typeof ic === "string" && CUSTOM_ICON_RE.test(ic); }
 
 // iconHTML rend une icône de projet partout de la même façon : <img> pour une icône maison (data URL),
-// sinon l'emoji en texte. cls donne la classe CSS de taille/forme.
+// sinon l'emoji en texte. cls donne la classe CSS de taille/forme. La data URL est validée (isCustomIcon)
+// ET échappée (défense en profondeur : neutralise toute évasion d'attribut si la validation évoluait).
 function iconHTML(ic, cls) {
   if (!ic) return "";
-  if (isCustomIcon(ic)) return `<img class="${cls} custom-ico" src="${ic}" alt="" />`;
+  if (isCustomIcon(ic)) return `<img class="${cls} custom-ico" src="${esc(ic)}" alt="" />`;
   return `<span class="${cls}">${esc(ic)}</span>`;
 }
 
@@ -94,7 +100,7 @@ function cropUI(img, onPick) {
 function iconGridHTML(cur) {
   const none = `<button type="button" class="ep-ico${!cur ? " on" : ""}" data-ic="">∅</button>`;
   const tiles = PROJECT_ICONS.map((ic) => `<button type="button" class="ep-ico${cur === ic ? " on" : ""}" data-ic="${esc(ic)}">${ic}</button>`).join("");
-  const custom = isCustomIcon(cur) ? `<button type="button" class="ep-ico on" data-ic="__cur__"><img src="${cur}" alt="" /></button>` : "";
+  const custom = isCustomIcon(cur) ? `<button type="button" class="ep-ico on" data-ic="__cur__"><img src="${esc(cur)}" alt="" /></button>` : "";
   const up = `<button type="button" class="ep-ico ep-ico-up" data-ic="__up__" title="Icône maison (image)">📷</button>`;
   return none + tiles + custom + up;
 }
@@ -121,7 +127,12 @@ function projectGraphCard(b, idx) {
   const cloneBtn = !b.local ? `<button class="btn btn-ghost btn-sm" data-clone="${esc(b.name)}" title="Copier le dépôt atelier dans un dossier de ce poste">Cloner ici</button>` : "";
   // Publier la VERSION (tag) local→atelier (1.12) : « Synchroniser » envoie les commits mais PAS les
   // tags. Si le poste est sur une version (tag exact) que l'atelier n'a pas encore, on le propose.
-  const locTag = (b.local && b.local.describe && !/-g[0-9a-f]+$/i.test(b.local.describe)) ? b.local.describe : "";
+  // locTag = VRAIE version (tag exact) sur laquelle le poste est posé. `describe` vient de
+  // `git describe --tags --always` : on écarte la forme « tag-N-g<sha> » (commits APRÈS un tag) ET la
+  // forme SHA nu (dépôt SANS aucun tag → --always retombe sur le hash abrégé). Sans ce second filtre, le
+  // bouton proposait « Publier <sha> » et poussait un TAG PARASITE nommé d'après le commit.
+  const _desc = (b.local && b.local.describe) || "";
+  const locTag = (_desc && !/-g[0-9a-f]+$/i.test(_desc) && !/^[0-9a-f]{7,40}$/i.test(_desc)) ? _desc : "";
   const atlVer = (b.atelier && b.atelier.version) || "";
   const publishBtn = (locTag && locTag !== atlVer) ? `<button class="btn btn-ghost btn-sm" data-publishtag="${esc(b.name)}" data-tag="${esc(locTag)}" title="Publier la version ${esc(locTag)} vers l'atelier (le contenu est déjà envoyé ; on nomme la version). L'atelier affichera alors ${esc(locTag)}.">📌 Publier ${esc(locTag)} → atelier</button>` : "";
   const prodBtns = prods.map((p, i) => {
@@ -822,11 +833,26 @@ function rebaseBranchFlow(path, base, reload) {
       closeModal();
       const msg = cleanErr(e);
       if (/conflit|conflict/i.test(msg)) {
-        openModal("Conflit de rebase", `<div class="field"><div class="callout warn">Le rebase a rencontré un <b>conflit</b>. Résolvez les fichiers en conflit puis poursuivez le rebase, ou annulez pour revenir à l'état d'avant.</div></div>`, async () => {
-          try { await App().GitRebaseAbort(path); closeModal(); toast("Rebase annulé", "ok"); reload(); }
-          catch (e2) { toast(cleanErr(e2), "err"); }
+        // Deux issues : POURSUIVRE (git rebase --continue, après résolution + enregistrement des fichiers)
+        // ou ANNULER (git rebase --abort, retour à l'état d'avant). L'ancienne version n'offrait QUE
+        // l'annulation, en contradiction avec son propre texte « poursuivez le rebase ».
+        openModal("Conflit de rebase", `<div class="field"><div class="callout warn">Le rebase a rencontré un <b>conflit</b>. Résolvez les fichiers en conflit dans votre éditeur, <b>enregistrez-les</b>, puis <b>Poursuivre</b>. Ou <b>Annuler</b> pour revenir à l'état d'avant.</div><div class="inline-error hidden" id="rbc-err"></div></div>`, async () => {
+          const er = el("rbc-err");
+          try { await App().GitRebaseContinue(path); closeModal(); toast("Rebase poursuivi et terminé", "ok"); reload(); }
+          catch (e2) {
+            const m2 = cleanErr(e2);
+            if (er) { er.textContent = /conflit|conflict/i.test(m2) ? "Il reste des conflits non résolus. Résolvez-les et enregistrez, puis réessayez." : m2; er.classList.remove("hidden"); }
+          }
         });
-        el("modal-ok").textContent = "Annuler le rebase"; el("modal-ok").classList.add("danger-btn");
+        el("modal-ok").textContent = "Poursuivre le rebase";
+        const cx = el("modal-cancel");
+        if (cx) {
+          cx.textContent = "Annuler le rebase"; cx.classList.remove("hidden");
+          cx.onclick = async () => {
+            try { await App().GitRebaseAbort(path); closeModal(); toast("Rebase annulé", "ok"); reload(); }
+            catch (e3) { toast(cleanErr(e3), "err"); }
+          };
+        }
       } else { toast(msg, "err"); }
     }
   });
@@ -1186,7 +1212,13 @@ async function renderProject(name) {
   // mais seulement si on est toujours sur CE projet (sinon la vue a changé, on ne touche à rien).
   if (b.local && b.local.path && b.atelier && b.atelier.instance) {
     App().Fetch(b.atelier.instance, b.local.path)
-      .then(() => { if (state.view === "project" && state.projectName === name) fillProjectGraph(b, 0); })
+      .then(async () => {
+        if (state.view !== "project" || state.projectName !== name) return;
+        // Le fetch a pu changer le RETARD : on relit l'état local puis on repeint la carte ENTIÈRE
+        // (en-tête inclus : bouton « Synchroniser » et compteurs), pas seulement le graphe.
+        await refreshProjectLocal(b);
+        if (state.view === "project" && state.projectName === name) repaintProjectCard(b);
+      })
       .catch(() => {});
   }
 }
@@ -1196,22 +1228,37 @@ async function renderProject(name) {
 // lecture disque, sans réseau) et on recopie l'état frais dans b.local — avance/retard, propreté,
 // branche, description — pour que la colonne « Local » reflète le geste TOUT DE SUITE ; puis on repeint
 // l'onglet et le graphe (fillProjectGraph relit lui-même la matrice des branches à jour).
-async function reloadProjectGit(b) {
-  if (b && b.local && b.local.path) {
-    try {
-      const d = await App().LocalDetail(b.local.path);
-      if (d && d.is_repo) {
-        b.local.branch = d.branch;
-        b.local.clean = d.clean;
-        b.local.ahead = d.ahead;
-        b.local.behind = d.behind;
-        b.local.changed = (d.changed || []).length;
-        b.local.describe = d.describe;
-      }
-    } catch (e) { /* best-effort : on repeint quand même avec l'état connu */ }
-  }
-  fillGitTab(b);
+// refreshProjectLocal relit l'état du clone (disque, SANS réseau) dans b.local — avance/retard, propreté,
+// branche, version — pour refléter un geste local ou un fetch tout de suite. Best-effort.
+async function refreshProjectLocal(b) {
+  if (!(b && b.local && b.local.path)) return;
+  try {
+    const d = await App().LocalDetail(b.local.path);
+    if (d && d.is_repo) {
+      b.local.branch = d.branch;
+      b.local.clean = d.clean;
+      b.local.ahead = d.ahead;
+      b.local.behind = d.behind;
+      b.local.changed = (d.changed || []).length;
+      b.local.describe = d.describe;
+    }
+  } catch (e) { /* best-effort : on repeint quand même avec l'état connu */ }
+}
+
+// repaintProjectCard repeint la carte ENTIÈRE (en-tête = boutons Synchroniser/Publier/Cloner + graphe),
+// pas seulement le graphe : l'en-tête dépend de b.local (retard, version), qui vient de changer.
+function repaintProjectCard(b) {
+  const board = el("proj-board");
+  if (!board) return;
+  board.innerHTML = projectGraphCard(b, 0);
+  bindProjectBoard([b]);
   fillProjectGraph(b, 0);
+}
+
+async function reloadProjectGit(b) {
+  await refreshProjectLocal(b);
+  fillGitTab(b);
+  repaintProjectCard(b);
 }
 
 // Cache des dépôts accessibles par connexion (évite de recharger à chaque changement).

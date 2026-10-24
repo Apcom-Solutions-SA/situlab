@@ -436,17 +436,3 @@ func (c *Client) ListOrgs(ctx context.Context) ([]Org, error) {
 	}
 	return orgs, nil
 }
-
-// ListTokens renvoie les tokens d'accès de l'utilisateur (sans leur valeur).
-// Selon la version/configuration de Forgejo, cet endpoint peut exiger une auth basique.
-func (c *Client) ListTokens(ctx context.Context, login string) ([]Token, error) {
-	if err := c.requireForgejo(); err != nil {
-		return nil, err
-	}
-	var tokens []Token
-	p := fmt.Sprintf("/users/%s/tokens", esc(login))
-	if err := c.do(ctx, p, &tokens, maxAPIBody); err != nil {
-		return nil, err
-	}
-	return tokens, nil
-}

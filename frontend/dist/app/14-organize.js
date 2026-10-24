@@ -173,15 +173,30 @@ async function loadMatrix() {
       <div class="callout danger"><b>Action irréversible.</b> Les dépôts <b>distants</b> (atelier/vitrine) de la sélection seront supprimés du serveur. Les <b>dossiers locaux sont conservés</b> (retirés du suivi seulement).</div>
       <ul class="arch-del-list">${sel.slice(0, 20).map((r) => `<li>${esc(r.name)}</li>`).join("")}${sel.length > 20 ? `<li class="muted">… et ${sel.length - 20} autre(s)</li>` : ""}</ul></div>`, () => {
       pinConfirm(`Supprimer définitivement ${sel.length} dépôt(s) distants`, async (pin) => {
-        let ok = 0;
+        let ok = 0; const fails = [];
         for (const row of sel) {
           const hasAtl = !!(row.atelier && row.atelier.present);
           const atelier = hasAtl ? { instance: row.atelier.instance, owner: row.atelier.org, repo: row.atelier.name } : { instance: "", owner: "", repo: "" };
           const productions = (row.vitrines || []).map((v) => ({ instance: v.instance, owner: v.org, repo: v.name }));
           const localPath = (row.local && row.local.present) ? row.local.local_path : "";
-          try { await App().PairingDelete(localPath, false, atelier, productions, pin); ok++; } catch (e) { /* on continue le lot */ }
+          try { await App().PairingDelete(localPath, false, atelier, productions, pin); ok++; }
+          catch (e) {
+            // PIN faux ou session verrouillée : inutile de poursuivre (tout le lot échouerait pareil). On
+            // relance l'erreur pour que pinConfirm l'affiche et garde la modale ouverte (ressaisie).
+            if (isLocked(e) || /pin/i.test(cleanErr(e))) throw e;
+            fails.push(row.name + " : " + cleanErr(e)); // échec propre à ce dépôt : on continue le lot
+          }
         }
-        closeModal(); toast(ok + " dépôt(s) supprimé(s)", "ok"); renderOrganize();
+        // pinConfirm referme la modale PIN de façon centrale après ce callback. On ne tait JAMAIS les
+        // échecs : un lot partiel est signalé, avec le détail de ce qui reste (modale différée pour ne pas
+        // être refermée par le closeModal central de pinConfirm).
+        renderOrganize();
+        if (fails.length) {
+          toast(`${ok} supprimé(s), ${fails.length} échec(s)`, "err");
+          setTimeout(() => infoModal("Suppressions partielles", `<div class="field"><div class="callout warn"><b>${ok}</b> dépôt(s) supprimé(s), <b>${fails.length} échec(s)</b> — à reprendre :</div><ul class="arch-del-list">${fails.slice(0, 30).map((f) => `<li>${esc(f)}</li>`).join("")}${fails.length > 30 ? `<li class="muted">… et ${fails.length - 30} autre(s)</li>` : ""}</ul></div>`), 0);
+        } else {
+          toast(ok + " dépôt(s) supprimé(s)", "ok");
+        }
       });
     });
     el("modal-ok").textContent = "Supprimer définitivement"; el("modal-ok").classList.add("danger-btn"); el("modal-cancel").textContent = "Annuler";

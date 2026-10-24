@@ -146,7 +146,14 @@ func (s *Service) DeleteRemoteBranch(instance, owner, repo, branch, pin string) 
 	if err := s.authorize(instance, config.ActionRepoAdmin, pin); err != nil {
 		return err
 	}
-	if r, e := s.ViewRepo(instance, owner, repo); e == nil && r.DefaultBranch == branch {
+	// Garde-fou FAIL-CLOSED : si on ne peut pas vérifier que « branch » n'est pas la branche par défaut
+	// (erreur réseau, 5xx transitoire), on REFUSE — sinon une erreur transitoire laisserait supprimer la
+	// branche par défaut sur un serveur qui l'autorise via l'API des refs.
+	r, e := s.ViewRepo(instance, owner, repo)
+	if e != nil {
+		return fmt.Errorf("impossible de vérifier que « %s » n'est pas la branche par défaut — réessayez : %s", branch, cleanClientErr(e))
+	}
+	if r.DefaultBranch == branch {
 		return fmt.Errorf("refus : « %s » est la branche par défaut de %s/%s", branch, owner, repo)
 	}
 	cl, _, err := s.clientFor(instance)
@@ -319,6 +326,7 @@ func (s *Service) GitCreateBranch(path, name string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.CreateBranch(path, name)
 }
 
@@ -329,6 +337,7 @@ func (s *Service) GitSwitchBranch(path, name string) (string, error) {
 	if err := s.assertWritable(); err != nil { // réécrit l'arbre de travail → bloqué en lecture seule
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.SwitchBranch(path, name)
 }
 
@@ -342,6 +351,7 @@ func (s *Service) GitDeleteBranch(path, name string, force bool) (string, error)
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.DeleteBranch(path, name, force)
 }
 
@@ -353,6 +363,7 @@ func (s *Service) GitDiscard(path, file string) (string, error) {
 	if err := s.assertWritable(); err != nil { // destructif local : bloqué aussi en lecture seule (v1.4)
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.DiscardChanges(path, file)
 }
 
@@ -370,6 +381,7 @@ func (s *Service) GitStashSave(path, message string) (string, error) {
 	if err := s.assertWritable(); err != nil { // retire le travail en cours de l'arbre → bloqué en lecture seule
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.StashSave(path, message)
 }
 
@@ -387,6 +399,7 @@ func (s *Service) GitStashPop(path string) (string, error) {
 	if err := s.assertWritable(); err != nil { // réapplique/modifie l'arbre → bloqué en lecture seule
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.StashPop(path)
 }
 
@@ -409,6 +422,7 @@ func (s *Service) GitWorktreeAdd(path, wtPath, branch string, createBranch bool)
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.WorktreeAdd(path, wtPath, branch, createBranch)
 }
 
@@ -420,6 +434,7 @@ func (s *Service) GitWorktreeRemove(path, wtPath string, force bool) (string, er
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.WorktreeRemove(path, wtPath, force)
 }
 
@@ -431,6 +446,7 @@ func (s *Service) GitWorktreePrune(path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.WorktreePrune(path)
 }
 
@@ -461,6 +477,7 @@ func (s *Service) GitMerge(path, ref string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	before := gitx.HeadSHA(path)
 	out, err := gitx.Merge(path, ref)
 	if err == nil {
@@ -477,6 +494,7 @@ func (s *Service) GitMergeAbort(path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.MergeAbort(path)
 }
 
@@ -488,6 +506,7 @@ func (s *Service) GitRebase(path, upstream string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	out, err := gitx.Rebase(path, upstream)
 	return mapConflict(path, out, err)
 }
@@ -500,6 +519,7 @@ func (s *Service) GitRebaseContinue(path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	out, err := gitx.RebaseContinue(path)
 	return mapConflict(path, out, err)
 }
@@ -512,6 +532,7 @@ func (s *Service) GitRebaseAbort(path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.RebaseAbort(path)
 }
 
@@ -523,6 +544,7 @@ func (s *Service) GitCherryPick(path, commit string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	before := gitx.HeadSHA(path)
 	out, err := gitx.CherryPick(path, commit)
 	if err == nil {
@@ -539,6 +561,7 @@ func (s *Service) GitCherryPickContinue(path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	before := gitx.HeadSHA(path)
 	out, err := gitx.CherryPickContinue(path)
 	if err == nil {
@@ -555,6 +578,7 @@ func (s *Service) GitCherryPickAbort(path string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.CherryPickAbort(path)
 }
 
@@ -566,6 +590,7 @@ func (s *Service) GitRevert(path, commit string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	before := gitx.HeadSHA(path)
 	out, err := gitx.Revert(path, commit)
 	if err == nil {
@@ -583,6 +608,7 @@ func (s *Service) GitReset(path, mode, ref string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.Reset(path, mode, ref)
 }
 
@@ -595,6 +621,7 @@ func (s *Service) GitAmend(path, message string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	out, err := gitx.Amend(path, message)
 	if err == nil {
 		s.attestCommit(path, gitx.HeadSHA(path))
@@ -610,6 +637,7 @@ func (s *Service) GitCommitPaths(path, message string, paths []string) (string, 
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	out, err := gitx.CommitPaths(path, message, paths)
 	if err == nil {
 		s.attestCommit(path, gitx.HeadSHA(path))
@@ -626,6 +654,7 @@ func (s *Service) GitTagCreate(path, name, message string) (string, error) {
 	if err := s.assertWritable(); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.TagCreate(path, name, message)
 }
 
@@ -638,6 +667,7 @@ func (s *Service) GitPushForce(instance, path, pinCode string) (string, error) {
 	if err := s.authorizePush(instance, path, pinCode); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.PushForceWithLease(path, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
 }
 
@@ -649,6 +679,7 @@ func (s *Service) GitPushTag(instance, path, tag, pinCode string) (string, error
 	if err := s.authorizePush(instance, path, pinCode); err != nil {
 		return "", err
 	}
+	defer s.lockRepo(path)() // sérialise avec le fetch de fond et les autres gestes sur CE dépôt
 	return gitx.PushTag(path, tag, s.instanceToken(instance), s.isGitHub(instance), s.instanceBaseURL(instance))
 }
 

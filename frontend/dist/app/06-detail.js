@@ -38,7 +38,7 @@ async function renderDetail() {
     if (d.from === "project" && d.fromProject && typeof openProject === "function") return openProject(d.fromProject);
     navTo(d.from || "organize");
   };
-  if (el("open-web")) el("open-web").onclick = () => safeOpenURL(d.html_url || ((state.repos || []).find((x) => x.full_name === d.full_name) || {}).html_url);
+  if (el("open-web")) el("open-web").onclick = () => safeOpenURL(repoWebURL(d));
   if (el("unfollow")) el("unfollow").onclick = () => {
     // « Ne plus suivre » : retire le clone local du suivi SituLab. AUCUN fichier n'est supprimé.
     confirmDelete({
@@ -56,7 +56,9 @@ async function renderDetail() {
   document.querySelectorAll(".tab").forEach((t) => {
     t.onclick = () => {
       document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
-      t.classList.add("active"); d.tab = t.dataset.tab; d.path = ""; paintDetail();
+      // Réinitialiser l'état « diff ouvert » en changeant d'onglet : sinon il reste vrai (il n'est remis
+      // à faux que par le bouton « retour » du diff) et bloque le rafraîchissement live du nouvel onglet.
+      t.classList.add("active"); d.tab = t.dataset.tab; d.path = ""; d._diffOpen = false; paintDetail();
     };
   });
 
@@ -596,7 +598,10 @@ function paintCrumbs() {
 }
 
 // mdToHTML : rendu Markdown MINIMAL et SÛR (échappement d'abord), zéro dépendance. Couvre titres, code
-// (inline + bloc), gras/italique, listes à puces, liens http(s) et paragraphes — suffisant pour un README.
+// (inline + bloc), gras/italique, listes à puces ET numérotées, citations, TABLEAUX, liens http(s) et
+// paragraphes — suffisant pour un README ou la fiche AGENTS.md (qui utilise des tableaux). NB : une
+// seconde fonction mdToHtml (09-modals-utils) rend le même sous-ensemble pour les espaces « .doc »
+// (Aide, Réglages) ; les deux doivent rester capables des tableaux pour un rendu cohérent de AGENTS.md.
 function mdToHTML(src) {
   const esc2 = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   const inline = (s) => esc2(s)
@@ -605,21 +610,34 @@ function mdToHTML(src) {
     .replace(/\*([^*]+)\*/g, "<i>$1</i>")
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => `<a href="${u}" data-ext>${t}</a>`);
   const lines = String(src).replace(/\r\n/g, "\n").split("\n");
-  const out = []; let inCode = false, inList = false; const buf = [];
+  const out = []; let inCode = false, inList = false, inOList = false, inTable = false; const buf = [];
   const flushP = () => { if (buf.length) { out.push("<p>" + inline(buf.join(" ")) + "</p>"); buf.length = 0; } };
-  const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+  const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } if (inOList) { out.push("</ol>"); inOList = false; } };
+  const closeTable = () => { if (inTable) { out.push("</tbody></table>"); inTable = false; } };
   for (const ln of lines) {
-    if (/^```/.test(ln)) { if (inCode) { out.push("</code></pre>"); inCode = false; } else { flushP(); closeList(); out.push('<pre class="md-code"><code>'); inCode = true; } continue; }
+    if (/^```/.test(ln)) { if (inCode) { out.push("</code></pre>"); inCode = false; } else { flushP(); closeList(); closeTable(); out.push('<pre class="md-code"><code>'); inCode = true; } continue; }
     if (inCode) { out.push(esc2(ln) + "\n"); continue; }
+    // Tableau « | a | b | » : la ligne de séparation (---|:--:) est ignorée ; la 1re ligne fait l'en-tête.
+    if (/^\s*\|.*\|\s*$/.test(ln)) {
+      const cells = ln.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
+      if (!inTable) { flushP(); closeList(); out.push('<table class="md-table"><tbody>'); inTable = true; }
+      out.push("<tr>" + cells.map((c) => "<td>" + inline(c) + "</td>").join("") + "</tr>"); continue;
+    }
+    closeTable();
     const h = ln.match(/^(#{1,6})\s+(.*)$/);
     if (h) { flushP(); closeList(); const lvl = Math.min(6, h[1].length) + 2; out.push(`<h${lvl}>` + inline(h[2]) + `</h${lvl}>`); continue; }
+    const bq = ln.match(/^\s*>\s?(.*)$/);
+    if (bq) { flushP(); closeList(); out.push("<blockquote>" + inline(bq[1]) + "</blockquote>"); continue; }
+    const oli = ln.match(/^\s*\d+\.\s+(.*)$/);
+    if (oli) { flushP(); if (inList) { out.push("</ul>"); inList = false; } if (!inOList) { out.push("<ol>"); inOList = true; } out.push("<li>" + inline(oli[1]) + "</li>"); continue; }
     const li = ln.match(/^\s*[-*]\s+(.*)$/);
-    if (li) { flushP(); if (!inList) { out.push("<ul>"); inList = true; } out.push("<li>" + inline(li[1]) + "</li>"); continue; }
+    if (li) { flushP(); if (inOList) { out.push("</ol>"); inOList = false; } if (!inList) { out.push("<ul>"); inList = true; } out.push("<li>" + inline(li[1]) + "</li>"); continue; }
     if (ln.trim() === "") { flushP(); closeList(); continue; }
     buf.push(ln);
   }
   if (inCode) out.push("</code></pre>");
-  flushP(); closeList();
+  flushP(); closeList(); closeTable();
   return out.join("\n");
 }
 
@@ -692,6 +710,10 @@ async function openFile(e) {
 
 // Sceau « certified » SituLab (garantie d'origine) : bouclier + coche, stroke --ok.
 const SEAL_SVG = `<svg class="seal" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l7 2.3v5.3c0 4.6-3 7.9-7 9.2-4-1.3-7-4.6-7-9.2V4.9z"/><path d="M8.6 12l2.4 2.4 4.5-4.9"/></svg>`;
+// Sceau INVALIDE / révoqué : même bouclier barré d'une croix (stroke --danger via .att-badge.bad) — un
+// trailer PRÉSENT mais qui NE VÉRIFIE PAS cryptographiquement (forgé, révoqué, hors fenêtre) ne doit
+// JAMAIS reprendre le visuel de la garantie verte : il porte son propre glyphe d'alerte.
+const SEAL_BAD_SVG = `<svg class="seal" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l7 2.3v5.3c0 4.6-3 7.9-7 9.2-4-1.3-7-4.6-7-9.2V4.9z"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/></svg>`;
 
 // stripAttestTrailer retire le trailer « SituLab-Approved: » du message affiché : il est représenté
 // par le sceau, jamais montré en base64 brut.
@@ -717,21 +739,23 @@ function hasAttestTrailer(msg) {
 function paintHisto(body, liveOnly) {
   const d = state.detail, rem = d._remote || { commits: [] };
   const tags = (d.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("") || `<span class="muted">aucune version</span>`;
-  let signedN = 0;
+  let claimedN = 0;
   const commits = (rem.commits || []).map((c) => {
     const full = stripAttestTrailer(c.message), nl = full.indexOf("\n");
     const subject = nl < 0 ? full : full.slice(0, nl);
     const bodyTxt = nl < 0 ? "" : full.slice(nl + 1).trim();
     const sha = esc(c.sha || "");
-    // Sceau d'après le drapeau calculé par le serveur sur le message COMPLET (le message transporté est
-    // tronqué au sujet, donc le trailer n'y est pas) — fonctionne en ligne, atelier ET vitrine, sans
-    // clone local. Repli : détection directe si un jour le message complet est présent.
-    const signed = !!c.signed || hasAttestTrailer(c.message);
-    if (signed) signedN++;
-    const badge = signed
-      ? `<span class="att-badge ok" data-att="${sha}" title="Signé via SituLab — garantie d'origine">${SEAL_SVG}</span>`
-      : `<span class="att-badge none" data-att="${sha}" title="Pas de signature SituLab sur ce commit"></span>`;
-    return `<div class="cmt${signed ? " signed" : ""}" data-sha="${sha}">
+    // DÉCLARATION de sceau d'après le drapeau serveur (présence du trailer sur le message complet, en ligne,
+    // sans clone). C'est une PRÉTENTION, pas une preuve : un trailer peut être ajouté à la main, révoqué ou
+    // périmé. On n'affiche donc PAS la garantie verte ici — on marque l'état « déclaré » (ambre, à vérifier).
+    // Seule la vérification cryptographique LOCALE (enrichAttestation) peut promouvoir en garantie verte,
+    // ou au contraire rétrograder en « invalide ». Fail-closed par défaut : rien n'est « garanti » sans preuve.
+    const claimed = !!c.signed || hasAttestTrailer(c.message);
+    if (claimed) claimedN++;
+    const badge = claimed
+      ? `<span class="att-badge claimed" data-att="${sha}" title="Sceau SituLab déclaré — vérification locale requise">${SEAL_SVG}</span>`
+      : `<span class="att-badge none" data-att="${sha}" title="Pas de sceau SituLab sur ce commit"></span>`;
+    return `<div class="cmt${claimed ? " claimed" : ""}" data-sha="${sha}">
       <div class="cmt-head"><span class="cmt-subject">${esc(subject)}</span>${badge}</div>
       <div class="cmt-meta"><code>${esc(c.short)}</code><span class="cmt-who">${esc(c.author)}</span><span class="cmt-when">${esc(fmtDate(c.date))}</span></div>
       ${bodyTxt ? `<button class="cmt-more" data-more="${sha}">Détails ▾</button><div class="cmt-body hidden" id="cb-${sha}">${esc(bodyTxt)}</div>` : ""}
@@ -742,9 +766,9 @@ function paintHisto(body, liveOnly) {
   if (liveOnly && sig === d._paintSig) return;
   d._paintSig = sig;
   const summaryHTML = shownN === 0 ? ""
-    : signedN > 0
-      ? `<div class="att-note ok"><span class="seal-sm">${SEAL_SVG}</span> <b>${signedN}</b>/${shownN} commit(s) signé(s) via SituLab — garantie d'origine.</div>`
-      : `<div class="att-note"><span class="seal-ph">🛡</span> Aucun de ces commits ne porte la signature SituLab (le sceau marque un commit créé ou promu via SituLab).</div>`;
+    : claimedN > 0
+      ? `<div class="att-note claimed"><span class="seal-sm">${SEAL_SVG}</span> <b>${claimedN}</b>/${shownN} commit(s) déclarent le sceau SituLab — <b>vérification locale…</b></div>`
+      : `<div class="att-note"><span class="seal-ph">🛡</span> Aucun de ces commits ne porte le sceau SituLab (le sceau marque un commit créé ou promu via SituLab).</div>`;
   body.innerHTML = scopeNoteHTML(d, "histo") + `<div id="att-banner"></div><div id="att-summary">${summaryHTML}</div>
     <div class="blk"><div class="blk-h">Versions</div><div class="tags">${tags}</div></div>
     <div class="blk"><div class="blk-h">Historique — ${esc(d.ref)}</div><div class="cmt-timeline">${commits}</div></div>`;
@@ -772,32 +796,75 @@ async function enrichAttestation(d) {
       if (b) b.innerHTML = `<div class="callout warn" style="margin-bottom:10px">Signature en mode <b>TEST</b> — la racine de gouvernance n'est pas encore installée : les sceaux ne sont pas vérifiables réellement.</div>`;
     }
   } catch (_) {}
-  if (state.detail !== d || !d.local_path) return;
-  // Vérification LOCALE (autoritative) : le clone a le commit COMPLET avec son trailer, alors que l'API
-  // en ligne renvoie souvent le message tronqué (sans trailer). On POSE donc le sceau d'après la
-  // vérification cryptographique locale — plus fiable que la détection par message.
-  let rows = [];
-  try { rows = (await App().AttestHistory(d.local_path, 200)) || []; } catch (_) { return; }
   if (state.detail !== d) return;
+  // Vérification cryptographique LOCALE = SEULE autorité pour la garantie d'origine. Le clone porte le
+  // commit COMPLET (arbre, parents, committer, trailer) : le cœur reconstruit le pré-image et vérifie
+  // contre la racine épinglée + la liste de révocation. Trois issues par commit déclaré :
+  //   • vérifié            → garantie VERTE (autoritatif) ;
+  //   • présent mais KO    → sceau INVALIDE/révoqué/forgé → état ROUGE (jamais vert) ;
+  //   • absent du clone / pas de clone → reste « déclaré, non vérifié » (ambre), jamais promu en vert.
+  // On ne « garantit » donc JAMAIS sur la seule foi du drapeau serveur : sans preuve locale, pas de vert.
+  let canVerify = !!d.local_path, loadErr = false;
   const map = {};
-  rows.forEach((r) => { if (r && r.sha) map[r.sha] = r.attestation; });
-  let signed = 0, shown = 0;
+  if (canVerify) {
+    let rows = null;
+    try { rows = await App().AttestHistory(d.local_path, 200); } catch (_) { loadErr = true; }
+    if (state.detail !== d) return;
+    if (Array.isArray(rows)) rows.forEach((r) => { if (r && r.sha) map[r.sha] = r.attestation; });
+    else canVerify = false;
+  }
+  let verified = 0, declared = 0, suspect = 0, shown = 0;
   document.querySelectorAll(".cmt[data-sha]").forEach((row) => {
     shown++;
-    const v = map[row.dataset.sha], badge = row.querySelector(".att-badge");
-    // Le sceau posé par paintHisto d'après le drapeau serveur fait FOI : la vérification locale ne fait
-    // qu'ENRICHIR (confirmer cryptographiquement), jamais retirer un sceau — sinon un clone local absent
-    // ou périmé effacerait à tort des sceaux pourtant présents sur le commit en ligne.
-    const alreadySealed = !!(badge && badge.classList.contains("ok"));
-    if (v && v.verified && badge) { badge.className = "att-badge ok"; badge.innerHTML = SEAL_SVG; badge.title = "Signé via SituLab — garantie d'origine vérifiée localement" + (v.subject ? " · " + v.subject : ""); row.classList.add("signed"); }
-    if (alreadySealed || (v && v.verified)) signed++;
+    const badge = row.querySelector(".att-badge");
+    if (!badge) return;
+    const claimed = badge.classList.contains("claimed") || badge.classList.contains("ok") || badge.classList.contains("bad");
+    const v = map[row.dataset.sha];
+    if (v && v.verified) {
+      badge.className = "att-badge ok"; badge.innerHTML = SEAL_SVG;
+      badge.title = "Signé via SituLab — garantie d'origine vérifiée localement" + (v.subject ? " · " + v.subject : "");
+      row.classList.add("signed"); row.classList.remove("claimed", "bad");
+      verified++;
+      return;
+    }
+    if (!claimed) return; // commit sans sceau déclaré : rien à poser
+    if (v && !v.verified) {
+      // Le commit EST dans le clone mais son trailer NE VÉRIFIE PAS (forgé, révoqué, cert hors fenêtre) :
+      // rétrogradation EXPLICITE en état d'alerte — on ne laisse jamais une prétention invalide passer.
+      badge.className = "att-badge bad"; badge.innerHTML = SEAL_BAD_SVG;
+      badge.title = "Sceau SituLab INVALIDE ou révoqué — origine NON garantie" + (v.reason ? " · " + v.reason : "");
+      row.classList.add("bad"); row.classList.remove("signed", "claimed");
+      suspect++;
+    } else {
+      // Commit absent du clone (ou pas de clone / lecture échouée) : simple déclaration, non vérifiée.
+      badge.className = "att-badge claimed"; badge.innerHTML = SEAL_SVG;
+      badge.title = canVerify
+        ? "Sceau SituLab déclaré — commit absent de la copie locale, non vérifié sur ce poste"
+        : "Sceau SituLab déclaré — copie locale requise pour vérifier l'origine";
+      row.classList.add("claimed"); row.classList.remove("signed", "bad");
+      declared++;
+    }
   });
-  // Résumé recalculé d'après la vérification locale (remplace l'estimation faite sur le message en ligne).
   const sum = el("att-summary");
-  if (sum && shown > 0) {
-    sum.innerHTML = signed > 0
-      ? `<div class="att-note ok"><span class="seal-sm">${SEAL_SVG}</span> <b>${signed}</b>/${shown} commit(s) signé(s) via SituLab — garantie d'origine vérifiée localement.</div>`
-      : `<div class="att-note"><span class="seal-ph">🛡</span> Aucun de ces commits ne porte la signature SituLab (le sceau marque un commit créé ou promu via SituLab).</div>`;
+  if (sum && shown > 0) sum.innerHTML = summarizeAttest(verified, declared, suspect, shown, canVerify);
+}
+
+// summarizeAttest : résumé HONNÊTE de l'état d'attestation après vérification locale. Priorité au signal
+// de sécurité (un seul sceau invalide/révoqué prime), puis au vérifié, puis au déclaré non vérifié.
+function summarizeAttest(verified, declared, suspect, shown, canVerify) {
+  if (suspect > 0) {
+    return `<div class="att-note bad"><span class="seal-sm">${SEAL_BAD_SVG}</span> <b>${suspect}</b> commit(s) portent un sceau <b>invalide ou révoqué</b> — origine NON garantie.${verified > 0 ? ` <b>${verified}</b> vérifié(s).` : ""}</div>`;
   }
+  if (verified > 0 && declared === 0) {
+    return `<div class="att-note ok"><span class="seal-sm">${SEAL_SVG}</span> <b>${verified}</b>/${shown} commit(s) signé(s) via SituLab — garantie d'origine vérifiée localement.</div>`;
+  }
+  if (verified > 0) {
+    return `<div class="att-note ok"><span class="seal-sm">${SEAL_SVG}</span> <b>${verified}</b> vérifié(s) · <b>${declared}</b> déclaré(s) non vérifié(s) — sur ${shown} commit(s).</div>`;
+  }
+  if (declared > 0) {
+    const why = canVerify ? "absents de la copie locale" : "copie locale requise pour vérifier";
+    return `<div class="att-note claimed"><span class="seal-sm">${SEAL_SVG}</span> <b>${declared}</b>/${shown} commit(s) déclarent le sceau SituLab — <b>non vérifié</b> (${why}).</div>`;
+  }
+  return `<div class="att-note"><span class="seal-ph">🛡</span> Aucun de ces commits ne porte le sceau SituLab (le sceau marque un commit créé ou promu via SituLab).</div>`;
 }
 

@@ -38,9 +38,10 @@ import (
 // Version du format de fichier (le bloc kdf reste auto-descriptif pour migrer sans casse).
 const Version = 1
 
-// Paramètres Argon2id actés le 2026-10-08 : cette clé protège les tokens AU REPOS, donc
-// doit résister à une attaque hors ligne si le fichier est volé. Stockés dans le fichier,
-// donc révisables/migrables.
+// Paramètres Argon2id actés le 2026-10-08 : cette clé (KEK) protège les tokens AU REPOS. La résistance
+// hors-ligne d'un fichier VOLÉ dépend du COÛT Argon2id ET de l'entropie du PIN : un PIN à 6 chiffres
+// (~10^6 candidats) reste cassable en minutes-heures malgré Argon2id. Pour un secret sensible, préférer
+// un PIN plus long ; et chiffrer le disque (BitLocker/FileVault). Paramètres dans le fichier (migrables).
 const (
 	defMemKiB = 64 * 1024 // 64 MiB
 	defTime   = 3
@@ -219,18 +220,22 @@ func (f *File) SetToken(dek []byte, id, instanceURL string, scopes []string, tok
 	if err != nil {
 		return err
 	}
-	e := Entry{ID: id, InstanceURL: instanceURL, Scopes: scopes, Enc: enc, CreatedAt: time.Now().UTC()}
 	replaced := false
 	for i := range f.Entries {
 		if f.Entries[i].ID == id {
-			e.CreatedAt = f.Entries[i].CreatedAt // on garde la date de première création
-			f.Entries[i] = e
+			// Remplacement : on ne touche QUE les champs liés au jeton. On PRÉSERVE les secrets frères de
+			// l'entrée (Pwd = mot de passe mémorisé ; Sign = clé de signature d'appareil) et la date de
+			// première création — sinon une simple reconnexion détruirait silencieusement la clé de
+			// signature (sceau de garantie cassé) ou le « se souvenir du mot de passe ».
+			f.Entries[i].InstanceURL = instanceURL
+			f.Entries[i].Scopes = scopes
+			f.Entries[i].Enc = enc
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		f.Entries = append(f.Entries, e)
+		f.Entries = append(f.Entries, Entry{ID: id, InstanceURL: instanceURL, Scopes: scopes, Enc: enc, CreatedAt: time.Now().UTC()})
 	}
 	return f.save()
 }

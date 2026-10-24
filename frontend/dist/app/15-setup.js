@@ -17,8 +17,11 @@ async function refreshSetup() {
     const s1 = insts > 0 && (vitAnswered || hasVitrine);
     state._setupHasVitrine = hasVitrine;
 
-    let pending = state.pendingPairings || 0;
-    try { const m = await App().RepoMatrix(); pending = (m && m.pending) || 0; } catch (e) {}
+    // Appairages en attente : on lit la DERNIÈRE valeur connue (cache) au lieu d'appeler RepoMatrix
+    // (= réseau), qui bloquait la PREMIÈRE peinture. Le cache est tenu à jour en arrière-plan par
+    // refreshPairingAlert (et par les vues Organiser/Projets) ; showApp re-calcule la mise en route une
+    // fois ce rafraîchissement réseau revenu. Au tout premier lancement, 0 → on ne bride pas (fail-open).
+    const pending = state.pendingPairings || 0;
     const s2 = pending === 0;
 
     let kernels = [];

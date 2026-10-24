@@ -66,10 +66,9 @@ type Instance struct {
 	// vérifiée, émis par la racine APCOM. Non secret. Vide = signature de garantie non activée.
 	SignCert string `json:"sign_cert,omitempty"`
 
-	// Mode de signature (v1.9.6). "server" = l'empreinte est demandée au service de signature serveur
-	// (clé privée jamais sur le poste, agent-proof) ; vide/"local" = signature logicielle embarquée.
-	// Réglé EN FENÊTRE uniquement (non exposé socket/CLI/MCP) — même doctrine que la politique PIN.
-	SignMode      string `json:"sign_mode,omitempty"`       // "" | "local" | "server"
+	// Service de signature serveur (v1.9.6) : la clé privée ne quitte jamais le serveur (agent-proof).
+	// C'est la SEULE voie d'attestation depuis 1.9.7 ; l'ancien champ sign_mode (local|server) a été
+	// retiré en 1.18 (plus jamais lu — l'attestation serveur est gouvernée par Forgejo + jeton).
 	SignServerURL string `json:"sign_server_url,omitempty"` // base du service ; vide = défaut
 }
 
@@ -256,7 +255,7 @@ type BackupPlan struct {
 	// seul le dernier bundle reste à la racine du dépôt, les précédents sont déplacés dans un
 	// sous-dossier « archive/ » dont on ne garde que les Archives plus récents (0 = aucune archive).
 	Overwrite bool `json:"overwrite,omitempty"`
-	Archives  int  `json:"archives,omitempty"` // 0..3 : nombre d'archives conservées quand Overwrite
+	Archives  int  `json:"archives"` // 0..3 : nombre d'archives conservées quand Overwrite (PAS omitempty : 0 est un choix explicite « aucune archive » qui doit survivre à l'édition)
 }
 
 // BackupRun : une entrée du JOURNAL de sauvegarde (v1.14). Non sensible.
@@ -381,6 +380,9 @@ func (c *Config) SecurityDigest() []byte {
 	}
 	type cloudPol struct {
 		Name    string          `json:"n"`
+		Kind    string          `json:"k"` // type de cloud (nextcloud/kdrive) : partie de l'identité signée
+		URL     string          `json:"u"` // DESTINATION du mot de passe d'application : doit être intègre (anti-redirection des identifiants vers un hôte attaquant)
+		User    string          `json:"us"`
 		Allowed []string        `json:"a"`
 		Denied  []string        `json:"d"`
 		PIN     *CloudPINPolicy `json:"p"`
@@ -396,7 +398,7 @@ func (c *Config) SecurityDigest() []byte {
 		d := append([]string(nil), fc.DeniedDirs...)
 		sort.Strings(a)
 		sort.Strings(d)
-		cs = append(cs, cloudPol{strings.ToLower(strings.TrimSpace(fc.Name)), a, d, fc.PINPolicy})
+		cs = append(cs, cloudPol{strings.ToLower(strings.TrimSpace(fc.Name)), strings.TrimSpace(fc.Kind), strings.TrimSpace(fc.URL), strings.TrimSpace(fc.User), a, d, fc.PINPolicy})
 	}
 	sort.Slice(cs, func(a, b int) bool { return cs[a].Name < cs[b].Name })
 	payload := struct {

@@ -136,13 +136,18 @@ function backupTunnel(plan) {
     // archives (cloud borné). Plan existant : on garde son réglage (absent = cumulatif, comportement
     // historique préservé).
     overwrite: plan ? (plan.overwrite ? "yes" : "no") : "yes",
-    archives: (plan && typeof plan.archives === "number") ? String(plan.archives) : "2",
+    // Édition : on reprend le nombre d'archives du plan ; absent = 0 (un ancien enregistrement omettait le
+    // zéro). Création : défaut 2. (Avant, un plan édité à « 0 archive » repassait à tort à 2.)
+    archives: plan ? (typeof plan.archives === "number" ? String(plan.archives) : "0") : "2",
     editing: !!plan,
+    _orig: (plan && plan.name) || "", // nom AVANT édition → détecte un renommage à l'enregistrement
   };
+  // NB : plus d'étape « couche » (local/atelier/both). Elle n'avait pas d'effet réel — un bundle « --all »
+  // d'un clone capture déjà tout, et le miroir n'en faisait qu'un sous-dossier. Un contrôle qui ne fait
+  // pas ce qu'il annonce n'a pas sa place dans un flux clé-en-main. W.layer reste « local » (champ conservé).
   const STEPS = [
     { k: "name", t: "Nom & type" },
     { k: "what", t: "Que sauvegarder" },
-    { k: "layer", t: "Quelle couche" },
     { k: "form", t: "Forme" },
     { k: "retention", t: "Conservation" },
     { k: "dest", t: "Destination" },
@@ -176,7 +181,6 @@ function backupTunnel(plan) {
       ${seg("type", W.type, [{ v: "generic", l: "Générique (dynamique)" }, { v: "targeted", l: "Ciblé (figé)" }])}
       <div class="sub" id="bk-type-help"></div><div class="inline-error hidden" id="bk-e"></div>`;
     if (k === "what") return `<div id="bk-scope-ui"></div><div class="inline-error hidden" id="bk-e"></div>`;
-    if (k === "layer") return `<div class="sub" style="margin-bottom:6px">Que contient la sauvegarde ?</div>${seg("layer", W.layer, [{ v: "local", l: "Local" }, { v: "atelier", l: "Atelier" }, { v: "both", l: "Les deux" }])}`;
     if (k === "form") return `${seg("form", W.form, [{ v: "bundle", l: "Bundle git (léger)" }, { v: "mirror", l: "Miroir (fichiers lisibles)" }])}<div class="sub" id="bk-form-help"></div>`;
     if (k === "retention") return `<div class="sub" style="margin-bottom:6px">À chaque sauvegarde…</div>
       ${seg("overwrite", W.overwrite, [{ v: "yes", l: "Écraser le précédent" }, { v: "no", l: "Tout conserver" }])}
@@ -196,7 +200,6 @@ function backupTunnel(plan) {
         <div><b>Nom</b><span>${esc(W.name || "—")}</span></div>
         <div><b>Type</b><span>${W.type === "generic" ? "Générique (dynamique)" : "Ciblé (figé)"}</span></div>
         <div><b>Contenu</b><span>${esc(what)}</span></div>
-        <div><b>Couche</b><span>${esc(W.layer)}</span></div>
         <div><b>Forme</b><span>${esc(bkFormLabel(W.form))}</span></div>
         <div><b>Conservation</b><span>${W.overwrite === "no" ? "tout conserver (cumulatif)" : (W.archives === "0" ? "écrase (aucune archive)" : "écrase + " + esc(W.archives) + " archive(s)")}</span></div>
         <div><b>Destination</b><span>${esc(W.cloud)} <code>${esc(W.dest || "/")}</code></span></div>
@@ -230,7 +233,7 @@ function backupTunnel(plan) {
   };
   const save = async () => {
     const e = el("bk-e");
-    try { await App().SaveBackupPlan({ name: W.name, type: W.type, scope: W.scope, repos: W.repos, layer: W.layer, form: W.form, routine: W.routine, cloud: W.cloud, dest: W.dest, overwrite: W.overwrite !== "no", archives: parseInt(W.archives, 10) || 0 }); closeModal(); renderBackup(); }
+    try { await App().SaveBackupPlan(W._orig || "", { name: W.name, type: W.type, scope: W.scope, repos: W.repos, layer: W.layer, form: W.form, routine: W.routine, cloud: W.cloud, dest: W.dest, overwrite: W.overwrite !== "no", archives: parseInt(W.archives, 10) || 0 }); closeModal(); renderBackup(); }
     catch (err) { const m = cleanErr(err); if (e) { e.textContent = m; e.classList.remove("hidden"); } else { toast(m, "err"); } }
   };
   const draw = () => {
@@ -329,11 +332,12 @@ async function runBackupFlow(name) {
   if (state.readOnly) { toast("Mode lecture seule actif — désactivez-le dans Réglages pour sauvegarder", "err"); return; }
   toast("Sauvegarde en cours…", "info");
   try {
-    const out = await App().RunBackupPlan(name).catch(async (e) => {
-      // Rétro-compat : un plan hérité (mono-dépôt) passe par RunBackup.
-      if (/introuvable|type/i.test(cleanErr(e))) return App().RunBackup(name);
-      throw e;
-    });
+    // Dispatch par TYPE du plan, pas en interceptant un message d'erreur : l'ancien repli se déclenchait
+    // sur tout échec contenant « type »/« introuvable » et MASQUAIT la cause réelle. Plan v1.14 (type
+    // défini) → RunBackupPlan ; plan hérité mono-dépôt → RunBackup (qui, côté cœur, redirige au besoin).
+    let plan = null;
+    try { plan = ((await App().Backups()) || []).find((b) => b && b.name === name) || null; } catch (e) {}
+    const out = (plan && plan.type) ? await App().RunBackupPlan(name) : await App().RunBackup(name);
     // Succès complet ou partiel : le cœur renvoie « N dépôt(s) sauvegardé(s) [, M échec(s)] → cloud:chemin ».
     const partial = /échec/i.test(String(out || ""));
     toast("✓ " + (out || "Sauvegarde terminée"), partial ? "info" : "ok");

@@ -1,11 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # SituLab — CI de qualité (sur chaque push / pull request)
 #
-# Portes BLOQUANTES : format (gofmt), analyse (go vet), tests (avec -race).
-# Portes INFORMATIVES au départ (continue-on-error) : govulncheck (vulnérabilités des
-# dépendances) et golangci-lint. À rendre bloquantes une fois le 1er passage nettoyé.
+# Portes BLOQUANTES : format (gofmt), analyse (go vet), tests (avec -race), vulnérabilités des
+# dépendances (govulncheck — rendu bloquant en 1.18 : « béton armé », zéro vulnérabilité connue).
+# Porte INFORMATIVE : golangci-lint (bruit de style, non bloquant).
 #
-# Toolchain : Go 1.25 (plancher = directive go.mod ; Wails v2 compile sans souci sous Go récent).
+# Toolchain : Go 1.27.3 (plancher = directive go.mod ; corrige GO-2026-6809 crypto/x509).
 # ─────────────────────────────────────────────────────────────────────────────
 name: ci
 
@@ -14,7 +14,7 @@ on:
   pull_request: {}
 
 env:
-  GO_VERSION: "1.27.2"
+  GO_VERSION: "1.27.3"
 
 jobs:
   quality:
@@ -38,8 +38,7 @@ jobs:
       - name: Tests (avec détecteur de courses) — BLOQUANT
         run: go test -race ./...
 
-      - name: Vulnérabilités des dépendances (govulncheck) — informatif
-        continue-on-error: true
+      - name: Vulnérabilités des dépendances (govulncheck) — BLOQUANT
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           "$(go env GOPATH)/bin/govulncheck" ./...

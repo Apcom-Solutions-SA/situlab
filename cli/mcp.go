@@ -557,7 +557,7 @@ func mcpTools() []mcpTool {
 		// --- Sauvegardes git → cloud (v1.10) ---
 		{"backup_list", "Liste les plans de sauvegarde git → cloud.", obj(map[string]any{}),
 			func(a map[string]any) (any, error) { return svc.Backups() }},
-		{"backup_run", "Exécute un plan de sauvegarde (bundle de l'historique → cloud). PIN selon la connexion.", obj(map[string]any{"name": strProp("nom du plan")}, "name"),
+		{"backup_run", "Exécute un plan de sauvegarde (un ou plusieurs dépôts → cloud). Sans PIN : routine additive.", obj(map[string]any{"name": strProp("nom du plan")}, "name"),
 			func(a map[string]any) (any, error) { return svc.RunBackup(argStr(a, "name")) }},
 
 		// --- KERNEL : la mémoire, lisible (v1.11) ---

@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
+	"path/filepath"
 	"strings"
 
 	"situlab/internal/config"
@@ -319,7 +321,7 @@ func isWriteOp(op string) bool {
 		OpAdminUserNew, OpTokenMgrNew, OpTokenMgrDel,
 		OpGitPushForce, OpGitPushTag, OpProjectPromote,
 		OpCloudMkdir, OpCloudUpload, OpCloudWrite, OpCloudDelete, OpBackupRun,
-		OpKernelSave, OpSpokeSave:
+		OpKernelSave, OpSpokeSave, OpInstanceDef:
 		return true
 	}
 	return false
@@ -681,7 +683,8 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 	case OpOrgList:
 		return d.withSession(func() (any, error) { return d.svc.Orgs(a.Instance) })
 	case OpTokensList:
-		return d.withSession(func() (any, error) { return d.svc.Tokens(a.Instance) })
+		// Auth BASIQUE (identifiants) : Forgejo refuse de lister les jetons via un jeton.
+		return d.withSession(func() (any, error) { return d.svc.TokenList(a.Instance, a.User, a.Password, a.OTP) })
 	case OpClone:
 		return d.withSession(func() (any, error) {
 			out, err := d.svc.Clone(a.Instance, a.Owner, a.Repo, a.Dir)
@@ -949,7 +952,19 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 			if err := d.cloudGuard(a.Cloud, a.Path); err != nil {
 				return nil, err
 			}
-			return d.svc.CloudList(a.Cloud, a.Path)
+			ents, err := d.svc.CloudList(a.Cloud, a.Path)
+			if err != nil {
+				return nil, err
+			}
+			// Perimetre IA : on ne divulgue pas les noms/tailles des enfants EXCLUS (denied_dirs), meme
+			// quand le dossier parent est autorise. Filtrage a la frontiere agent (la fenetre liste tout).
+			kept := ents[:0]
+			for _, e := range ents {
+				if d.svc.CloudPathAllowed(a.Cloud, e.Path) {
+					kept = append(kept, e)
+				}
+			}
+			return kept, nil
 		})
 	case OpCloudGet:
 		return d.withSession(func() (any, error) {
@@ -958,6 +973,11 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 			}
 			if a.Local == "" {
 				return nil, errors.New("destination locale requise")
+			}
+			// Cote LOCAL : fail-closed. Un agent ne peut ecrire QUE sous un depot suivi, jamais dans le
+			// dossier SituLab (device.key/keyring/daemon.token) ni ailleurs sur le poste.
+			if !d.svc.AgentLocalPathAllowed(a.Local) {
+				return nil, errors.New("destination locale hors perimetre : uniquement sous un depot suivi (jamais les donnees SituLab)")
 			}
 			return nil, d.svc.CloudDownload(a.Cloud, a.Path, a.Local)
 		})
@@ -979,10 +999,17 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 		}
 		return nil, d.svc.CloudMkdir(a.Cloud, a.Path, pin)
 	case OpCloudUpload:
-		if err := d.cloudGuard(a.Cloud, a.Path); err != nil { // a.Path = dossier cloud de destination
+		// Fichier LOCAL source : fail-closed (jamais les secrets SituLab ni hors depot suivi).
+		if !d.svc.AgentLocalPathAllowed(a.Local) {
+			return nil, errors.New("fichier local hors perimetre : uniquement sous un depot suivi (jamais les donnees SituLab)")
+		}
+		// On garde le chemin cloud FINAL (dossier + nom de base), pas seulement le dossier : sinon un
+		// nom de base pointant un fichier exclu (denied_dirs) contournerait l'allowlist en ecriture.
+		finalRemote := path.Join("/"+strings.Trim(config.CloudCleanPath(a.Path), "/"), filepath.Base(a.Local))
+		if err := d.cloudGuard(a.Cloud, finalRemote); err != nil {
 			return nil, err
 		}
-		pin, err := d.gateCloud(op, a, "Autoriser l'envoi d'un fichier vers « "+a.Path+" »")
+		pin, err := d.gateCloud(op, a, "Autoriser l'envoi d'un fichier vers « "+finalRemote+" »")
 		if err != nil {
 			return nil, err
 		}
@@ -1010,6 +1037,17 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 	case OpBackupList:
 		return d.svc.Backups(), nil
 	case OpBackupAdd:
+		// Definir un plan = definir une SORTIE de donnees. A la frontiere agent (fail-closed) : le depot
+		// bundle doit etre un depot suivi et la destination cloud doit etre dans l'allowlist IA — sinon un
+		// agent injecte creerait un canal d'exfiltration vers un dossier arbitraire. La fenetre (humain)
+		// n'est pas bornee (App.SaveBackupPlan).
+		if !d.svc.AgentLocalPathAllowed(a.Path) {
+			return nil, errors.New("depot hors perimetre : seul un depot suivi peut etre sauvegarde depuis un agent")
+		}
+		dest := "/" + strings.Trim(config.CloudCleanPath(a.Dest), "/")
+		if !d.svc.CloudPathAllowed(a.Cloud, dest) {
+			return nil, core.ErrCloudForbidden
+		}
 		return nil, d.svc.AddBackupPlan(a.Name, a.Path, a.Cloud, a.Dest)
 	case OpBackupRemove:
 		return nil, d.svc.RemoveBackupPlan(a.Name)

@@ -534,16 +534,27 @@ function pinRequestModal(reason, detail, action, intent, deadlineMs) {
       ${pushPreviewHTML(detail)}</div>
     <div id="pin-countdown" class="pin-countdown" aria-live="polite"></div>
     <div id="pin-live"><label>Votre PIN SituLab</label><div id="pin-input"></div>
+    <div id="pin-err" class="inline-error hidden"></div>
     <small>SituLab <b>constate</b> l'action réelle ci-dessus ; le message de l'agent est <b>déclaratif</b>. Votre PIN seul autorise — il ne quitte jamais SituLab. Si vous n'êtes pas à l'origine de cette demande, cliquez <b>Refuser</b>.</small></div></div>`, async () => {
-    let ok = false;
-    try { await App().SubmitPIN(ci ? ci.read() : ""); ok = true; } catch (e) {}
+    const code = ci ? ci.read() : "";
+    const er = el("pin-err");
+    // Vérifier le PIN À BLANC AVANT de soumettre : un PIN faux (ou un verrou anti-bruteforce) doit être
+    // SIGNALÉ et laisser la modale ouverte pour une nouvelle saisie — jamais se refermer en silence, ce
+    // qui laissait l'action de l'agent échouer sans que l'utilisateur sache pourquoi. VerifyPIN n'ouvre
+    // pas de session ; c'est la soumission qui autorise l'action en attente côté démon.
+    let okPin = false;
+    try { okPin = await App().VerifyPIN(code); }
+    catch (e) { if (er) { er.textContent = cleanErr(e); er.classList.remove("hidden"); } if (ci) ci.clear(); return; }
+    if (!okPin) { if (er) { er.textContent = "PIN incorrect. Réessayez."; er.classList.remove("hidden"); } if (ci) ci.clear(); return; }
+    if (er) er.classList.add("hidden");
+    try { await App().SubmitPIN(code); } catch (e) {}
     if (pinTimer) { clearInterval(pinTimer); pinTimer = null; }
     pinModalOpen = false;
     closeModal();
     // Si l'écran de déverrouillage du frontend était affiché EN PARALLÈLE (le poll avait constaté le
     // verrou avant l'arrivée de la demande du démon), la saisie ci-dessus a déverrouillé la session :
     // on rejoue l'app au lieu de laisser l'utilisateur ressaisir son PIN dans cet écran (double demande).
-    if (ok && el("app") && el("app").classList.contains("hidden")) {
+    if (el("app") && el("app").classList.contains("hidden")) {
       for (let i = 0; i < 12; i++) {
         await sleep(150);
         try { if (await App().Unlocked()) { location.reload(); return; } } catch (e) {}
@@ -567,6 +578,9 @@ function pinRequestModal(reason, detail, action, intent, deadlineMs) {
     const cd = el("pin-countdown");
     const expire = () => {
       if (pinTimer) { clearInterval(pinTimer); pinTimer = null; }
+      // Libérer le verrou de modale : la demande a expiré côté démon ; une NOUVELLE demande doit pouvoir
+      // ouvrir une modale fraîche au lieu d'être avalée par cet écran « délai écoulé » encore affiché.
+      pinModalOpen = false;
       const live = el("pin-live"); if (live) live.classList.add("hidden");
       if (cd) { cd.classList.add("pin-countdown-out"); cd.innerHTML = "⏱ Délai écoulé — la demande a expiré. Relancez l'action côté agent si besoin."; }
       const ok = el("modal-ok"); if (ok) { ok.disabled = true; ok.classList.add("hidden"); }

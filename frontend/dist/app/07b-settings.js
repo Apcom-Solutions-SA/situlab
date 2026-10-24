@@ -28,6 +28,10 @@ async function renderSettings() {
 
     <section class="set-sec set-panel" data-panel="secu"><div class="set-sec-h">🔒 Compte &amp; sécurité</div>
       <div class="set-sec-d">Votre PIN déverrouille vos accès (jetons chiffrés sur ce poste) et confirme chaque envoi vers le serveur. Personne ne peut lire vos accès sans lui.</div>
+      <div class="callout warn hidden" id="pol-reval-row" style="margin-bottom:12px">
+        <b>⚠ Politique de sécurité à re-valider.</b> La signature de ce poste n'est plus reconnue (mise à niveau, clé d'appareil renouvelée, ou configuration éditée hors SituLab). Tant qu'elle n'est pas re-validée, SituLab reste en <b>lecture seule</b>. Vérifiez vos réglages ci-dessous (rôles, périmètres, PIN), puis re-validez.
+        <div style="margin-top:8px"><button class="btn btn-primary btn-sm" id="pol-reval">Re-valider la politique de sécurité</button></div>
+      </div>
       <div class="set-row"><div class="set-row-l"><b id="pin-state"></b></div>
         <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="set-pin"></button><button class="lnk" id="pin-forgot">PIN oublié ?</button></div></div>
       <div class="set-row"><div class="set-row-l">Session <span id="sess-state" class="muted"></span></div>
@@ -262,6 +266,24 @@ async function renderSettings() {
         } catch (e) { toast(cleanErr(e), "err"); ro.checked = !ro.checked; }
       };
     }
+    // Politique à re-valider (mise à niveau / clé renouvelée / édition hors SituLab) : seul geste qui
+    // sort de la position fermée. Sans ce bouton, l'utilisateur était piégé (lecture seule non décochable,
+    // message « re-validez dans Réglages » sans cible). Le bouton re-signe la politique courante.
+    try {
+      const needs = await App().SecurityPolicyNeedsRevalidation();
+      const prr = el("pol-reval-row");
+      if (prr) prr.classList.toggle("hidden", !needs);
+      const pb = el("pol-reval");
+      if (pb) pb.onclick = async () => {
+        try {
+          await App().RevalidateSecurityPolicy();
+          toast("Politique de sécurité re-validée", "ok");
+          try { state.readOnly = await App().ReadOnly(); } catch (e) {}
+          updateReadOnlyBanner();
+          renderSettings(); // re-render : bannière retirée, lecture seule reflète l'état réel
+        } catch (e) { toast(cleanErr(e), "err"); }
+      };
+    } catch (e) {}
     const pd = el("purge-data");
     if (pd) pd.onclick = purgeDataModal;
   } catch (e) {}

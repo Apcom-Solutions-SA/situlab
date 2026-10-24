@@ -376,6 +376,21 @@ function createRepoModal(preset) {
   else if (orgs.length) el("nowner").value = orgs[0];
   el("modal-ok").textContent = "Continuer";
   wireAiInvite(() => promptRepoCreate(el("nowner") ? el("nowner").value : "", el("nr") ? el("nr").value : ""));
+  // Compléter avec les organisations RÉELLES de l'utilisateur (async, best-effort) — pas seulement celles
+  // déjà vues dans ses dépôts : sinon impossible de créer un dépôt dans une organisation encore vide.
+  (async () => {
+    let real = [];
+    try { real = (await App().Orgs(state.instance)) || []; } catch (e) { return; }
+    const sel = el("nowner"); if (!sel) return;
+    const names = real.map((o) => o && (o.username || o.login)).filter(Boolean);
+    const merged = [...new Set([...orgs, ...names])].sort();
+    if (!merged.length) return;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">Moi (${esc(state.login || "espace personnel")})</option>` +
+      merged.map((o) => `<option value="${esc(o)}">${esc(o)} (organisation)</option>`).join("");
+    if (keep && merged.includes(keep)) sel.value = keep;
+    else if (preset.owner && merged.includes(preset.owner)) sel.value = preset.owner;
+  })();
 }
 
 // deleteRepoModal : suppression définitive d'un dépôt distant, avec garde-fou (retaper le

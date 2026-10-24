@@ -122,6 +122,7 @@ type Service struct {
 	bkMu   sync.Mutex
 	bkBusy int
 	bkProg func(BackupProgress)
+	bkRun  map[string]bool // plans en cours (anti-concurrence du MÊME plan : la rotation de l'un ne doit pas effacer le bundle frais de l'autre)
 }
 
 type repoCache struct {
@@ -428,6 +429,9 @@ func (s *Service) RemoveInstance(name string) error {
 
 // SetDefaultInstance définit l'instance par défaut.
 func (s *Service) SetDefaultInstance(name string) error {
+	if err := s.assertWritable(); err != nil { // mutation de config : refusée en lecture seule (comme SetDefaultCloud)
+		return err
+	}
 	s.ioMu.Lock()
 	defer s.ioMu.Unlock()
 	cfg, err := config.Load()
@@ -576,21 +580,6 @@ func (s *Service) Orgs(instance string) ([]forgejo.Org, error) {
 	ctx, cancel := opCtx()
 	defer cancel()
 	return cl.ListOrgs(ctx)
-}
-
-// Tokens renvoie les tokens d'accès (sans valeur).
-func (s *Service) Tokens(instance string) ([]forgejo.Token, error) {
-	cl, _, err := s.clientFor(instance)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := opCtx()
-	defer cancel()
-	u, err := cl.CurrentUser(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return cl.ListTokens(ctx, u.Login)
 }
 
 // cachedRepos renvoie les dépôts distants, avec un cache court par instance pour
@@ -875,6 +864,21 @@ func (s *Service) PINSet() bool {
 	return keyring.Initialized()
 }
 
+// isTrivialPIN rejette un code fait d'un seul caractère répété (000000, 111111…). La vraie résistance
+// hors-ligne du trousseau volé tient à l'espace du PIN + au coût Argon2id (documenté) ; bannir des motifs
+// n'y change presque rien — on écarte seulement le pire cas, sans contraindre l'usage clé-en-main.
+func isTrivialPIN(code string) bool {
+	if len(code) < 2 {
+		return false
+	}
+	for i := 1; i < len(code); i++ {
+		if code[i] != code[0] {
+			return false
+		}
+	}
+	return true
+}
+
 // SetPIN définit (1re fois) ou change le PIN.
 //   - 1re fois : initialise le trousseau chiffré et OUVRE la session (la DEK naît ici).
 //   - changement : l'ancien PIN est exigé et vérifié par le MÊME chemin verrouillé que
@@ -883,6 +887,9 @@ func (s *Service) PINSet() bool {
 func (s *Service) SetPIN(oldCode, newCode string) error {
 	if len(newCode) < pinMinLen {
 		return fmt.Errorf("le PIN doit comporter au moins %d caractères", pinMinLen)
+	}
+	if isTrivialPIN(newCode) {
+		return errors.New("PIN trop prévisible : évitez un code fait d'un seul chiffre répété (ex. 000000)")
 	}
 	if !keyring.Initialized() {
 		_, dek, err := keyring.Init(newCode)
@@ -1162,6 +1169,18 @@ func (s *Service) verifyPINGated(code string) ([]byte, bool, error) {
 	// Succès : on remet le compteur à zéro.
 	s.resetPINCounters()
 	return dek, true, nil
+}
+
+// VerifyPIN vérifie un PIN À BLANC (sans ouvrir de session), throttlé par le MÊME verrou anti-bruteforce
+// que le déverrouillage. La fenêtre s'en sert pour signaler un PIN FAUX avant de soumettre la demande au
+// démon — au lieu de refermer la modale en silence et de laisser l'action échouer sans explication.
+// Renvoie (ok, err) ; err non nil = verrou actif, trousseau absent/illisible. La DEK n'est jamais retenue.
+func (s *Service) VerifyPIN(code string) (bool, error) {
+	dek, ok, err := s.verifyPINGated(code)
+	if ok {
+		zero(dek)
+	}
+	return ok, err
 }
 
 // Push pousse un dépôt local vers le distant. Le PIN est OBLIGATOIRE et protégé par
@@ -1956,6 +1975,9 @@ func (s *Service) ReconnectToken(name, token string) error {
 // gestion des jetons ne le redemande plus. Si ce choix était « ne pas mémoriser », rien n'est
 // conservé (et toute trace est purgée). Appelé au 1er déverrouillage réussi du gestionnaire.
 func (s *Service) RememberPassword(instance, password string, twoFA bool) error {
+	if err := s.assertWritable(); err != nil { // persiste un secret + TwoFA : mutation, refusée en lecture seule
+		return err
+	}
 	dek, err := s.sessionDEK()
 	if err != nil {
 		return err

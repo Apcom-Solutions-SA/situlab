@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -16,6 +17,63 @@ import (
 	"situlab/internal/keyring"
 	"situlab/internal/webdav"
 )
+
+// pathUnder dit si p est EGAL a root ou situe dessous (apres nettoyage). Fail-closed sur erreur.
+func pathUnder(p, root string) bool {
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." && !filepath.IsAbs(rel))
+}
+
+// AgentLocalPathAllowed borne le chemin LOCAL d'un transfert cloud INITIE PAR UN AGENT (CORPUS
+// upload/download). Fail-closed : seuls les fichiers situes SOUS un depot suivi (clone local) sont
+// permis, et JAMAIS un chemin du dossier de configuration de SituLab (secrets : device.key, keyring,
+// daemon.token, config.json). Empeche un agent injecte d'exfiltrer les clefs ou d'ecrire des octets
+// arbitraires hors de l'espace de travail. La FENETRE (humain) n'est PAS soumise a cette borne.
+func (s *Service) AgentLocalPathAllowed(local string) bool {
+	if strings.TrimSpace(local) == "" {
+		return false
+	}
+	abs, err := filepath.Abs(local)
+	if err != nil {
+		return false
+	}
+	// Resoudre les liens symboliques (du fichier s'il existe, sinon du parent) pour bloquer une evasion.
+	if r, e := filepath.EvalSymlinks(abs); e == nil {
+		abs = r
+	} else if r, e := filepath.EvalSymlinks(filepath.Dir(abs)); e == nil {
+		abs = filepath.Join(r, filepath.Base(abs))
+	}
+	abs = filepath.Clean(abs)
+	// Jamais le dossier de configuration (secrets souverains).
+	if cfgDir, e := filepath.Abs(config.Dir()); e == nil {
+		if cr, e2 := filepath.EvalSymlinks(cfgDir); e2 == nil {
+			cfgDir = cr
+		}
+		if pathUnder(abs, filepath.Clean(cfgDir)) {
+			return false
+		}
+	}
+	s.mu.Lock()
+	s.lockedReload()
+	roots := append([]string(nil), s.cfg.LocalRepos...)
+	s.mu.Unlock()
+	for _, root := range roots {
+		ra, e := filepath.Abs(root)
+		if e != nil {
+			continue
+		}
+		if re, e2 := filepath.EvalSymlinks(ra); e2 == nil {
+			ra = re
+		}
+		if pathUnder(abs, filepath.Clean(ra)) {
+			return true
+		}
+	}
+	return false
+}
 
 // buildWebDAVBase reconstruit l'URL WebDAV RÉELLE d'un cloud à partir de ce que l'utilisateur colle
 // (souvent l'adresse du navigateur : page de login, tableau de bord…), par type de cloud.
@@ -484,6 +542,12 @@ func (s *Service) fileCloudClientFor(name string) (*webdav.Client, config.FileCl
 	pass, err := kr.GetToken(dek, cloudKeyID(fc.Name))
 	if err != nil {
 		return nil, fc, err
+	}
+	// Défense en profondeur : la DESTINATION du mot de passe d'application doit rester HTTPS, revérifié à
+	// l'usage (pas seulement à l'ajout). Bloque une URL réécrite en http:// (fuite d'identifiant en clair)
+	// même si, par ailleurs, la signature d'intégrité était contournée.
+	if u, perr := url.Parse(strings.TrimSpace(fc.URL)); perr != nil || u.Scheme != "https" {
+		return nil, fc, fmt.Errorf("adresse cloud non sécurisée (HTTPS requis) : %q", fc.URL)
 	}
 	return webdav.New(fc.URL, fc.User, pass, s.version), fc, nil
 }

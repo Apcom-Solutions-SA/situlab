@@ -155,6 +155,19 @@ func (s *Service) buildAttestationTrailer(inst, path, sha string) string {
 	if e != nil || len(attJSON) == 0 {
 		return ""
 	}
+	// Vérification LOCALE avant de sceller : le serveur peut se tromper, être compromis ou renvoyer une
+	// attestation déjà morte (cert hors fenêtre, serial révoqué, chaîne ne remontant pas à la racine
+	// épinglée, signature ne couvrant pas CE pré-image). On ne pose JAMAIS un sceau qu'on ne sait pas
+	// vérifier soi-même : sinon attestPromotionSHA réécrirait le SHA d'un commit autour d'un trailer
+	// invérifiable, et l'historique afficherait une « garantie d'origine » que le poste ne peut pas
+	// confirmer. Fail-closed : attestation non vérifiée → pas de sceau (best-effort, jamais d'erreur).
+	att, derr := attest.Decode(attJSON)
+	if derr != nil {
+		return ""
+	}
+	if v := attest.VerifyPreimage(att, pre, time.Now(), s.revokedSerials()); !v.Verified {
+		return ""
+	}
 	return base64.StdEncoding.EncodeToString(attJSON)
 }
 

@@ -1171,11 +1171,28 @@ func cmdOrg() *cobra.Command {
 
 func cmdToken() *cobra.Command {
 	c := &cobra.Command{Use: "token", Short: "Gestion des tokens d'accès"}
-	c.AddCommand(&cobra.Command{
+	var lUser, lPass, lOTP string
+	listCmd := &cobra.Command{
 		Use:   "list",
-		Short: "Liste tes tokens d'accès (noms et portées)",
+		Short: "Liste tes tokens d'accès (noms et portées ; identifiants requis)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			tokens, err := svc.Tokens(flagInstance)
+			// Forgejo n'autorise pas la gestion des jetons PAR jeton : il faut une auth basique
+			// (identifiant + mot de passe + 2FA au besoin), comme pour create/delete.
+			p, err := secretOrPrompt(lPass, "le mot de passe (--password)", "Mot de passe pour "+lUser+" : ")
+			if err != nil {
+				return err
+			}
+			lPass = p
+			if lOTP != "" {
+				warnSecretFlag("le code 2FA (--otp)")
+			}
+			tokens, err := svc.Tokens(flagInstance, lUser, lPass, lOTP)
+			if err != nil && lOTP == "" && looksLikeAuthFailure(err) && term.IsTerminal(int(os.Stdin.Fd())) {
+				if o, e := promptSecret("Code 2FA (laisser vide si aucun) : "); e == nil && o != "" {
+					lOTP = o
+					tokens, err = svc.Tokens(flagInstance, lUser, lPass, lOTP)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -1185,7 +1202,11 @@ func cmdToken() *cobra.Command {
 				}
 			})
 		},
-	})
+	}
+	listCmd.Flags().StringVar(&lUser, "user", "", "identifiant du compte")
+	listCmd.Flags().StringVar(&lPass, "password", "", "mot de passe du compte (sinon demandé, masqué)")
+	listCmd.Flags().StringVar(&lOTP, "otp", "", "code 2FA (si le compte en a un)")
+	c.AddCommand(listCmd)
 
 	var user, pass, otp, name, scopes, repos string
 	splitCSV := func(s string) []string {
@@ -1200,7 +1221,23 @@ func cmdToken() *cobra.Command {
 	create := &cobra.Command{
 		Use: "create", Short: "Crée un token (auth basique user+mot de passe ; PIN demandé sur le poste)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := secretOrPrompt(pass, "le mot de passe (--password)", "Mot de passe pour "+user+" : ")
+			if err != nil {
+				return err
+			}
+			pass = p
+			if otp != "" {
+				warnSecretFlag("le code 2FA (--otp)")
+			}
 			tok, err := svc.TokenCreate(flagInstance, user, pass, otp, name, splitCSV(scopes), splitCSV(repos))
+			// Compte avec 2FA : réessayer en demandant le code (masqué), seulement sur un refus
+			// d'authentification et au terminal — pour ne jamais exiger --otp en clair.
+			if err != nil && otp == "" && looksLikeAuthFailure(err) && term.IsTerminal(int(os.Stdin.Fd())) {
+				if o, e := promptSecret("Code 2FA (laisser vide si aucun) : "); e == nil && o != "" {
+					otp = o
+					tok, err = svc.TokenCreate(flagInstance, user, pass, otp, name, splitCSV(scopes), splitCSV(repos))
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -1208,7 +1245,7 @@ func cmdToken() *cobra.Command {
 		},
 	}
 	create.Flags().StringVar(&user, "user", "", "identifiant du compte")
-	create.Flags().StringVar(&pass, "password", "", "mot de passe du compte")
+	create.Flags().StringVar(&pass, "password", "", "mot de passe du compte (sinon demandé, masqué)")
 	create.Flags().StringVar(&name, "name", "situlab", "nom du token")
 	create.Flags().StringVar(&scopes, "scopes", "read:repository,write:repository", "portées (séparées par des virgules)")
 	create.Flags().StringVar(&repos, "repos", "", "restreindre à ces dépôts owner/repo (virgules) ; vide = selon les droits")
@@ -1222,14 +1259,29 @@ func cmdToken() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("id invalide")
 			}
-			if err := svc.TokenDelete(flagInstance, dUser, dPass, dOTP, id); err != nil {
+			p, err := secretOrPrompt(dPass, "le mot de passe (--password)", "Mot de passe pour "+dUser+" : ")
+			if err != nil {
+				return err
+			}
+			dPass = p
+			if dOTP != "" {
+				warnSecretFlag("le code 2FA (--otp)")
+			}
+			err = svc.TokenDelete(flagInstance, dUser, dPass, dOTP, id)
+			if err != nil && dOTP == "" && looksLikeAuthFailure(err) && term.IsTerminal(int(os.Stdin.Fd())) {
+				if o, e := promptSecret("Code 2FA (laisser vide si aucun) : "); e == nil && o != "" {
+					dOTP = o
+					err = svc.TokenDelete(flagInstance, dUser, dPass, dOTP, id)
+				}
+			}
+			if err != nil {
 				return err
 			}
 			return emit(cmd, map[string]string{"status": "ok"}, func() { fmt.Fprintln(cmd.OutOrStdout(), "Token supprimé.") })
 		},
 	}
 	del.Flags().StringVar(&dUser, "user", "", "identifiant du compte")
-	del.Flags().StringVar(&dPass, "password", "", "mot de passe du compte")
+	del.Flags().StringVar(&dPass, "password", "", "mot de passe du compte (sinon demandé, masqué)")
 	del.Flags().StringVar(&dOTP, "otp", "", "code 2FA (si le compte en a un)")
 
 	c.AddCommand(create, del)
@@ -1790,6 +1842,11 @@ func cmdAdmin() *cobra.Command {
 	userCreate := &cobra.Command{
 		Use: "user-create <identifiant>", Short: "Crée un utilisateur (PIN demandé sur le poste)", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := secretOrPrompt(password, "le mot de passe initial (--password)", "Mot de passe initial pour "+args[0]+" : ")
+			if err != nil {
+				return err
+			}
+			password = p
 			u, err := svc.AdminCreateUser(flagInstance, args[0], email, password, admin)
 			if err != nil {
 				return err
@@ -1798,7 +1855,7 @@ func cmdAdmin() *cobra.Command {
 		},
 	}
 	userCreate.Flags().StringVar(&email, "email", "", "e-mail")
-	userCreate.Flags().StringVar(&password, "password", "", "mot de passe initial")
+	userCreate.Flags().StringVar(&password, "password", "", "mot de passe initial (sinon demandé, masqué)")
 	userCreate.Flags().BoolVar(&admin, "admin", false, "administrateur")
 
 	c.AddCommand(userList, directory, userCreate)
@@ -1833,6 +1890,22 @@ func splitRepoNum(args []string) (owner, repo string, num int, err error) {
 		return "", "", 0, fmt.Errorf("numéro invalide : %s", args[1])
 	}
 	return owner, repo, num, nil
+}
+
+// warnSecretFlag avertit (stderr) qu'un secret passé en OPTION de ligne de commande reste visible dans
+// la liste des processus (ps / Gestionnaire des tâches) et l'historique du shell — à éviter.
+func warnSecretFlag(what string) {
+	fmt.Fprintf(os.Stderr, "Attention : %s passé en option reste visible dans la liste des processus et l'historique du shell ; laissez l'option vide pour une saisie masquée.\n", what)
+}
+
+// secretOrPrompt renvoie le secret fourni par drapeau (en avertissant qu'il est exposé), sinon le
+// demande au terminal, masqué. Évite d'imposer un secret sur la ligne de commande.
+func secretOrPrompt(flagVal, what, label string) (string, error) {
+	if flagVal != "" {
+		warnSecretFlag(what)
+		return flagVal, nil
+	}
+	return promptSecret(label)
 }
 
 func promptSecret(label string) (string, error) {

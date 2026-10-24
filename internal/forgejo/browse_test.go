@@ -257,6 +257,37 @@ func TestLatestTagSinglePage(t *testing.T) {
 	}
 }
 
+// GitHub ne garantit aucun ordre sur /tags : latestSemverTag doit retenir la plus grande VERSION
+// sémantique quel que soit l'ordre, en IGNORANT les tags non sémantiques (latest, nightly…) — y compris
+// quand un tel tag arrive EN PREMIER (régression 1.18 : il ancrait le résultat et n'était jamais dépassé).
+func TestLatestSemverTag(t *testing.T) {
+	mk := func(names ...string) []apiTag {
+		out := make([]apiTag, len(names))
+		for i, n := range names {
+			out[i] = apiTag{Name: n}
+			out[i].Commit.SHA = n
+		}
+		return out
+	}
+	cases := []struct {
+		names []string
+		want  string
+	}{
+		{[]string{"latest", "v1.0.0", "v2.0.0"}, "v2.0.0"},     // non-sémantique en tête, ignoré
+		{[]string{"nightly", "v1.2.0", "v1.3.0"}, "v1.3.0"},    // idem
+		{[]string{"v1.0.0", "latest", "v2.0.0"}, "v2.0.0"},     // non-sémantique au milieu
+		{[]string{"v2.0.0", "v1.0.0", "latest"}, "v2.0.0"},     // sémantique en tête, ordre décroissant
+		{[]string{"v1.0.0", "v1.0.1-rc1", "v1.1.0"}, "v1.1.0"}, // pré-version < release
+		{[]string{"v1.2.0", "v1.2.0-beta"}, "v1.2.0"},          // release l'emporte sur sa pré-version
+		{[]string{"latest", "nightly"}, "latest"},              // AUCUN sémantique → repli sur le 1er
+	}
+	for _, tc := range cases {
+		if got := latestSemverTag(mk(tc.names...)); got.Name != tc.want {
+			t.Errorf("latestSemverTag(%v) = %q, attendu %q", tc.names, got.Name, tc.want)
+		}
+	}
+}
+
 // Dépôt sans aucun tag : ok=false, sans erreur.
 func TestLatestTagNone(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

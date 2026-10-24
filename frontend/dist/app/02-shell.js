@@ -54,8 +54,15 @@ async function showApp(instances) {
     refreshDisconnected(),
     refreshWhoami(),
     (typeof refreshPairingAlert === "function" ? refreshPairingAlert() : Promise.resolve()),
-  ]).then(() => {
+  ]).then(async () => {
     updateHealth(); // pastilles de santé git + cloud, une fois les données fraîches
+    // Mise en route recalculée avec le compte d'appairages RÉEL (refreshPairingAlert vient de l'actualiser) :
+    // la première peinture s'est faite sur le cache pour ne pas attendre le réseau. On réconcilie la vue
+    // d'atterrissage si l'état a basculé (entrée dans la mise en route, ou sortie une fois résolue).
+    const wasSetupView = state.view === "setup";
+    if (typeof refreshSetup === "function") await refreshSetup();
+    if (setupActive() && !wasSetupView) { state.view = "setup"; render(); }
+    else if (!setupActive() && wasSetupView) { state.view = "organize"; render(); }
     if (!setupActive()) maybeAutoTour(); // visite auto : seulement une fois la mise en route terminée
   });
 }

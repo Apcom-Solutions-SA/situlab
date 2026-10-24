@@ -157,18 +157,6 @@ async function pickSpokeRepo() {
   });
 }
 
-async function loadSpokeStatus(name, i) {
-  const box = el("spk-st-" + i);
-  if (!box) return;
-  try {
-    const st = await App().SpokeStatus(name);
-    const tone = klTone(st);
-    box.innerHTML = `<span class="spk-dot ${tone}"></span>${esc(st.summary || "")} <span class="muted">· ${esc(st.branch || "")}</span>`;
-  } catch (e) {
-    box.innerHTML = `<span class="spk-dot red"></span>${esc(cleanErr(e))}`;
-  }
-}
-
 function spokePull(name) {
   App().SpokePull(name)
     .then(() => { toast("Récupéré", "ok"); renderSpokes(); })

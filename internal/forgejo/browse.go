@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -143,20 +144,94 @@ func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]Tag, error
 	}
 }
 
-// LatestTag ne récupère que le tag le PLUS RÉCENT : une seule page, un seul élément. L'API renvoie les
-// tags du plus récent au plus ancien, donc le premier suffit. Évite de paginer tout l'historique des
-// versions quand seul le dernier compte (vitrines, barre de version) — gain réseau marqué sur les
-// affichages de dépôts (perf 1.17). ok=false si le dépôt n'a aucun tag.
+// semverTriple extrait (major, minor, patch) d'un nom de tag « vX.Y.Z[-pré] ». `pre` est vrai si un
+// suffixe de pré-version (-rc1, -beta…) est présent. `ok` est faux si le nom n'est pas une version
+// sémantique numérique (on refuse alors de réordonner). Composants absents = 0 ; tolérant au préfixe v/V.
+func semverTriple(name string) (maj, min, pat int, pre, ok bool) {
+	s := strings.TrimPrefix(strings.TrimPrefix(name, "v"), "V")
+	core := s
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		core, pre = s[:i], true
+	}
+	parts := strings.Split(core, ".")
+	dst := []*int{&maj, &min, &pat}
+	for i := 0; i < len(parts) && i < 3; i++ {
+		n, err := strconv.Atoi(parts[i])
+		if err != nil {
+			return 0, 0, 0, false, false
+		}
+		*dst[i] = n
+		ok = true
+	}
+	return maj, min, pat, pre, ok
+}
+
+// tagVersionLess : a < b en ordre de version sémantique. À cœur (X.Y.Z) égal, une release l'emporte sur
+// une pré-version. Deux tags non sémantiques ⇒ false (ordre laissé inchangé, pas de réordonnancement).
+func tagVersionLess(a, b string) bool {
+	aM, am, ap, apre, aok := semverTriple(a)
+	bM, bm, bp, bpre, bok := semverTriple(b)
+	if !aok || !bok {
+		return false
+	}
+	switch {
+	case aM != bM:
+		return aM < bM
+	case am != bm:
+		return am < bm
+	case ap != bp:
+		return ap < bp
+	case apre != bpre:
+		return apre && !bpre // a est une pré-version, b une release → a < b
+	default:
+		return false
+	}
+}
+
+// LatestTag récupère le tag de version le PLUS RÉCENT (vitrines, barre de version), sans paginer tout
+// l'historique quand seul le dernier compte. ok=false si le dépôt n'a aucun tag.
+//
+// Forgejo/Gitea renvoie les tags du plus récent au plus ancien : une seule page d'un élément suffit.
+// GitHub N'OFFRE AUCUNE GARANTIE d'ordre sur /tags (ni date, ni version) — prendre le premier élément y
+// choisirait un tag arbitraire (régression possible de la barre de version). On récupère donc une page
+// de tags et on retient le plus grand en ordre sémantique. Borne assumée : le dernier tag est cherché
+// parmi les `perPage` premiers renvoyés (amplement suffisant pour une vitrine versionnée vX.Y.Z).
 func (c *Client) LatestTag(ctx context.Context, owner, repo string) (Tag, bool, error) {
+	n := 1
+	if c.kind == KindGitHub {
+		n = perPage
+	}
 	var raw []apiTag
-	p := fmt.Sprintf("/repos/%s/%s/tags?%s=1&page=1", esc(owner), esc(repo), c.limKey())
+	p := fmt.Sprintf("/repos/%s/%s/tags?%s=%d&page=1", esc(owner), esc(repo), c.limKey(), n)
 	if err := c.do(ctx, p, &raw, maxAPIBody); err != nil {
 		return Tag{}, false, err
 	}
 	if len(raw) == 0 {
 		return Tag{}, false, nil
 	}
-	return Tag{Name: raw[0].Name, SHA: raw[0].Commit.SHA}, true, nil
+	best := raw[0]
+	if c.kind == KindGitHub {
+		best = latestSemverTag(raw)
+	}
+	return Tag{Name: best.Name, SHA: best.Commit.SHA}, true, nil
+}
+
+// latestSemverTag choisit le plus grand tag SÉMANTIQUE parmi `tags` (ordre quelconque — cas GitHub).
+// On IGNORE les tags non sémantiques (« latest », « nightly »…) : les amorcer ancrerait le résultat sur
+// un non-sémantique que tagVersionLess ne dépasse jamais (il renvoie false dès qu'un opérande n'est pas
+// sémantique). Si AUCUN tag n'est sémantique, renvoie tags[0] (repli best-effort). `tags` est non vide.
+func latestSemverTag(tags []apiTag) apiTag {
+	best := tags[0]
+	seeded := false
+	for _, t := range tags {
+		if _, _, _, _, ok := semverTriple(t.Name); !ok {
+			continue
+		}
+		if !seeded || tagVersionLess(best.Name, t.Name) {
+			best, seeded = t, true
+		}
+	}
+	return best
 }
 
 // ListCommits renvoie les derniers commits d'une référence (branche/tag/sha). Pagine par

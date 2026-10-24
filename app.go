@@ -145,6 +145,15 @@ func (a *App) CancelPIN() {
 	}
 }
 
+// VerifyPIN vérifie un PIN à blanc (throttlé), pour que la modale signale un PIN faux et reste ouverte
+// pour une nouvelle saisie au lieu de se refermer en silence. N'ouvre PAS de session.
+func (a *App) VerifyPIN(pin string) (bool, error) {
+	if err := a.ready(); err != nil {
+		return false, err
+	}
+	return a.svc.VerifyPIN(pin)
+}
+
 // ready renvoie une erreur explicite si le noyau n'est pas prêt (au lieu de paniquer).
 func (a *App) ready() error {
 	if a.svc == nil {
@@ -282,7 +291,7 @@ func (a *App) SetDefaultInstance(name string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.SetDefaultInstance(name)
+	return a.lockedErr(a.svc.SetDefaultInstance(name))
 }
 
 // TestInstance teste une connexion.
@@ -315,6 +324,16 @@ func (a *App) Repos(instance string) ([]forgejo.Repo, error) {
 		return nil, err
 	}
 	return a.svc.Repos(instance)
+}
+
+// Orgs liste les organisations de l'utilisateur sur une instance — pour choisir le propriétaire d'un
+// nouveau dépôt, y compris une organisation où l'on n'a encore AUCUN dépôt (la liste dérivée des dépôts
+// existants les manquait). Lecture, pas de PIN.
+func (a *App) Orgs(instance string) ([]forgejo.Org, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.Orgs(instance)
 }
 
 // RepoBranches / RepoTags / RepoCommits / RepoContents / RepoFile : détail distant.
@@ -351,14 +370,6 @@ func (a *App) RepoFile(instance, owner, repo, path, ref string) (string, error) 
 		return "", err
 	}
 	return a.svc.RepoFile(instance, owner, repo, path, ref)
-}
-
-// ListTokens renvoie les tokens d'accès (noms et portées ; jamais les valeurs).
-func (a *App) ListTokens(instance string) ([]forgejo.Token, error) {
-	if err := a.ready(); err != nil {
-		return nil, err
-	}
-	return a.svc.Tokens(instance)
 }
 
 // LocalDetail renvoie l'état détaillé d'un dépôt local.
@@ -603,6 +614,16 @@ func (a *App) RevalidateSecurityPolicy() error {
 	return nil
 }
 
+// SecurityPolicyNeedsRevalidation : la politique de ce poste est-elle signée mais NON reconnue (clé
+// d'appareil renouvelée, mise à niveau, édition hors SituLab) ? Si oui, SituLab reste en position fermée
+// (lecture seule) et l'UI propose « re-valider la politique » (seul geste qui débloque).
+func (a *App) SecurityPolicyNeedsRevalidation() (bool, error) {
+	if err := a.ready(); err != nil {
+		return false, err
+	}
+	return a.svc.SecurityPolicyTampered(), nil
+}
+
 // SetInstanceRole fixe le rôle d'une connexion (atelier|production). Fenêtre uniquement (v1.7).
 func (a *App) SetInstanceRole(name, role string) error {
 	if err := a.ready(); err != nil {
@@ -737,7 +758,11 @@ func (a *App) ProjectPromote(name string, prodIndex int, sourceBranch, version, 
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.svc.ProjectPromote(name, prodIndex, core.PromoteOptions{SourceBranch: sourceBranch, Version: version, TargetBranch: targetBranch, Mode: mode, Notes: notes}, pin)
+	res, err := a.svc.ProjectPromote(name, prodIndex, core.PromoteOptions{SourceBranch: sourceBranch, Version: version, TargetBranch: targetBranch, Mode: mode, Notes: notes}, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return res, err
 }
 
 // BranchTags liste les versions (tags) joignables depuis une branche d'un clone local, de la plus
@@ -777,6 +802,21 @@ func (a *App) afterWrite() {
 	}
 }
 
+// lockedErr / lockedVal : parité du verrouillage-après-écriture pour les liaisons de la FENÊTRE, qui
+// court-circuitent handle() (appel in-process du cœur). Toute mutation qui déchiffre un jeton ou touche
+// un contenu distant doit, en cas de SUCCÈS, repasser par afterWrite() — exactement comme le démon le
+// fait pour chaque isWriteOp. Sans ça, l'option « verrouiller après chaque écriture » ne protégeait que
+// la moitié des surfaces (le jeton restait déchiffré en mémoire après un geste lancé depuis la fenêtre).
+// lockedErr sert les liaisons qui ne renvoient qu'une erreur ; celles en « (valeur, erreur) » appellent
+// afterWrite() en clair sur le chemin de succès (Go n'autorise pas d'étaler un résultat multi-valeurs
+// comme argument quand un autre argument le précède).
+func (a *App) lockedErr(err error) error {
+	if err == nil {
+		a.afterWrite()
+	}
+	return err
+}
+
 // Push pousse un dépôt local (PIN obligatoire).
 func (a *App) Push(instance, path, pin string) (string, error) {
 	if err := a.ready(); err != nil {
@@ -796,7 +836,7 @@ func (a *App) PublishTag(instance, owner, repo, localPath, tag, pin string) erro
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.PublishTag(instance, owner, repo, localPath, tag, pin)
+	return a.lockedErr(a.svc.PublishTag(instance, owner, repo, localPath, tag, pin))
 }
 
 func (a *App) Synchronize(instance, path, message, pin string) (*core.SyncResult, error) {
@@ -967,7 +1007,11 @@ func (a *App) CreateRepo(instance, owner, name, desc string, private bool, pin s
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.svc.CreateRepo(instance, owner, name, desc, private, pin)
+	r, err := a.svc.CreateRepo(instance, owner, name, desc, private, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return r, err
 }
 
 // DeleteRepo supprime définitivement un dépôt distant (PIN requis).
@@ -975,43 +1019,51 @@ func (a *App) DeleteRepo(instance, owner, repo, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.DeleteRepo(instance, owner, repo, pin)
+	return a.lockedErr(a.svc.DeleteRepo(instance, owner, repo, pin))
 }
 func (a *App) CreateIssue(instance, owner, repo, title, body, pin string) (*forgejo.Issue, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.svc.CreateIssue(instance, owner, repo, title, body, pin)
+	r, err := a.svc.CreateIssue(instance, owner, repo, title, body, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return r, err
 }
 func (a *App) CommentIssue(instance, owner, repo string, index int, body, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.CommentIssue(instance, owner, repo, index, body, pin)
+	return a.lockedErr(a.svc.CommentIssue(instance, owner, repo, index, body, pin))
 }
 func (a *App) SetIssueState(instance, owner, repo string, index int, state, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.SetIssueState(instance, owner, repo, index, state, pin)
+	return a.lockedErr(a.svc.SetIssueState(instance, owner, repo, index, state, pin))
 }
 func (a *App) EditIssue(instance, owner, repo string, index int, title, body, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.EditIssue(instance, owner, repo, index, title, body, pin)
+	return a.lockedErr(a.svc.EditIssue(instance, owner, repo, index, title, body, pin))
 }
 func (a *App) CreatePull(instance, owner, repo, title, head, base, body, pin string) (*forgejo.Issue, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.svc.CreatePull(instance, owner, repo, title, head, base, body, pin)
+	r, err := a.svc.CreatePull(instance, owner, repo, title, head, base, body, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return r, err
 }
 func (a *App) MergePull(instance, owner, repo string, index int, method, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.MergePull(instance, owner, repo, index, method, pin)
+	return a.lockedErr(a.svc.MergePull(instance, owner, repo, index, method, pin))
 }
 func (a *App) RepoIssues(instance, owner, repo, state string) ([]forgejo.Issue, error) {
 	if err := a.ready(); err != nil {
@@ -1127,7 +1179,11 @@ func (a *App) AdminCreateUser(instance, username, email, password string, admin 
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.svc.AdminCreateUser(instance, username, email, password, admin, pin)
+	u, err := a.svc.AdminCreateUser(instance, username, email, password, admin, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return u, err
 }
 func (a *App) AdminUserRepos(instance string, uid int64) ([]forgejo.Repo, error) {
 	if err := a.ready(); err != nil {
@@ -1145,13 +1201,13 @@ func (a *App) AdminSuspendUser(instance, username string, suspend bool, pin stri
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.AdminSuspendUser(instance, username, suspend, pin)
+	return a.lockedErr(a.svc.AdminSuspendUser(instance, username, suspend, pin))
 }
 func (a *App) AdminDeleteUser(instance, username string, purge bool, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.AdminDeleteUser(instance, username, purge, pin)
+	return a.lockedErr(a.svc.AdminDeleteUser(instance, username, purge, pin))
 }
 
 // --- Gestionnaire de tokens ---
@@ -1191,13 +1247,17 @@ func (a *App) TokenCreate(instance, user, password, otp, name string, scopes, re
 	if err := a.ready(); err != nil {
 		return "", err
 	}
-	return a.svc.TokenCreate(instance, user, password, otp, name, scopes, repos, pin)
+	tok, err := a.svc.TokenCreate(instance, user, password, otp, name, scopes, repos, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return tok, err
 }
 func (a *App) TokenDelete(instance, user, password, otp string, id int64, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.TokenDelete(instance, user, password, otp, id, pin)
+	return a.lockedErr(a.svc.TokenDelete(instance, user, password, otp, id, pin))
 }
 
 // --- v1.2 : PR (détail/diff/revue/état), releases, réglages dépôt, labels/assignés/milestones ---
@@ -1224,37 +1284,45 @@ func (a *App) ReviewPull(instance, owner, repo string, index int, event, body, p
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.ReviewPull(instance, owner, repo, index, event, body, pin)
+	return a.lockedErr(a.svc.ReviewPull(instance, owner, repo, index, event, body, pin))
 }
 func (a *App) SetPullState(instance, owner, repo string, index int, state, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.SetPullState(instance, owner, repo, index, state, pin)
+	return a.lockedErr(a.svc.SetPullState(instance, owner, repo, index, state, pin))
 }
 func (a *App) EditPull(instance, owner, repo string, index int, title, body, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.EditPull(instance, owner, repo, index, title, body, pin)
+	return a.lockedErr(a.svc.EditPull(instance, owner, repo, index, title, body, pin))
 }
 func (a *App) CreateRelease(instance, owner, repo, tag, name, body, target string, draft, prerelease bool, pin string) (*forgejo.Release, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.svc.CreateRelease(instance, owner, repo, tag, name, body, target, draft, prerelease, pin)
+	r, err := a.svc.CreateRelease(instance, owner, repo, tag, name, body, target, draft, prerelease, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return r, err
 }
 func (a *App) DeleteRelease(instance, owner, repo string, id int64, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.DeleteRelease(instance, owner, repo, id, pin)
+	return a.lockedErr(a.svc.DeleteRelease(instance, owner, repo, id, pin))
 }
 func (a *App) EditRepoSettings(instance, owner, repo string, fields map[string]any, pin string) (*forgejo.Repo, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	return a.svc.EditRepoSettings(instance, owner, repo, fields, pin)
+	r, err := a.svc.EditRepoSettings(instance, owner, repo, fields, pin)
+	if err == nil {
+		a.afterWrite()
+	}
+	return r, err
 }
 
 // DeleteRemoteBranch supprime une branche distante (PIN ; refuse la branche par défaut).
@@ -1262,7 +1330,7 @@ func (a *App) DeleteRemoteBranch(instance, owner, repo, branch, pin string) erro
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.DeleteRemoteBranch(instance, owner, repo, branch, pin)
+	return a.lockedErr(a.svc.DeleteRemoteBranch(instance, owner, repo, branch, pin))
 }
 func (a *App) RepoLabels(instance, owner, repo string) ([]forgejo.Label, error) {
 	if err := a.ready(); err != nil {
@@ -1280,19 +1348,19 @@ func (a *App) SetIssueLabels(instance, owner, repo string, index int, names []st
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.SetIssueLabels(instance, owner, repo, index, names, pin)
+	return a.lockedErr(a.svc.SetIssueLabels(instance, owner, repo, index, names, pin))
 }
 func (a *App) SetIssueAssignees(instance, owner, repo string, index int, assignees []string, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.SetIssueAssignees(instance, owner, repo, index, assignees, pin)
+	return a.lockedErr(a.svc.SetIssueAssignees(instance, owner, repo, index, assignees, pin))
 }
 func (a *App) SetIssueMilestone(instance, owner, repo string, index int, milestoneID int64, pin string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.SetIssueMilestone(instance, owner, repo, index, milestoneID, pin)
+	return a.lockedErr(a.svc.SetIssueMilestone(instance, owner, repo, index, milestoneID, pin))
 }
 
 // --- Clouds de fichiers souverains (CORPUS, v1.10) ---
@@ -1513,12 +1581,13 @@ func (a *App) RunBackup(name string) (string, error) {
 
 // --- BACKUP tunnel (v1.14) ---
 
-// SaveBackupPlan crée/met à jour un plan de sauvegarde v1.14 (générique ou ciblé).
-func (a *App) SaveBackupPlan(in config.BackupPlan) error {
+// SaveBackupPlan crée/met à jour un plan de sauvegarde v1.14 (générique ou ciblé). oldName = nom avant
+// édition (vide à la création) : un renommage remplace l'entrée au lieu d'en créer une seconde.
+func (a *App) SaveBackupPlan(oldName string, in config.BackupPlan) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.svc.SaveBackupPlan(in)
+	return a.svc.SaveBackupPlan(oldName, in)
 }
 
 // RunBackupPlan exécute un plan v1.14 (déclencheur « manual » depuis la fenêtre). Sans PIN : une

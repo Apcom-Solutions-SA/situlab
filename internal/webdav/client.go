@@ -23,13 +23,11 @@ import (
 	"net/url"
 	"path"
 	"strings"
-	"time"
 )
 
 const (
-	userAgent  = "SituLab"
-	reqTimeout = 60 * time.Second
-	maxBody    = 128 << 20 // plafond de corps (anti-DoS mémoire) : 128 Mo par fichier
+	userAgent = "SituLab"
+	maxBody   = 128 << 20 // plafond de corps (anti-DoS mémoire) : 128 Mo par fichier
 )
 
 // ErrTooLarge signale un fichier dépassant la borne autorisée.
@@ -64,13 +62,17 @@ func New(base, user, pass, version string) *Client {
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	// PAS de Timeout global au niveau du client : il bornerait la requete ENTIERE (envoi du corps
+	// compris) et ecraserait le contexte par appel. Les deadlines viennent du ctx de chaque operation
+	// (court pour lister/lire, backupUploadTimeout pour un gros bundle). Le transport garde ses garde-fous
+	// de connexion/TLS (DialContext, TLSHandshakeTimeout) pour ne pas se figer sur l'etablissement.
 	return &Client{
 		base:     base,
 		basePath: bp,
 		user:     user,
 		pass:     pass,
 		ver:      version,
-		http:     &http.Client{Timeout: reqTimeout, Transport: tr},
+		http:     &http.Client{Transport: tr},
 	}
 }
 

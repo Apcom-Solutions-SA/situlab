@@ -90,12 +90,20 @@ async function showOnboarding() {
     try {
       if (await doLogin(err, "")) { location.reload(); return; }
     } catch (e) {
-      // Échec : on bascule sur l'étape 2FA (le compte en a peut-être une), sans
-      // redemander les identifiants déjà saisis. Un retour reste possible.
-      obShow("2fa");
-      ciOtp.clear();
-      el("otp-err").classList.add("hidden");
-      setTimeout(() => { const b = el("f-otp").querySelector("input"); if (b) b.focus(); }, 40);
+      // On ne bascule sur l'étape 2FA QUE si l'échec ressemble à un refus d'authentification ou mentionne
+      // explicitement un code (le compte a peut-être une 2FA). Pour une autre erreur — réseau, URL
+      // invalide, instance en double — on AFFICHE le message sur l'écran de connexion au lieu de déposer
+      // l'utilisateur en silence sur un écran 2FA muet qui ne résoudra rien.
+      const msg = cleanErr(e);
+      const maybe2FA = isAuthError(e) || /2fa|otp|two.?factor|double.?facteur|\bcode\b/i.test(msg);
+      if (maybe2FA) {
+        obShow("2fa");
+        ciOtp.clear();
+        el("otp-err").classList.add("hidden");
+        setTimeout(() => { const b = el("f-otp").querySelector("input"); if (b) b.focus(); }, 40);
+      } else {
+        err.textContent = msg; err.classList.remove("hidden");
+      }
     } finally {
       btn.disabled = false; btn.textContent = "Se connecter";
     }
