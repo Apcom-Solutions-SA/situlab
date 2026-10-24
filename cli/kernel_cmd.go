@@ -114,9 +114,9 @@ func cmdKernel() *cobra.Command {
 	}
 
 	cat := &cobra.Command{
-		Use: "cat [nom]", Short: "Contenu du fichier d'OUVERTURE (lu sur le poste — utile via le pont SafeRoom)", Args: cobra.MaximumNArgs(1),
+		Use: "cat [nom]", Short: "Contenu du fichier d'OUVERTURE (lu sur le poste)", Args: cobra.MaximumNArgs(1),
 		Long: "Imprime le CONTENU du fichier d'ouverture (celui que « kernel open » désigne). Pensé pour un\n" +
-			"agent qui ne partage pas le disque du poste (SafeRoom) : il reçoit le contenu, pas un chemin\n" +
+			"agent qui ne partage pas forcément le disque du poste : il reçoit le contenu, pas un chemin\n" +
 			"illisible chez lui. Lecture seule, sans PIN.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			k, err := resolveKernelArg(args)

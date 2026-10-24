@@ -6,6 +6,87 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : SemVer.
 > (voir « Historique antérieur ») : il traçait les allers-retours de conception, sans valeur pour le
 > lecteur. Les versions récentes restent détaillées.
 
+## [1.17.0] — Agent IA en menu principal, Réglages réorganisés, fenêtre PIN avec compte à rebours
+
+### Ajouté
+- **Agent IA — entrée du menu principal** : sorti des Réglages, il a sa propre page. Deux temps :
+  la **fiche de collaboration AGENTS.md administrée « à la source »** (copie canonique dans le dossier
+  de configuration, qui **survit aux mises à jour**) et **brancher son agent** (CLI/MCP). Boucle
+  d'état : fiche absente → « Enregistrer à la source » ; présente → chemin exact à donner à l'agent.
+- **Réglages — onglet « Aide »** : le guide SituLab est désormais accessible dans les Réglages (il
+  quitte le menu latéral), avec relance de la visite guidée.
+- **Fenêtre PIN — compte à rebours visible** : on voit le temps restant pour valider ; à l'expiration,
+  la fenêtre bascule proprement en « délai écoulé » au lieu de rester figée.
+- **Sauvegardes — suivi visuel permanent** : un indicateur flottant (sur toutes les vues) montre la
+  sauvegarde en cours (plan + dépôt i/n), puis ✓/⚠/✕ ; à la fermeture, un écran plein « ne forcez pas la
+  fermeture » s'affiche pendant les sauvegardes de fin, la fenêtre se ferme ensuite toute seule.
+- **Sauvegardes — rétention** : choisir d'**écraser** le précédent (0/1/2/3 archives rangées dans un
+  sous-dossier `archive/`, les trop anciennes purgées automatiquement) ou de **tout conserver**
+  (cumulatif, avec un avertissement : le cloud s'alourdit). Tracé au Journal par dépôt.
+- **Confirmation de suppression partout** : toute suppression ouvre un dialogue soigné et cohérent qui
+  énonce clairement les conséquences (ce qui est supprimé, ce qui n'est **pas** touché) avant d'agir —
+  sur 100 % des actions de suppression (connexions, plans, projets, KERNEL, spokes, dépôts, branches…).
+
+### Modifié
+- **Réglages — « À propos »** : les onglets « Versions » et « Licence » fusionnent en un seul.
+- **Réglages — connexions git & cloud** : cartes refondues avec **logo de marque** (GitHub, Forgejo,
+  Nextcloud, kDrive) et **pastille d'état reprise du header** (Connectée / Déconnectée / Joignable…),
+  même présentation des deux côtés.
+- **Agent IA** : renommé (ex-« Assistant IA »), picto robot (celui des accès IA cloud).
+- **Sauvegardes sans PIN** : une sauvegarde est une routine additive — elle ne demande plus le PIN et
+  se fait à l'ouverture, à la fermeture ou sur action manuelle (les routines automatiques ne sont plus
+  silencieusement ignorées quand le cloud exigeait un PIN).
+- **« Effacer mes données »** : boucle vérifiée et complète (toutes connexions git **et** cloud, fiche
+  AGENTS.md à la source explicitement effacée, classement, trousseau, coffre OS, WebView2, localStorage).
+- **Module « Git avancé » cohérent** : le panneau git du détail projet (matrice des branches, rebase,
+  worktrees, réglages de dépôt) ne s'affiche que si le module est actif — comme le détail de dépôt.
+- **Message de première connexion** réécrit : direct, sans formules superflues ; il pointe vers la
+  fiche à la source.
+- **Mode lecture seule** : la bascule reflète l'état **autoritaire** du cœur (plus le cache), et en cas
+  de doute affiche le côté sûr (coché).
+- **Agent IA — tableau de bord** : la page passe en cartes (Fiche AGENTS.md / Brancher mon agent
+  côte à côte ; la configuration n'apparaît qu'après le choix du type d'agent) — peu de scroll au repos.
+  L'étape « Déposer la fiche » du flux agent, redondante avec la carte Fiche, est retirée.
+- **Suppressions — corbeilles discrètes** : dans toutes les listes et cartes (connexions git & cloud,
+  jetons, utilisateurs, projets, branches, worktrees, vitrines, KERNEL, spokes, plans de sauvegarde,
+  fichiers CORPUS), l'action « supprimer / retirer » devient une petite icône corbeille (intitulé en
+  info-bulle) au lieu d'un lien texte — rangées d'actions plus lisibles.
+
+### Performance
+- **Démarrage** : première peinture **immédiate** — plus d'enchaînement d'appels réseau (Whoami, santé
+  cloud, Doctor) avant le premier rendu ; l'enrichissement se fait en arrière-plan.
+- **Affichage des dépôts** : le dernier tag d'une vitrine est lu **sans paginer** tout l'historique des
+  versions (nouvel appel ciblé) ; **santé des clouds testée en parallèle** (un cloud lent ne bloque
+  plus les autres) ; sonde « en ligne » périodique restreinte aux vues qui en dépendent.
+- **Délai de la fenêtre PIN** : une **source unique** (plus de « 120 s » recopié en dur) ; l'indice CLI
+  porte le délai max, parsable en `--output json` pour une boucle d'agent nette.
+
+### Corrigé
+- **BACKUP — tunnel de création** : choisir un dépôt ciblé ou un dossier cloud n'écrase plus le tunnel ;
+  le plan est enfin créé (`SaveBackupPlan` atteint).
+- **Instantanéité git** : un geste local (branche créée/basculée/fusionnée/supprimée) se reflète tout de
+  suite dans la colonne « Local » ; rapatriement best-effort des refs distantes à l'ouverture d'un projet.
+- **Sauvegarde manuelle — fenêtre PIN figée** : après un PIN accepté, la fenêtre de confirmation restait
+  ouverte (elle ne se fermait pas). Corrigé **au centre** (toute action confirmée par PIN ferme désormais
+  sa fenêtre) ; « Sauvegarder maintenant » affiche aussi un état « en cours » puis le résultat.
+- **Santé cloud** : résultat mutualisé quelques secondes (cache court) — plusieurs vues qui la
+  demandaient coup sur coup (pastilles + CORPUS + Réglages) ne refont plus le test réseau à chaque fois.
+- **Sauvegarde — succès/échecs/pannes remontent de bout en bout** : vérification de chaque envoi (le
+  fichier est confirmé présent et non vide sur le cloud ; un 2xx sans persistance devient un échec franc),
+  détection d'une panne cloud avant de commencer, création de dossier qui remonte les vraies erreurs,
+  Journal enrichi (destination + dépôts réussis + échecs détaillés) et état de la dernière exécution
+  (✓ / ⚠ / ✕) sur chaque carte de plan.
+
+### Retiré
+- **OS de travail « SafeRoom » (WSL)** : fonction expérimentale (ALPHA) **abandonnée** et **entièrement
+  retirée** — code (box WSL, pont `situlab-bridge`, terminal xterm), entrée de menu, onglet Réglages et
+  documentation associée (SECURITY.md). L'assistance IA passe par l'**Agent IA** (CLI/MCP) et la fiche
+  AGENTS.md.
+
+### Connu / différé
+- Le champ de configuration **SignMode** reste non lu en production (mode de signature non
+  sélectionnable) — à câbler ultérieurement. Cache des tags/branches par dépôt : différé.
+
 ## [1.16.4] — Réglages allégés, SafeRoom au premier plan, flux git plus complet
 
 ### Ajouté

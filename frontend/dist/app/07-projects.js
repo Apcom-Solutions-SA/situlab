@@ -135,7 +135,7 @@ function projectGraphCard(b, idx) {
   return `<div class="pboard">
     <div class="pboard-h">
       <div class="pboard-ttl">${ico}<b class="pboard-name">${esc(b.name)}</b> <span class="muted">${esc(atl.owner)}/${esc(atl.repo)}</span></div>
-      <div class="pbc-act">${syncBtn}${publishBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">modifier</button><button class="lnk danger" data-delproj="${esc(b.name)}" title="Retirer ce lien de projet (aucun dépôt n'est supprimé)">supprimer</button></div>
+      <div class="pbc-act">${syncBtn}${publishBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">modifier</button><button class="icon-del" data-delproj="${esc(b.name)}" title="Retirer ce projet (aucun dépôt n'est supprimé)" aria-label="Retirer le projet « ${esc(b.name)} »">${ICO_TRASH}</button></div>
     </div>
     <div class="pgraph" id="pg-${idx}"><div class="skeleton"></div></div>
   </div>`;
@@ -386,10 +386,15 @@ function bindProjectBoard(boards) {
     }
     const dp = ev.target.closest("[data-delproj]");
     if (dp) {
-      openModal("Supprimer ce projet ?", `<div class="field"><div class="callout warn">Le lien « ${esc(dp.dataset.delproj)} » est retiré. Aucun dépôt n'est touché.</div></div>`, async () => {
-        try { await App().RemoveProject(dp.dataset.delproj); closeModal(); toast("Projet supprimé", "ok"); state.view = "projects"; renderProjects(); } catch (e) { toast(cleanErr(e), "err"); }
+      const nm = dp.dataset.delproj;
+      confirmDelete({
+        title: `Supprimer le projet « ${esc(nm)} » ?`,
+        lead: `Le projet <b>${esc(nm)}</b> (le regroupement local ↔ atelier ↔ vitrine) sera retiré de SituLab.`,
+        items: ["Le lien de projet et son organisation (icône, atelier, vitrines)"],
+        safe: ["Aucun dépôt n'est supprimé — ni en local, ni sur les serveurs", "Vos clones et votre travail restent intacts"],
+        confirmLabel: "Supprimer le projet",
+        onConfirm: async () => { await App().RemoveProject(nm); toast("Projet supprimé", "ok"); state.view = "projects"; renderProjects(); },
       });
-      el("modal-ok").textContent = "Supprimer"; el("modal-ok").classList.add("danger-btn");
     }
   };
 }
@@ -632,7 +637,7 @@ function remoteBranchRowHTML(br, g, which) {
   const isDefault = g.def ? br.name === g.def : (br.name === "main" || br.name === "master");
   const tag = isDefault ? `<span class="gp-badge" title="branche par défaut — protégée">par défaut</span>` : "";
   const del = (which === "atelier" && !isDefault)
-    ? `<button class="lnk danger" data-gprdel="${esc(br.name)}" data-inst="${esc(g.t.instance)}" data-owner="${esc(g.t.owner)}" data-repo="${esc(g.t.repo)}" data-scope="atelier">supprimer</button>`
+    ? `<button class="icon-del" data-gprdel="${esc(br.name)}" data-inst="${esc(g.t.instance)}" data-owner="${esc(g.t.owner)}" data-repo="${esc(g.t.repo)}" data-scope="atelier" title="Supprimer la branche distante « ${esc(br.name)} »" aria-label="Supprimer la branche distante « ${esc(br.name)} »">${ICO_TRASH}</button>`
     : "";
   const date = (br.commit_date || "").slice(0, 10);
   const ver = gpVerChip((g.tags && br.commit_sha) ? g.tags[br.commit_sha] : "", 0, true);
@@ -705,7 +710,7 @@ function branchRowHTML(br, vitrine) {
     <button class="lnk" data-gpswitch="${esc(br.name)}">basculer</button>
     <button class="lnk" data-gpmerge="${esc(br.name)}" title="fusionner « ${esc(br.name)} » dans la branche courante">fusionner ici</button>
     <button class="lnk" data-gprebase="${esc(br.name)}" title="rebaser la branche courante sur « ${esc(br.name)} » (historique linéaire)">rebaser ici</button>
-    <button class="lnk danger" data-gpdel="${esc(br.name)}" data-merged="${br.merged ? "1" : "0"}" data-atelier="${br.has_remote ? "1" : "0"}" data-vitrine="${esc(vitrine)}" data-ahead="${br.ahead || 0}">supprimer</button>`;
+    <button class="icon-del" data-gpdel="${esc(br.name)}" data-merged="${br.merged ? "1" : "0"}" data-atelier="${br.has_remote ? "1" : "0"}" data-vitrine="${esc(vitrine)}" data-ahead="${br.ahead || 0}" title="Supprimer la branche « ${esc(br.name)} »" aria-label="Supprimer la branche « ${esc(br.name)} »">${ICO_TRASH}</button>`;
   return `<div class="gp-row">
     <div class="gp-row-main">${scope}<span class="gp-bname">⎇ ${esc(br.name)}</span> ${ver}${cur}${badge}</div>
     <div class="gp-row-bits">${bits.join(" ")}${br.author ? ` <small class="muted">· ${esc(br.author)}</small>` : ""}</div>
@@ -718,7 +723,7 @@ function worktreeRowHTML(w) {
   const main = w.main ? `<span class="gp-badge">principal</span>` : "";
   const lock = w.locked ? `<span class="gp-badge" title="worktree verrouillé">🔒</span>` : "";
   const br = w.branch ? `⎇ ${esc(w.branch)}` : (w.detached ? "<span class='muted'>(détaché)</span>" : (w.bare ? "<span class='muted'>(nu)</span>" : ""));
-  const rm = w.main ? "" : `<button class="lnk danger" data-gpwtrm="${esc(w.path)}" title="retirer ce worktree (son dossier sera supprimé)">retirer</button>`;
+  const rm = w.main ? "" : `<button class="icon-del" data-gpwtrm="${esc(w.path)}" title="Retirer ce worktree (son dossier sera supprimé)" aria-label="Retirer ce worktree">${ICO_TRASH}</button>`;
   return `<div class="gp-row">
     <div class="gp-row-main"><span class="gp-wfolder" title="${esc(w.path)}">📁 ${esc(folderOf(w.path))}</span> ${main}${lock}</div>
     <div class="gp-row-bits">${br}</div>
@@ -1146,12 +1151,17 @@ function tagProjectModal(name, current, allTags) {
 async function renderProject(name) {
   if (!name) { state.view = "projects"; return renderProjects(); }
   state.projSig = "";
+  // Le « Panneau git » (matrice des branches, rebase, worktrees, réglages de dépôt) est la surface
+  // AVANCÉE : on ne l'affiche que si le module « Git avancé » est actif — cohérent avec le détail de
+  // dépôt (06-detail) qui masque déjà « Git local » et « Réglages » hors mode avancé (v1.17, besoin #3).
+  // Le tableau du projet (promouvoir, synchroniser) reste, lui, toujours accessible : c'est l'essentiel.
+  const adv = state.advanced && !state.readOnly;
   el("view").innerHTML = `<div class="view-head view-head-row">
       <div><button class="btn btn-ghost btn-sm" id="proj-back">‹ Dépôts git</button>
       <div class="view-title" style="margin-top:6px">${esc(name)}</div></div></div>
     <div id="proj-board"><div class="skeleton"></div></div>
-    <div class="gp-head">🔧 Panneau git</div>
-    <div id="proj-gitpanel"><div class="skeleton"></div></div>`;
+    ${adv ? `<div class="gp-head">🔧 Panneau git</div>
+    <div id="proj-gitpanel"><div class="skeleton"></div></div>` : ""}`;
   el("proj-back").onclick = () => { state.view = "projects"; render(); };
   let b;
   try { b = await App().ProjectBoardOne(name); }
@@ -1163,13 +1173,45 @@ async function renderProject(name) {
     fillProjectGraph(b, 0);
   }
   const gp = el("proj-gitpanel");
-  if (gp) {
+  if (gp && adv) {
     gp.innerHTML = gitPanelHTML(b);
     // Panneau à onglets (1.9.10) : fonctionne même SANS clone (les onglets distants lisent par API). On
     // re-remplit l'onglet COURANT après un geste + le graphe au-dessus (local : BranchMatrix sans réseau).
-    bindGitPanel(b, () => { fillGitTab(b); fillProjectGraph(b, 0); });
+    bindGitPanel(b, () => reloadProjectGit(b));
     fillGitTab(b);
   }
+  // Instantanéité (1.17, Point 3) : rapatriement best-effort des refs distantes À L'OUVERTURE, pour que
+  // la présence « atelier/vitrine » des branches (pastilles) soit à jour sans geste serveur ni retour au
+  // menu. Non bloquant : l'état local est déjà peint ; dès que le fetch revient, on repeint le graphe —
+  // mais seulement si on est toujours sur CE projet (sinon la vue a changé, on ne touche à rien).
+  if (b.local && b.local.path && b.atelier && b.atelier.instance) {
+    App().Fetch(b.atelier.instance, b.local.path)
+      .then(() => { if (state.view === "project" && state.projectName === name) fillProjectGraph(b, 0); })
+      .catch(() => {});
+  }
+}
+
+// reloadProjectGit : recharge l'affichage git d'un projet APRÈS un geste local (créer/basculer/
+// fusionner/supprimer une branche…). L'instantanéité (Point 3) : on ré-interroge le clone (LocalDetail,
+// lecture disque, sans réseau) et on recopie l'état frais dans b.local — avance/retard, propreté,
+// branche, description — pour que la colonne « Local » reflète le geste TOUT DE SUITE ; puis on repeint
+// l'onglet et le graphe (fillProjectGraph relit lui-même la matrice des branches à jour).
+async function reloadProjectGit(b) {
+  if (b && b.local && b.local.path) {
+    try {
+      const d = await App().LocalDetail(b.local.path);
+      if (d && d.is_repo) {
+        b.local.branch = d.branch;
+        b.local.clean = d.clean;
+        b.local.ahead = d.ahead;
+        b.local.behind = d.behind;
+        b.local.changed = (d.changed || []).length;
+        b.local.describe = d.describe;
+      }
+    } catch (e) { /* best-effort : on repeint quand même avec l'état connu */ }
+  }
+  fillGitTab(b);
+  fillProjectGraph(b, 0);
 }
 
 // Cache des dépôts accessibles par connexion (évite de recharger à chaque changement).
@@ -1376,7 +1418,7 @@ function editProjectModal(b, opts) {
 
   function draw() {
     const prodRows = E.productions.length
-      ? E.productions.map((p, i) => `<div class="ep-slot"><span class="role-badge role-production">VITRINE</span> ${esc(p.owner + "/" + p.repo)} <span class="muted">(${esc(p.instance)})</span> <button type="button" class="lnk danger" data-rmprod="${i}">retirer</button></div>`).join("")
+      ? E.productions.map((p, i) => `<div class="ep-slot"><span class="role-badge role-production">VITRINE</span> ${esc(p.owner + "/" + p.repo)} <span class="muted">(${esc(p.instance)})</span> <button type="button" class="icon-del" data-rmprod="${i}" title="Retirer cette vitrine" aria-label="Retirer cette vitrine">${ICO_TRASH}</button></div>`).join("")
       : `<div class="muted">Aucune vitrine — projet <b>local + atelier</b>.</div>`;
     el("ep-body").innerHTML = `
       <label>Nom du projet</label><input id="ep-name" class="inp" value="${esc(E.name)}" />

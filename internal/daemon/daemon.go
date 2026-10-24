@@ -1014,19 +1014,10 @@ func (d *Daemon) dispatch(op string, a Args) (any, error) {
 	case OpBackupRemove:
 		return nil, d.svc.RemoveBackupPlan(a.Name)
 	case OpBackupRun:
-		cloud := ""
-		for _, b := range d.svc.Backups() {
-			if strings.EqualFold(b.Name, a.Name) {
-				cloud = b.Cloud
-				break
-			}
-		}
-		a.Cloud = cloud
-		pin, err := d.gateCloud(OpCloudWrite, a, "Autoriser la sauvegarde « "+a.Name+" » vers le cloud")
-		if err != nil {
-			return nil, err
-		}
-		out, rerr := d.svc.RunBackup(a.Name, pin)
+		// Pas de fenêtre PIN pour une sauvegarde : c'est une routine additive (copie vers le cloud de
+		// l'utilisateur) qui doit se faire toute seule. RunBackup autorise via authorizeBackupCloud
+		// (session déverrouillée + hors lecture seule, sans PIN).
+		out, rerr := d.svc.RunBackup(a.Name)
 		return mapStrErr("path", out, rerr)
 
 	// --- KERNEL (v1.11) : la mémoire, lisible ---

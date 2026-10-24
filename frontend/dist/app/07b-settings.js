@@ -3,17 +3,21 @@ async function renderSettings() {
   const zoom = readZoom();
   const mods = state.modules || {};
   const MODULE_GROUPS = [
-    { k: "agents", label: "Accès IA (agents)", d: "Assistant IA et configuration CLI/MCP." },
+    { k: "agents", label: "Accès IA (agents)", d: "Agent IA et configuration CLI/MCP." },
     { k: "git_advanced", label: "Git avancé", d: "Étapes git séparées, matrice des branches, outils git locaux, réglages de dépôt." },
     { k: "spokes", label: "SPOKES", d: "Le menu des projections de mission." },
     { k: "corpus", label: "CORPUS (clouds)", d: "Le menu des clouds de fichiers souverains." },
     { k: "backup", label: "BACKUP", d: "Le menu des sauvegardes git → cloud." },
   ];
-  const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions git"], ["cloud", "☁ Connexions cloud"], ["app", "🎨 Apparence"], ["modules", "🧩 Modules"]]
-    .concat(mods.agents === false ? [] : [["ia", "🤖 Assistant IA"]])
-    .concat([["osbox", "🖥 OS de travail"], ["diag", "🩺 Diagnostic"], ["ver", "🏷️ Versions"], ["lic", "⚖️ Licence"]]);
+  // « Agent IA » est sorti des Réglages (v1.17) → entrée du menu principal (voir renderAssistantIA).
+  // « Aide » est entrée dans les Réglages (v1.17) → onglet ci-dessous, à la place de l'entrée de menu.
+  const navItems = [["secu", "🔒 Compte & sécurité"], ["conn", "🔗 Connexions git"], ["cloud", "☁ Connexions cloud"], ["app", "🎨 Apparence"], ["modules", "🧩 Modules"],
+    ["diag", "🩺 Diagnostic"], ["help", "❓ Aide"], ["about", "ℹ️ À propos"]];
   let setTab = "secu";
   try { setTab = localStorage.getItem("situlab.settab") || "secu"; } catch (_) {}
+  // Garde-fou : un onglet mémorisé qui n'existe plus (ex. « osbox » retiré en 1.17) laisserait la page
+  // vide → on retombe sur « secu ».
+  if (!navItems.some(([k]) => k === setTab)) setTab = "secu";
   // Une pastille de santé (ou un lien) peut demander à ouvrir un onglet précis des Réglages.
   if (state.settabTarget) { setTab = state.settabTarget; state.settabTarget = null; }
   el("view").innerHTML = `
@@ -80,25 +84,12 @@ async function renderSettings() {
         <span class="switch"><input type="checkbox" data-mod="${g.k}" ${mods[g.k] !== false ? "checked" : ""} /><span class="track"></span></span></label>`).join("")}</div>
     </section>
 
-    <section class="set-sec set-panel" data-panel="ia"><div class="set-sec-h">🤖 Assistant IA</div>
-      <div class="set-sec-d">SituLab est la porte de votre IA vers vos dépôts, clouds et sauvegardes — elle prépare, vous validez. Réglez ici comment elle vous assiste.</div>
-      <div class="ia-cards">
-        <div class="ia-card">
-          <div class="ia-card-h">🗺 Carte de contextualisation</div>
-          <div class="ia-card-d">Le fichier <code>AGENTS.md</code> : la carte que votre IA lit au démarrage pour piloter SituLab. Déposez-le près de vos dépôts.</div>
-          <div class="ia-card-act"><button class="btn btn-ghost btn-sm" id="agents-view">Consulter</button><button class="btn btn-ghost btn-sm" id="agent-deposit">Déposer dans un dossier…</button></div>
-        </div>
-        <div class="ia-card">
-          <div class="ia-card-h">⚙ Brancher mon agent</div>
-          <div class="ia-card-d">Message de première connexion + configuration MCP (Cursor, Claude Desktop…) prêts à coller.</div>
-          <div class="ia-card-act"><button class="btn btn-primary btn-sm" id="agent-config">Configurer mon agent IA</button></div>
-        </div>
+    <section class="set-sec set-panel" data-panel="help"><div class="set-sec-h">❓ Aide — le guide SituLab</div>
+      <div class="set-sec-d">Toute la documentation, pour vous comme pour vos agents. Vous pouvez aussi rejouer la visite guidée.</div>
+      <div class="set-actions-row" style="margin-top:0;border-top:none;padding-top:0">
+        <button class="btn btn-ghost btn-sm" id="help-replay-tour">↺ Rejouer la visite guidée</button>
       </div>
-    </section>
-
-    <section class="set-sec set-panel" data-panel="osbox"><div class="set-sec-h">🖥 OS de travail séparé <span class="pill alpha-pill" title="Fonction expérimentale — aucune sécurité garantie">ALPHA</span></div>
-      <div class="callout warn" style="margin-bottom:10px">⚠ <b>ALPHA — aucune sécurité garantie.</b> La cage WSL n'est <b>pas étanche</b> et l'agent y tourne en <b>root</b> : il peut, s'il le décide, contourner l'isolation (remonter le disque hôte, réactiver l'interop Windows). La <b>seule garantie forte</b> reste que la box <b>ne détient aucune clé</b> — toute action distante passe par SituLab (PIN sur ce poste). <b>N'y placez aucun secret.</b></div>
-      <div id="osbox-panel"><div class="skeleton"></div></div>
+      <div class="doc" id="set-doc" style="margin-top:12px"><div class="skeleton"></div></div>
     </section>
 
     <section class="set-sec set-panel" data-panel="diag"><div class="set-sec-h">🩺 Diagnostic</div>
@@ -106,14 +97,13 @@ async function renderSettings() {
       <div id="diag-creds"><div class="muted">Vérification…</div></div>
     </section>
 
-    <section class="set-sec set-panel" data-panel="ver"><div class="set-sec-h">🏷️ Versions</div>
+    <section class="set-sec set-panel" data-panel="about"><div class="set-sec-h">ℹ️ À propos</div>
+      <div class="set-sub-h">Version</div>
       <div class="set-row"><div class="set-row-l">Version installée <b id="app-ver">…</b></div>
         <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-check">Vérifier les mises à jour ↗</button></div></div>
       <div class="set-row"><div class="set-row-l">Téléchargements (votre OS)</div>
         <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-site">situememoring.com ↗</button><button class="btn btn-ghost btn-sm" id="ver-gh">GitHub ↗</button></div></div>
-    </section>
-
-    <section class="set-sec set-panel" data-panel="lic"><div class="set-sec-h">⚖️ Licence</div>
+      <div class="set-sub-h" style="margin-top:16px">Licence</div>
       <div class="set-sec-d">SituLab — logiciel libre sous licence <b>Apache-2.0</b>. © 2026 <b>APCOM Solutions SA</b>. La marque « SituLab » n'est pas couverte par la licence.</div>
       <div class="set-row-c" style="justify-content:flex-start"><button class="btn btn-ghost btn-sm" id="lic-show">Texte de la licence</button><button class="btn btn-ghost btn-sm" id="notice-show">NOTICE</button></div>
     </section>
@@ -132,9 +122,12 @@ async function renderSettings() {
     document.querySelectorAll(".set-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== k));
     document.querySelectorAll(".set-navbtn").forEach((b) => b.classList.toggle("active", b.dataset.settab === k));
     try { localStorage.setItem("situlab.settab", k); } catch (_) {}
-    // Chargement PARESSEUX de l'OS de travail (OSBoxStatus interroge wsl.exe : on n'en paie le coût
-    // que si l'onglet est réellement ouvert).
-    if (k === "osbox" && el("osbox-panel") && typeof renderOSBoxPanel === "function") renderOSBoxPanel();
+    // Chargement paresseux de l'Aide (le guide AGENTS.md) : seulement quand l'onglet est ouvert.
+    if (k === "help" && el("set-doc") && !el("set-doc").dataset.loaded) {
+      el("set-doc").dataset.loaded = "1";
+      App().Doc().then((d) => { const n = el("set-doc"); if (n) n.innerHTML = (typeof mdToHtml === "function" ? mdToHtml : mdToHTML)(d); })
+        .catch((e) => { const n = el("set-doc"); if (n) n.innerHTML = surfaceError("Documentation indisponible", cleanErr(e), null); });
+    }
   };
   document.querySelectorAll(".set-navbtn").forEach((b) => b.onclick = () => showTab(b.dataset.settab));
   showTab(setTab);
@@ -144,8 +137,8 @@ async function renderSettings() {
   // Chapitre « Connexions cloud » : liste + admin (réutilise les tunnels CORPUS avec retour Réglages).
   renderSettingsClouds();
   if (el("sc-add-cloud")) el("sc-add-cloud").onclick = () => addCloudModal(renderSettings);
-  const agv = el("agents-view");
-  if (agv) agv.onclick = async () => { try { infoModal("AGENTS.md", `<div class="md-render" style="max-height:60vh;overflow:auto">${mdToHTML(await App().Doc())}</div>`); } catch (_) {} };
+  // Onglet Aide : rejouer la visite guidée (le guide se charge paresseusement via showTab).
+  if (el("help-replay-tour")) el("help-replay-tour").onclick = () => { navTo("kernel"); setTimeout(() => startTour(true), 350); };
 
   document.querySelectorAll("[data-th]").forEach((b) => b.onclick = () => { writeTheme(b.dataset.th); applyTheme(b.dataset.th); renderSettings(); });
   document.querySelectorAll("[data-zoom]").forEach((b) => b.onclick = () => { writeZoom(b.dataset.zoom); applyZoom(b.dataset.zoom); renderSettings(); });
@@ -190,8 +183,13 @@ async function renderSettings() {
       const reconBtn = dc ? `<button class="btn btn-primary btn-sm" data-recon="${esc(i.name)}">Reconnecter</button>` : "";
       // Jetons : pour toute connexion. Utilisateurs : seulement Forgejo/Gitea (pas GitHub).
       const usrBtn = i.provider === "github" ? "" : `<button class="lnk" data-usr="${esc(i.name)}">utilisateurs</button>`;
-      return `<div class="srow${dc ? " srow-disc" : ""}"><div>${i.default ? "★ " : ""}<b>${esc(i.name)}</b> ${badge} <span class="muted">${esc(i.url)}</span> ${pill}</div>
-      <div class="srow-act">${reconBtn}<button class="lnk" data-tok="${esc(i.name)}">jetons</button>${usrBtn}<button class="lnk" data-pol="${esc(i.name)}">rôle &amp; PIN</button>${i.default ? "" : `<button class="lnk" data-def="${esc(i.name)}">défaut</button>`}<button class="lnk danger" data-del="${esc(i.name)}">supprimer</button></div></div>`;
+      void pill;
+      const statusPill = h === "auth" ? connStatus("ko", "Déconnectée") : h === "net" ? connStatus("warn", "Hors ligne") : connStatus("ok", "Connectée");
+      return `<div class="conn-card${dc ? " conn-card-disc" : ""}">
+        <div class="conn-left">${connLogo(i.provider)}
+          <div class="conn-main"><div class="conn-id">${i.default ? "★ " : ""}<b>${esc(i.name)}</b> ${badge} ${statusPill}</div>
+            <div class="conn-meta">${esc(i.url)}</div></div></div>
+        <div class="conn-acts">${reconBtn}<button class="lnk" data-tok="${esc(i.name)}">jetons</button>${usrBtn}<button class="lnk" data-pol="${esc(i.name)}">rôle &amp; PIN</button>${i.default ? "" : `<button class="lnk" data-def="${esc(i.name)}">défaut</button>`}<button class="icon-del" data-del="${esc(i.name)}" title="Supprimer la connexion « ${esc(i.name)} »" aria-label="Supprimer la connexion « ${esc(i.name)} »">${ICO_TRASH}</button></div></div>`;
     }).join("");
     el("inst-list").onclick = async (ev) => {
       const def = ev.target.closest("[data-def]"), del = ev.target.closest("[data-del]"), recon = ev.target.closest("[data-recon]"), pol = ev.target.closest("[data-pol]");
@@ -204,10 +202,14 @@ async function renderSettings() {
       if (def) { try { await App().SetDefaultInstance(def.dataset.def); toast("Instance par défaut mise à jour", "ok"); renderSettings(); } catch (e) { toast(cleanErr(e), "err"); } }
       if (del) {
         const nm = del.dataset.del;
-        openModal("Supprimer cette connexion ?", `<div class="field"><div class="callout warn">Vous retirez « ${esc(nm)} » et l'accès chiffré que SituLab garde pour ce serveur. Vos dépôts et fichiers sur le poste ne sont pas touchés, mais pour revenir il faudra vous reconnecter (identifiant + mot de passe + code 2FA).</div></div>`, async () => {
-          try { await App().RemoveInstance(nm); closeModal(); toast("Connexion supprimée", "ok"); location.reload(); } catch (e) { toast(cleanErr(e), "err"); }
+        confirmDelete({
+          title: `Supprimer la connexion « ${esc(nm)} » ?`,
+          lead: `La connexion git <b>${esc(nm)}</b> et l'accès chiffré que SituLab garde pour ce serveur seront retirés de ce poste.`,
+          items: ["La connexion et son jeton chiffré (trousseau + coffre OS)"],
+          safe: ["Vos dépôts et fichiers déjà clonés sur le poste restent intacts", "Le serveur git distant n'est pas touché"],
+          confirmLabel: "Supprimer la connexion",
+          onConfirm: async () => { await App().RemoveInstance(nm); toast("Connexion supprimée", "ok"); location.reload(); },
         });
-        el("modal-ok").textContent = "Supprimer"; el("modal-ok").classList.add("danger-btn");
       }
     };
   } catch (e) { el("inst-list").innerHTML = surfaceError("Lecture impossible", cleanErr(e), null); }
@@ -244,7 +246,13 @@ async function renderSettings() {
     }
     const ro = el("read-only");
     if (ro) {
-      ro.checked = !!state.readOnly;
+      // Fail-closed (besoin #5) : on reflète l'état AUTORITAIRE du cœur (pas le cache d'interface), lu à
+      // frais à l'ouverture des Réglages ; en cas de doute (erreur de lecture) on affiche le côté SÛR —
+      // lecture seule cochée — plutôt que de laisser croire, à tort, que les écritures sont ouvertes.
+      let roState = !!state.readOnly;
+      try { roState = await App().ReadOnly(); } catch (e) { roState = true; }
+      state.readOnly = roState;
+      ro.checked = roState;
       ro.onchange = async () => {
         try {
           await App().SetReadOnly(ro.checked);
@@ -256,9 +264,6 @@ async function renderSettings() {
     }
     const pd = el("purge-data");
     if (pd) pd.onclick = purgeDataModal;
-    // Assistant IA : dépôt de la carte de contextualisation + configuration de l'agent.
-    if (el("agent-deposit")) el("agent-deposit").onclick = installDirectives;
-    if (el("agent-config")) el("agent-config").onclick = aiAgentModal;
   } catch (e) {}
   renderDiagnostic();
 }
@@ -300,13 +305,16 @@ async function renderSettingsClouds() {
   if (!clouds.length) { box.innerHTML = `<div class="muted">Aucun cloud connecté. Branchez un Nextcloud ou un kDrive pour porter votre CORPUS.</div>`; return; }
   // Santé best-effort (peut être indisponible si session verrouillée).
   let health = {};
-  try { (await App().CloudHealth() || []).forEach((h) => { health[h.name] = h; }); } catch (_) {}
+  try { (await cloudHealthCached() || []).forEach((h) => { health[h.name] = h; }); } catch (_) {}
   box.innerHTML = clouds.map((fc) => {
     const h = health[fc.name];
-    const pill = h ? (h.ok ? `<span class="pill ok-pill">joignable</span>` : `<span class="pill disc-pill">injoignable</span>`) : "";
+    const statusPill = h ? (h.ok ? connStatus("ok", "Joignable") : connStatus("ko", "Injoignable")) : connStatus("idle", "À vérifier");
     const nd = (fc.allowed_dirs || []).length;
-    return `<div class="srow"><div><b>${esc(fc.name)}</b> <span class="muted">${esc(fc.kind)} · ${esc(fc.url)}</span> ${pill} <span class="muted">— ${nd} dossier(s) ouvert(s) à l'IA</span></div>
-    <div class="srow-act"><button class="lnk" data-ai="${esc(fc.name)}">accès IA</button><button class="lnk" data-pin="${esc(fc.name)}">PIN</button><button class="lnk danger" data-del="${esc(fc.name)}">supprimer</button></div></div>`;
+    return `<div class="conn-card">
+      <div class="conn-left">${connLogo(fc.kind)}
+        <div class="conn-main"><div class="conn-id"><b>${esc(fc.name)}</b> <span class="conn-tag">${esc(fc.kind)}</span> ${statusPill}</div>
+          <div class="conn-meta">${esc(fc.url)} · ${nd} dossier(s) ouvert(s) à l'IA</div></div></div>
+      <div class="conn-acts"><button class="lnk" data-ai="${esc(fc.name)}">accès IA</button><button class="lnk" data-pin="${esc(fc.name)}">PIN</button><button class="icon-del" data-del="${esc(fc.name)}" title="Supprimer le cloud « ${esc(fc.name)} »" aria-label="Supprimer le cloud « ${esc(fc.name)} »">${ICO_TRASH}</button></div></div>`;
   }).join("");
   box.onclick = (ev) => {
     const ai = ev.target.closest("[data-ai]"), pin = ev.target.closest("[data-pin]"), del = ev.target.closest("[data-del]");

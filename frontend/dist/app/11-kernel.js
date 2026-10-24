@@ -45,7 +45,7 @@ async function renderKernel() {
       ? `<span class="run-pill" title="Fichier d'ouverture pour l'IA">📄 ${esc(run)}</span><button type="button" class="lnk" data-run="${i}">modifier</button>`
       : `<button type="button" class="lnk run-set" data-run="${i}">📄 Définir le fichier d'ouverture</button>`;
     return `<div class="desig-wrap">${classeurCardHTML(p)}
-      <div class="desig-meta">${runLink}<button type="button" class="lnk danger" data-remove="${esc(p.name)}">Retirer ce KERNEL</button></div>
+      <div class="desig-meta">${runLink}<button type="button" class="icon-del" data-remove="${esc(p.name)}" title="Retirer ce KERNEL" aria-label="Retirer ce KERNEL « ${esc(p.name)} »">${ICO_TRASH}</button></div>
     </div>`;
   }).join("")}</div>`;
   home.onclick = (ev) => {
@@ -65,13 +65,20 @@ async function renderKernel() {
   };
 }
 
-// removeKernelFlow : retire la DÉSIGNATION KERNEL (le dépôt n'est pas touché). Confirmation légère.
-function removeKernelFlow(name) {
-  openModal("Retirer ce KERNEL ?", `<div class="field"><div class="callout">« ${esc(name)} » ne sera plus marqué comme <b>KERNEL</b>. Le dépôt n'est <b>pas</b> touché (ni supprimé, ni dé-cloné) — il reste dans vos dépôts appairés.</div></div>`, async () => {
-    try { await App().RemoveKernel(name); closeModal(); toast("KERNEL retiré", "ok"); renderKernel(); }
-    catch (e) { if (isLocked(e)) return handleLock(); toast(cleanErr(e), "err"); }
+// removeKernelFlow : retire la DÉSIGNATION KERNEL (le dépôt n'est pas touché).
+function removeKernelFlow(name, onDone) {
+  confirmDelete({
+    title: `Retirer le KERNEL « ${esc(name)} » ?`,
+    lead: `« ${esc(name)} » ne sera plus <b>marqué comme KERNEL</b> dans SituLab.`,
+    items: ["La désignation KERNEL (marquage + fichier d'ouverture associé)"],
+    safe: ["Le dépôt n'est pas supprimé ni dé-cloné — il reste dans vos dépôts appairés", "Le contenu sur le disque et le serveur n'est pas touché"],
+    confirmLabel: "Retirer ce KERNEL",
+    onConfirm: async () => {
+      try { await App().RemoveKernel(name); } catch (e) { if (isLocked(e)) { handleLock(); return; } throw e; }
+      toast("KERNEL retiré", "ok");
+      (onDone || renderKernel)();
+    },
   });
-  el("modal-ok").textContent = "Retirer";
 }
 
 async function loadKernelStatus() {
@@ -173,12 +180,18 @@ async function renderKernelBackup() {
       <div class="kl-bk-main"><b>${esc(linked.name)}</b><span class="sub">→ ${esc(linked.cloud)}:${esc(linked.dest || "/")}</span>
       <span class="kl-bk-when">${linked.last_run ? "dernière : " + esc(fmtWhen(linked.last_run)) : "jamais exécutée"}</span></div>
       <button class="btn btn-primary btn-sm" id="kl-bk-run">Sauvegarder maintenant</button></div>`;
-    el("kl-bk-run").onclick = () => {
-      pinConfirm("Lancer la sauvegarde « " + linked.name + " » (bundle → cloud)", async (pin) => {
-        const out = await App().RunBackup(linked.name, pin);
-        toast("Sauvegardé : " + out, "ok");
-        renderKernelBackup();
-      });
+    el("kl-bk-run").onclick = async () => {
+      // Sauvegarde = routine additive, sans PIN (elle se fait). Rétro-compat RunBackup pour un plan ciblé.
+      if (state.readOnly) { toast("Mode lecture seule actif — désactivez-le pour sauvegarder", "err"); return; }
+      toast("Sauvegarde en cours…", "info");
+      try {
+        const out = await App().RunBackupPlan(linked.name).catch(async (e) => {
+          if (/introuvable|type/i.test(cleanErr(e))) return App().RunBackup(linked.name);
+          throw e;
+        });
+        toast("✓ " + (out || "Sauvegarde terminée"), /échec/i.test(String(out || "")) ? "info" : "ok");
+      } catch (e) { toast("Échec de la sauvegarde : " + cleanErr(e), "err"); }
+      renderKernelBackup();
     };
     return;
   }
@@ -317,7 +330,7 @@ function manageKernelModal(k) {
       <div class="inline-error hidden" id="kl-mge"></div>`;
     const sa = el("kl-setact");
     if (sa) sa.onclick = () => doKernel(() => App().SetActiveKernel(k.name), "KERNEL actif : " + k.name);
-    el("kl-remove").onclick = () => doKernel(() => App().RemoveKernel(k.name), "KERNEL retiré", true);
+    el("kl-remove").onclick = () => removeKernelFlow(k.name);
   }
   // Enregistrer le rattachement au clic sur Valider.
   el("modal-ok").textContent = "Enregistrer";

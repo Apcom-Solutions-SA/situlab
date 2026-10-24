@@ -163,7 +163,7 @@ async function renderTokens() {
     const mine = list.filter((t) => t.name !== active);
     const pillsOf = (t) => (t.scopes || []).length ? t.scopes.map((s) => `<span class="pill">${esc(scopeText(s))}</span>`).join(" ") : `<span class="muted">portée par défaut</span>`;
     const rows = mine.length ? mine.map((t) =>
-      `<div class="srow"><div><b>${esc(t.name)}</b> ${pillsOf(t)}</div><button class="lnk danger" data-del="${t.id}" data-name="${esc(t.name)}">supprimer${isSitulabToken(t.name) ? " (résidu)" : ""}</button></div>`
+      `<div class="srow"><div><b>${esc(t.name)}</b> ${pillsOf(t)}</div><button class="icon-del" data-del="${t.id}" data-name="${esc(t.name)}" title="Supprimer le jeton « ${esc(t.name)} »${isSitulabToken(t.name) ? " (résidu SituLab)" : ""}" aria-label="Supprimer le jeton">${ICO_TRASH}</button></div>`
     ).join("") : `<p class="muted">Aucun jeton pour relier d'autres outils. Créez-en un avec « Nouveau token ».</p>`;
     const sessBlock = sess
       ? `<div class="sess-token"><span class="sess-dot"></span><div><div class="sess-name">Jeton de session SituLab</div><div class="sess-sub">Créé et géré par SituLab pour cette connexion. Non modifiable ici — révocable uniquement depuis Forgejo, par un administrateur.</div></div></div>`
@@ -243,35 +243,102 @@ function iaTokenName() { return "IA-SituLab"; }
 // liste de dépôts ni de commandes imposées. On dit à l'IA où est l'outil, de lire la fiche
 // AGENTS.md (mode d'emploi + collaboration), de regarder l'état et de nous dire ce qu'elle en
 // pense. exe = chemin complet de l'exécutable (résout le « pas dans le PATH »). kind = "mcp" | "cli".
-function firstPromptText(kind, exe) {
+function firstPromptText(kind, exe, docPath) {
   exe = exe || "situlab";
   const launch = kind === "mcp"
-    ? "- Tu me pilotes SituLab via le serveur MCP « situlab » (ses outils apparaissent chez toi)."
-    : `- SituLab est installé ici : "${exe}". Lance-le en ligne de commande par ce chemin complet (il n'est pas forcément dans le PATH), par ex. "${exe}" --help.`;
+    ? "Tu me pilotes SituLab via le serveur MCP « situlab » (ses outils apparaissent chez toi)."
+    : `SituLab est installé ici : "${exe}". Appelle-le par ce chemin complet (il n'est pas forcément dans le PATH), ex. "${exe}" --help.`;
+  const fiche = docPath
+    ? `Lis d'abord ma fiche de collaboration : "${docPath}" — mode d'emploi de SituLab et notre façon de travailler.`
+    : "Lis d'abord le fichier AGENTS.md près de mes dépôts — mode d'emploi de SituLab et notre façon de travailler.";
   return [
-    "Salut ! On va travailler ensemble avec SituLab, mon utilitaire git. Le principe : toi tu prépares, moi je garde la main — je valide par mon PIN.",
+    "On va travailler ensemble avec SituLab, mon utilitaire git. Toi tu prépares, je garde la main : je valide par mon PIN quand c'est nécessaire.",
     "",
     launch,
-    "- Près de mes dépôts, tu trouveras un fichier AGENTS.md : c'est à la fois le mode d'emploi pour toi ET notre fiche de collaboration. Lis-le en premier.",
-    "- Puis liste mes KERNEL (situlab kernel list) et propose-moi d'en ouvrir un, ou regarde l'état de mes dépôts — et dis-moi ce que tu comprends.",
-    "- Règle d'or : ne me demande jamais mon PIN et ne cherche pas à le contourner. Rien ne part en ligne sans ma validation.",
-    "",
-    "Pour commencer : dis-moi ce que tu as compris de SituLab, et propose-moi ce qu'on pourrait noter dans AGENTS.md sur notre façon de travailler (tu peux l'enrichir au fil de l'eau).",
+    fiche,
+    "Puis regarde l'état de mes dépôts (ou « situlab kernel list ») et dis-moi ce que tu comprends.",
   ].join("\n");
 }
 
-// aiAgentModal : « faisons connaissance avec votre agent IA » (v1.4.2). L'utilisateur choisit son
-// type d'agent (terminal/CLI ou système/MCP) ; SituLab produit le prompt de première connexion
-// sur mesure, la config MCP à coller, et propose d'installer le guide AGENTS.md.
+// renderAssistantIA : vue de 1er niveau « Agent IA » (v1.17, besoin #1). Sortie des Réglages pour
+// devenir une entrée du menu principal. Deux temps clairs : (1) la fiche de collaboration AGENTS.md
+// administrée « à la source » (besoin #8), (2) brancher son agent (le choix CLI/MCP, inline ici).
+async function renderAssistantIA() {
+  // Tableau de bord à cartes (v1.17) : en-tête compact + deux cartes côte à côte (fiche AGENTS.md /
+  // brancher son agent). Le détail de configuration n'apparaît qu'en pleine largeur APRÈS le choix du
+  // type d'agent — au repos la page tient sans scroll vertical.
+  el("view").innerHTML = `
+    <div class="view-head"><div class="view-title">Agent IA</div></div>
+
+    <div class="ia-cards ia-dash">
+      <div class="ia-card">
+        <div class="ia-card-h">🗺 Fiche de collaboration</div>
+        <div class="ia-card-d"><code>AGENTS.md</code> : mode d'emploi + fiche de travail commune, gardée <b>à la source</b> (survit aux mises à jour).</div>
+        <div id="ia-doc-state" class="ia-card-fill"><div class="skeleton"></div></div>
+      </div>
+
+      <div class="ia-card">
+        <div class="ia-card-h">⚙ Brancher mon agent</div>
+        <div class="ia-card-d">Choisissez votre type d'agent — message de connexion (et config MCP) prêts à coller.</div>
+        <div class="ai-choice ai-choice-row">
+          <button type="button" class="ai-pick" data-k="cli"><span class="ai-pick-ic">🖥️</span><b>Agent en terminal</b><span class="sub">Claude Code, shell… commandes <code>situlab</code>.</span></button>
+          <button type="button" class="ai-pick" data-k="mcp"><span class="ai-pick-ic">🧩</span><b>Agent système (MCP)</b><span class="sub">Claude Desktop, Cursor… <code>situlab mcp</code>.</span></button>
+        </div>
+      </div>
+
+      <div class="ia-card ia-card-wide hidden" id="ai-out-card">
+        <div class="ia-card-h" id="ai-out-h">Configuration</div>
+        <div id="ai-out"></div>
+      </div>
+    </div>`;
+  document.querySelectorAll(".ai-pick").forEach((b) => b.onclick = () => {
+    const c = el("ai-out-card"); if (c) c.classList.remove("hidden");
+    const h = el("ai-out-h"); if (h) h.textContent = b.dataset.k === "mcp" ? "⚙ Configurer un agent système (MCP)" : "⚙ Configurer un agent en terminal";
+    aiAgentShow(b.dataset.k);
+  });
+  let exists = false, docPath = "";
+  try { exists = await App().AgentsDocExists(); } catch (_) {}
+  try { docPath = await App().AgentsDocPath(); } catch (_) {}
+  renderIaDocState(exists, docPath);
+}
+
+// renderIaDocState : boucle d'état de la fiche à la source (besoin #8), rendue DANS la carte (sans
+// encart imbriqué, pour un tableau de bord net). Absente → une seule action : l'enregistrer. Présente →
+// statut ✓ + le chemin exact (à donner à l'agent) + consulter / mettre à jour / déposer.
+function renderIaDocState(exists, docPath) {
+  const box = el("ia-doc-state"); if (!box) return;
+  if (!exists) {
+    box.innerHTML = `<p class="sub" style="margin:0 0 10px">Pas encore enregistrée. Enregistrez-la pour que votre agent la lise au chemin indiqué — maintenant et après chaque mise à jour.</p>
+      <div class="ia-card-act"><button class="btn btn-primary btn-sm" id="ia-doc-save">Enregistrer la fiche à la source</button></div>`;
+    el("ia-doc-save").onclick = saveAgentsDocToSource;
+    return;
+  }
+  box.innerHTML = `<div class="ia-ok">✓ Enregistrée à la source</div>
+    <code class="ia-pathbox" title="Chemin à donner à votre agent (déjà inclus dans le message de présentation)">${esc(docPath)}</code>
+    <div class="ia-card-act">
+      <button class="btn btn-ghost btn-sm" id="ia-doc-view">Consulter</button>
+      <button class="btn btn-ghost btn-sm" id="ia-doc-resave">Mettre à jour</button>
+      <button class="btn btn-ghost btn-sm" id="ia-doc-deposit">Déposer dans un projet…</button>
+    </div>`;
+  el("ia-doc-view").onclick = async () => { try { infoModal("AGENTS.md", `<div class="md-render" style="max-height:60vh;overflow:auto">${mdToHTML(await App().Doc())}</div>`); } catch (_) {} };
+  el("ia-doc-resave").onclick = saveAgentsDocToSource;
+  el("ia-doc-deposit").onclick = installDirectives;
+}
+
+async function saveAgentsDocToSource() {
+  try {
+    const p = await App().SaveAgentsDocToSource();
+    toast("Fiche enregistrée : " + shortPath(p), "ok");
+    renderAssistantIA();
+  } catch (e) { toast(cleanErr(e), "err"); }
+}
+
+// aiAgentModal : point d'entrée historique « faisons connaissance avec votre agent IA ». Depuis 1.17,
+// toute la mise en route IA (fiche AGENTS.md + brancher son agent) vit dans la page « Agent IA » du
+// menu principal : on y renvoie simplement, plutôt que de dupliquer le parcours dans une modale.
 function aiAgentModal() {
-  infoModal("Faisons connaissance avec votre agent IA", `
-    <p class="sub">SituLab est fait pour que votre assistant <b>prépare</b> le travail et que <b>vous</b> validiez par votre PIN. Lequel utilisez-vous&nbsp;?</p>
-    <div class="ai-choice">
-      <button type="button" class="ai-pick" data-k="cli"><span class="ai-pick-ic">🖥️</span><b>Un agent en terminal</b><span class="sub">Claude Code, agent shell… il tape des commandes <code>situlab</code>.</span></button>
-      <button type="button" class="ai-pick" data-k="mcp"><span class="ai-pick-ic">🧩</span><b>Un agent système (MCP)</b><span class="sub">Claude Desktop, Cursor… il se connecte à <code>situlab mcp</code>.</span></button>
-    </div>
-    <div id="ai-out"></div>`);
-  document.querySelectorAll(".ai-pick").forEach((b) => b.onclick = () => aiAgentShow(b.dataset.k));
+  try { closeModal(); } catch (e) {}
+  navTo("ia");
 }
 
 async function aiAgentShow(kind) {
@@ -280,6 +347,10 @@ async function aiAgentShow(kind) {
   if (!out) return;
   let exe = "situlab";
   try { exe = (await App().ExePath()) || "situlab"; } catch (e) {}
+  // Chemin de la fiche administrée à la source (si elle a été enregistrée) : on l'inclut dans le
+  // message de présentation pour que l'agent la lise au bon endroit (v1.17, besoin #8).
+  let docPath = "";
+  try { if (await App().AgentsDocExists()) docPath = await App().AgentsDocPath(); } catch (e) {}
   let mcpBlock = "", cfg = "";
   if (kind === "mcp") {
     cfg = JSON.stringify({ mcpServers: { situlab: { command: exe, args: ["mcp"] } } }, null, 2);
@@ -288,17 +359,16 @@ async function aiAgentShow(kind) {
       <pre class="filebox" style="user-select:text;white-space:pre-wrap">${esc(cfg)}</pre>
       <button type="button" class="btn btn-ghost btn-sm" id="ai-cfg">Copier la configuration</button></div>`;
   }
-  const a = kind === "mcp" ? "2" : "1", b = kind === "mcp" ? "3" : "2";
+  // La fiche AGENTS.md (dépôt, chemin à la source) est gérée par la carte « Fiche de collaboration »
+  // au-dessus : on ne la redouble plus ici (c'était redondant). Ne reste que le message de présentation,
+  // qui pointe déjà vers la fiche enregistrée à la source.
+  const step1 = kind === "mcp" ? "2" : "1";
   out.innerHTML = mcpBlock + `
-    <div class="ai-step"><div class="ai-step-h">${a}. Dites bonjour à votre agent</div>
-      <p class="sub">Copiez ce message et collez-le dans votre assistant : il lui dit où est SituLab, l'invite à lire la fiche de collaboration et à vous donner son premier avis. Léger, ouvert — pas de commandes imposées.</p>
-      <button type="button" class="btn btn-primary btn-sm" id="ai-prompt">Copier le message de présentation 🤖</button></div>
-    <div class="ai-step"><div class="ai-step-h">${b}. Déposez la fiche de collaboration</div>
-      <p class="sub"><code>AGENTS.md</code> est à la fois le mode d'emploi de votre agent ET votre fiche de collaboration : déposez-la dans votre projet (les agents la lisent automatiquement), votre IA la lira au démarrage et pourra l'enrichir avec vous. Modifiable aussi dans Réglages.</p>
-      <button type="button" class="btn btn-ghost btn-sm" id="ai-doc">Déposer AGENTS.md dans un dossier…</button></div>`;
+    <div class="ai-step"><div class="ai-step-h">${step1}. Dites bonjour à votre agent</div>
+      <p class="sub">Copiez ce message et collez-le dans votre assistant : il lui dit où est SituLab, l'invite à lire la fiche de collaboration (au chemin enregistré à la source) et à vous donner son premier avis.</p>
+      <button type="button" class="btn btn-primary btn-sm" id="ai-prompt">Copier le message de présentation 🤖</button></div>`;
   if (el("ai-cfg")) el("ai-cfg").onclick = () => copyPrompt(cfg, { close: false, title: "Configuration MCP" });
-  el("ai-prompt").onclick = () => copyPrompt(firstPromptText(kind, exe), { close: false, title: "Message de présentation" });
-  el("ai-doc").onclick = installDirectives;
+  el("ai-prompt").onclick = () => copyPrompt(firstPromptText(kind, exe, docPath), { close: false, title: "Message de présentation" });
 }
 
 // installDirectives : choisit un dossier et y écrit le guide AGENTS.md pour l'agent de l'utilisateur.

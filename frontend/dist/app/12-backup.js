@@ -41,11 +41,24 @@ async function renderBackup() {
       `<div class="cc-center"><button class="btn btn-primary" id="bk-new2">＋ Nouveau plan</button></div>`;
     el("bk-new2").onclick = () => backupTunnel(null);
   } else {
-    box.innerHTML = plans.map(bkCardHTML).join("");
+    // Dernière exécution par plan (pour l'état ✓/⚠/✕ sur chaque carte). Best-effort : le journal est
+    // du plus récent au plus ancien, donc la 1re occurrence d'un plan est sa dernière exécution.
+    let lastByPlan = {};
+    try { ((await App().BackupRuns()) || []).forEach((r) => { if (!lastByPlan[r.plan]) lastByPlan[r.plan] = r; }); } catch (_) {}
+    box.innerHTML = plans.map((p) => bkCardHTML(p, lastByPlan[p.name])).join("");
+    box.querySelectorAll("[data-journal]").forEach((b) => b.onclick = () => navTo("bkjournal"));
     box.querySelectorAll("[data-run]").forEach((b) => b.onclick = () => runBackupFlow(b.dataset.run));
     box.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { const p = plans.find((x) => x.name === b.dataset.edit); if (p) backupTunnel(p); });
-    box.querySelectorAll("[data-rm]").forEach((b) => b.onclick = async () => {
-      try { await App().RemoveBackupPlan(b.dataset.rm); renderBackup(); } catch (e) { toast(cleanErr(e), "err"); }
+    box.querySelectorAll("[data-rm]").forEach((b) => b.onclick = () => {
+      const nm = b.dataset.rm;
+      confirmDelete({
+        title: `Supprimer le plan « ${esc(nm)} » ?`,
+        lead: `Le plan de sauvegarde <b>${esc(nm)}</b> sera retiré de SituLab. Il ne s'exécutera plus.`,
+        items: ["Le plan et son réglage (quoi, où, quand, rétention)"],
+        safe: ["Les sauvegardes déjà envoyées sur le cloud (bundles et archives) restent en place", "Vos dépôts locaux ne sont pas touchés"],
+        confirmLabel: "Supprimer le plan",
+        onConfirm: async () => { await App().RemoveBackupPlan(nm); renderBackup(); },
+      });
     });
   }
 }
@@ -82,15 +95,26 @@ function bkWhat(b) {
 function bkFormLabel(f) { return f === "mirror" ? "miroir (fichiers lisibles)" : "bundle git"; }
 function bkRoutineLabel(r) { return r === "on_open" ? "à l'ouverture" : r === "on_close" ? "à la fermeture" : "manuel"; }
 
-function bkCardHTML(b) {
+function bkCardHTML(b, lastRun) {
   const legacy = !b.type;
+  // État de la DERNIÈRE exécution, visible d'un coup d'œil (observabilité) : ✓ réussie, ⚠ partielle,
+  // ✕ échouée. Cliquable → Journal pour le détail (où, quoi, quelle erreur).
+  let statut = "";
+  if (lastRun) {
+    const ko = !lastRun.ok, partial = lastRun.ok && lastRun.failed > 0;
+    const ico = ko ? "✕" : partial ? "⚠" : "✓";
+    const cls = ko ? "ko" : partial ? "warn" : "ok";
+    statut = `<button class="bk-status ${cls}" data-journal="1" title="Voir le Journal des sauvegardes">${ico} dernière : ${esc(fmtWhen(b.last_run || lastRun.when))}</button>`;
+  } else {
+    statut = `<span class="bk-meta-run">${b.last_run ? "dernière : " + esc(fmtWhen(b.last_run)) : "jamais exécutée"}</span>`;
+  }
   return `<div class="bk-card">
     <div class="bk-main"><b>${esc(b.name)}</b>
       <span class="bk-flow">${bkWhat(b)} → <b>${esc(b.cloud)}</b><code>${esc(b.dest || "/")}</code></span>
-      <span class="bk-meta">${legacy ? "plan simple" : `${esc(bkFormLabel(b.form))} · ${esc(b.layer || "local")} · ${esc(bkRoutineLabel(b.routine))}`} · ${b.last_run ? "dernière : " + esc(fmtWhen(b.last_run)) : "jamais exécutée"}</span></div>
+      <span class="bk-meta">${legacy ? "plan simple" : `${esc(bkFormLabel(b.form))} · ${esc(b.layer || "local")} · ${esc(bkRoutineLabel(b.routine))} · ${b.overwrite ? (b.archives ? "écrase +" + b.archives + " arch." : "écrase") : "cumulatif"}`} · ${statut}</span></div>
     <div class="bk-act"><button class="btn btn-primary btn-sm" data-run="${esc(b.name)}">Sauvegarder maintenant</button>
       ${legacy ? "" : `<button class="btn btn-ghost btn-sm" data-edit="${esc(b.name)}">Modifier</button>`}
-      <button class="btn btn-ghost btn-sm" data-rm="${esc(b.name)}">Retirer</button></div></div>`;
+      <button class="icon-del" data-rm="${esc(b.name)}" title="Retirer le plan « ${esc(b.name)} »" aria-label="Retirer le plan de sauvegarde « ${esc(b.name)} »">${ICO_TRASH}</button></div></div>`;
 }
 
 // backupTunnel : assistant ÉTAPE PAR ÉTAPE (tunnel). plan != null → édition (pré-rempli). Tout se
@@ -108,6 +132,11 @@ function backupTunnel(plan) {
     routine: (plan && plan.routine) || "manual",
     cloud: (plan && plan.cloud) || clouds[0].name,
     dest: (plan && plan.dest) || "/",
+    // Rétention (chaînes dans le tunnel, converties à l'enregistrement). Nouveau plan : écrase + 2
+    // archives (cloud borné). Plan existant : on garde son réglage (absent = cumulatif, comportement
+    // historique préservé).
+    overwrite: plan ? (plan.overwrite ? "yes" : "no") : "yes",
+    archives: (plan && typeof plan.archives === "number") ? String(plan.archives) : "2",
     editing: !!plan,
   };
   const STEPS = [
@@ -115,6 +144,7 @@ function backupTunnel(plan) {
     { k: "what", t: "Que sauvegarder" },
     { k: "layer", t: "Quelle couche" },
     { k: "form", t: "Forme" },
+    { k: "retention", t: "Conservation" },
     { k: "dest", t: "Destination" },
     { k: "routine", t: "Routine" },
     { k: "review", t: "Récapitulatif" },
@@ -125,6 +155,9 @@ function backupTunnel(plan) {
   const helps = () => {
     const th = el("bk-type-help"); if (th) th.textContent = W.type === "generic" ? "Portée dynamique : tout nouveau dépôt correspondant entrera automatiquement." : "Liste figée : seuls les dépôts inscrits sont sauvegardés.";
     const fh = el("bk-form-help"); if (fh) fh.textContent = W.form === "mirror" ? "Miroir : fichiers déposés lisibles dans le cloud (plus lourd)." : "Bundle : un .bundle par dépôt (léger, re-clonable, illisible sans git).";
+    // Rétention : affiche l'avertissement « cumulatif » OU le choix du nombre d'archives.
+    const rc = el("bk-ret-cumul"), ra = el("bk-ret-arch");
+    if (rc && ra) { const ow = W.overwrite !== "no"; rc.classList.toggle("hidden", ow); ra.classList.toggle("hidden", !ow); }
   };
   const drawScope = () => {
     const ui = el("bk-scope-ui"); if (!ui) return;
@@ -134,7 +167,7 @@ function backupTunnel(plan) {
     } else {
       ui.innerHTML = `<button type="button" class="btn btn-ghost btn-sm" id="bk-pickrepos">🔎 Choisir les dépôts (${W.repos.length})</button>
         ${W.repos.length ? `<div class="bk-repolist">${W.repos.map((p) => `<span class="bk-repochip">${esc(baseNameJS(p))}</span>`).join("")}</div>` : `<div class="sub">Aucun dépôt choisi pour l'instant.</div>`}`;
-      el("bk-pickrepos").onclick = () => backupRepoSelect(W.repos, (sel) => { W.repos = sel; drawScope(); });
+      el("bk-pickrepos").onclick = () => backupRepoSelect(W.repos, (sel) => { W.repos = sel; reopenTunnel(); }, reopenTunnel);
     }
   };
   const stepBody = (k) => {
@@ -145,10 +178,18 @@ function backupTunnel(plan) {
     if (k === "what") return `<div id="bk-scope-ui"></div><div class="inline-error hidden" id="bk-e"></div>`;
     if (k === "layer") return `<div class="sub" style="margin-bottom:6px">Que contient la sauvegarde ?</div>${seg("layer", W.layer, [{ v: "local", l: "Local" }, { v: "atelier", l: "Atelier" }, { v: "both", l: "Les deux" }])}`;
     if (k === "form") return `${seg("form", W.form, [{ v: "bundle", l: "Bundle git (léger)" }, { v: "mirror", l: "Miroir (fichiers lisibles)" }])}<div class="sub" id="bk-form-help"></div>`;
+    if (k === "retention") return `<div class="sub" style="margin-bottom:6px">À chaque sauvegarde…</div>
+      ${seg("overwrite", W.overwrite, [{ v: "yes", l: "Écraser le précédent" }, { v: "no", l: "Tout conserver" }])}
+      <div id="bk-ret-cumul" class="callout warn" style="margin-top:10px">⚠ En <b>conservant tout</b>, le dossier cloud <b>s'alourdit</b> à chaque sauvegarde (un bundle de plus à chaque fois). À surveiller.</div>
+      <div id="bk-ret-arch">
+        <div class="sub" style="margin:12px 0 6px">Archives conservées (versions précédentes rangées dans un sous-dossier <code>archive/</code>) :</div>
+        ${seg("archives", W.archives, [{ v: "0", l: "Aucune" }, { v: "1", l: "1" }, { v: "2", l: "2" }, { v: "3", l: "3" }])}
+        <div class="sub">Seul le dernier bundle reste en vue ; au-delà, les plus anciennes archives sont supprimées automatiquement à chaque sauvegarde.</div>
+      </div>`;
     if (k === "dest") return `<label>Cloud de destination</label>
       <select id="bk-c" class="select">${clouds.map((c) => `<option value="${esc(c.name)}"${W.cloud === c.name ? " selected" : ""}>${esc(c.name)} — ${esc(c.kind)}</option>`).join("")}</select>
       <div class="bk-dest-row" style="margin-top:8px">→ <code id="bk-dest">${esc(W.dest || "/")}</code> <button class="btn btn-ghost btn-sm" type="button" id="bk-browse">📁 Choisir le dossier…</button></div>`;
-    if (k === "routine") return `${seg("routine", W.routine, [{ v: "manual", l: "Manuel" }, { v: "on_open", l: "À l'ouverture" }, { v: "on_close", l: "À la fermeture" }])}<div class="sub">Les routines automatiques ne s'exécutent que pour les clouds sans PIN (autonomes).</div>`;
+    if (k === "routine") return `${seg("routine", W.routine, [{ v: "manual", l: "Manuel" }, { v: "on_open", l: "À l'ouverture" }, { v: "on_close", l: "À la fermeture" }])}<div class="sub">Les sauvegardes se font <b>sans PIN</b> : les routines « ouverture » et « fermeture » s'exécutent toutes seules (avec un suivi visuel à l'écran).</div>`;
     if (k === "review") {
       const what = W.type === "targeted" ? `${W.repos.length} dépôt(s) choisi(s)` : scopeLabel(W.scope);
       return `<div class="bk-review">
@@ -157,6 +198,7 @@ function backupTunnel(plan) {
         <div><b>Contenu</b><span>${esc(what)}</span></div>
         <div><b>Couche</b><span>${esc(W.layer)}</span></div>
         <div><b>Forme</b><span>${esc(bkFormLabel(W.form))}</span></div>
+        <div><b>Conservation</b><span>${W.overwrite === "no" ? "tout conserver (cumulatif)" : (W.archives === "0" ? "écrase (aucune archive)" : "écrase + " + esc(W.archives) + " archive(s)")}</span></div>
         <div><b>Destination</b><span>${esc(W.cloud)} <code>${esc(W.dest || "/")}</code></span></div>
         <div><b>Routine</b><span>${esc(bkRoutineLabel(W.routine))}</span></div>
       </div><div class="inline-error hidden" id="bk-e"></div>`;
@@ -173,9 +215,10 @@ function backupTunnel(plan) {
     if (k === "name") { helps(); const n = el("bk-n"); if (n) n.oninput = () => { W.name = n.value; }; }
     if (k === "what") drawScope();
     if (k === "form") helps();
+    if (k === "retention") helps();
     if (k === "dest") {
       const c = el("bk-c"); if (c) c.onchange = () => { W.cloud = c.value; };
-      const br = el("bk-browse"); if (br) br.onclick = () => cloudFolderPicker(el("bk-c").value, W.dest, (d) => { W.dest = d; const dc = el("bk-dest"); if (dc) dc.textContent = d || "/"; });
+      const br = el("bk-browse"); if (br) br.onclick = () => cloudFolderPicker(el("bk-c").value, W.dest, (d) => { W.dest = d; reopenTunnel(); }, reopenTunnel);
     }
   };
   const validate = (k) => {
@@ -187,8 +230,8 @@ function backupTunnel(plan) {
   };
   const save = async () => {
     const e = el("bk-e");
-    try { await App().SaveBackupPlan({ name: W.name, type: W.type, scope: W.scope, repos: W.repos, layer: W.layer, form: W.form, routine: W.routine, cloud: W.cloud, dest: W.dest }); closeModal(); renderBackup(); }
-    catch (err) { if (e) { e.textContent = cleanErr(err); e.classList.remove("hidden"); } }
+    try { await App().SaveBackupPlan({ name: W.name, type: W.type, scope: W.scope, repos: W.repos, layer: W.layer, form: W.form, routine: W.routine, cloud: W.cloud, dest: W.dest, overwrite: W.overwrite !== "no", archives: parseInt(W.archives, 10) || 0 }); closeModal(); renderBackup(); }
+    catch (err) { const m = cleanErr(err); if (e) { e.textContent = m; e.classList.remove("hidden"); } else { toast(m, "err"); } }
   };
   const draw = () => {
     const d = STEPS[si], k = d.k, last = si === STEPS.length - 1;
@@ -205,17 +248,23 @@ function backupTunnel(plan) {
     if (el("bk-next")) el("bk-next").onclick = () => { if (validate(k)) { si++; draw(); } };
     if (el("bk-save")) el("bk-save").onclick = save;
   };
-  openModal(W.editing ? "Modifier le plan" : "Nouveau plan de sauvegarde", `<div id="bk-wiz"></div>`, null);
-  if (el("modal-ok")) el("modal-ok").classList.add("hidden");
-  if (el("modal-cancel")) el("modal-cancel").textContent = "Annuler";
-  draw();
+  // La modale étant globale et partagée, les sous-sélecteurs (dépôts, dossier cloud) la réécrivent ;
+  // on reconstruit le tunnel à l'étape courante après chaque pick/annulation (sinon le tunnel est
+  // détruit et « Créer le plan » jamais atteint — bug de création des plans).
+  const reopenTunnel = () => {
+    openModal(W.editing ? "Modifier le plan" : "Nouveau plan de sauvegarde", `<div id="bk-wiz"></div>`, null);
+    if (el("modal-ok")) el("modal-ok").classList.add("hidden");
+    if (el("modal-cancel")) el("modal-cancel").textContent = "Annuler";
+    draw();
+  };
+  reopenTunnel();
 }
 
 // baseNameJS : dernier segment d'un chemin (coupe sur \ et /).
 function baseNameJS(p) { const s = String(p || "").replace(/[\\/]+$/, ""); const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\")); return i < 0 ? s : s.slice(i + 1); }
 
 // backupRepoSelect : sélecteur de dépôts appairés (filtres KERNEL/spoke/autre + recherche). onPick(paths[]).
-async function backupRepoSelect(current, onPick) {
+async function backupRepoSelect(current, onPick, onCancel) {
   let rows = [];
   try { rows = (await App().ProjectsLight()) || []; } catch (e) { toast(cleanErr(e), "err"); return; }
   const items = rows.filter((p) => p.local && p.local.path).map((p) => ({
@@ -237,15 +286,16 @@ async function backupRepoSelect(current, onPick) {
       <div class="org-chips">${[["all", "Tous"], ["kernel", "KERNEL"], ["spoke", "Spokes"], ["other", "Autres"]].map(([k, l]) => `<button type="button" class="org-chip ${k === "all" ? "on" : ""}" data-role="${k}">${k !== "all" && k !== "other" ? `<span class="btn-ico">${bkPicto(k)}</span>` : ""}${l}</button>`).join("")}</div>
     </div>
     <div id="brs-list" class="brs-listbox"></div>
-    <div class="sub"><b id="brs-n">${sel.size}</b> dépôt(s) sélectionné(s).</div></div>`, () => { onPick(Array.from(sel)); closeModal(); });
+    <div class="sub"><b id="brs-n">${sel.size}</b> dépôt(s) sélectionné(s).</div></div>`, () => { onPick(Array.from(sel)); });
   el("modal-ok").textContent = "Valider la sélection";
+  if (onCancel && el("modal-cancel")) el("modal-cancel").onclick = onCancel;
   el("brs-q").oninput = () => { filt.q = el("brs-q").value.trim().toLowerCase(); render(); };
   el("modal-body").querySelectorAll("[data-role]").forEach((b) => b.onclick = () => { filt.role = b.dataset.role; el("modal-body").querySelectorAll("[data-role]").forEach((x) => x.classList.toggle("on", x === b)); render(); });
   render();
 }
 
 // cloudFolderPicker : navigue l'arbre d'un cloud, permet de créer un sous-dossier, puis choisit. onPick(path).
-async function cloudFolderPicker(cloud, start, onPick) {
+async function cloudFolderPicker(cloud, start, onPick, onCancel) {
   let cur = start && start !== "/" ? start : "/";
   const load = async () => {
     el("cfp-cur").textContent = cur;
@@ -266,20 +316,114 @@ async function cloudFolderPicker(cloud, start, onPick) {
     const n = (el("cfp-new").value || "").trim().replace(/[\\/]/g, "");
     let dest = cur;
     if (n) dest = (cur === "/" ? "" : cur) + "/" + n;
-    onPick(dest || "/"); closeModal();
+    onPick(dest || "/");
   });
   el("modal-ok").textContent = "Choisir ce dossier";
+  if (onCancel && el("modal-cancel")) el("modal-cancel").onclick = onCancel;
   load();
 }
 
-function runBackupFlow(name) {
-  pinConfirm("Lancer la sauvegarde « " + name + " »", async (pin) => {
-    const out = await App().RunBackupPlan(name, pin).catch(async (e) => {
+// runBackupFlow : lance une sauvegarde manuelle. PAS de PIN (routine additive) — elle « se fait ».
+// Garde-fou lecture seule (le cœur le refuserait aussi), état « en cours », puis résultat / erreur clairs.
+async function runBackupFlow(name) {
+  if (state.readOnly) { toast("Mode lecture seule actif — désactivez-le dans Réglages pour sauvegarder", "err"); return; }
+  toast("Sauvegarde en cours…", "info");
+  try {
+    const out = await App().RunBackupPlan(name).catch(async (e) => {
       // Rétro-compat : un plan hérité (mono-dépôt) passe par RunBackup.
-      if (/introuvable|type/i.test(cleanErr(e))) return App().RunBackup(name, pin);
+      if (/introuvable|type/i.test(cleanErr(e))) return App().RunBackup(name);
       throw e;
     });
-    toast("Sauvegardé : " + out, "ok");
-    renderBackup();
-  });
+    // Succès complet ou partiel : le cœur renvoie « N dépôt(s) sauvegardé(s) [, M échec(s)] → cloud:chemin ».
+    const partial = /échec/i.test(String(out || ""));
+    toast("✓ " + (out || "Sauvegarde terminée"), partial ? "info" : "ok");
+  } catch (e) {
+    toast("Échec de la sauvegarde : " + cleanErr(e), "err");
+  }
+  renderBackup();
+}
+
+/* ---------------- Suivi VISUEL permanent des sauvegardes (1.17) ----------------
+ * Un indicateur flottant présent sur TOUTES les vues pendant qu'une sauvegarde tourne (manuelle,
+ * ouverture ou fermeture), et un écran plein à la fermeture pour que l'utilisateur sache qu'il ne doit
+ * pas forcer la sortie (la fenêtre se ferme toute seule une fois la sauvegarde finie). Branché une fois
+ * au démarrage (installBackupProgress), piloté par les événements Wails "backup:progress"/"backup:closing".
+ */
+let _bkIndTimer = null;
+function installBackupProgress() {
+  if (!(window.runtime && window.runtime.EventsOn) || state._bkProgBound) return;
+  state._bkProgBound = true;
+  try { window.runtime.EventsOn("backup:progress", (ev) => bkOnProgress(ev || {})); } catch (_) {}
+  try { window.runtime.EventsOn("backup:closing", (c) => bkOnClosing(!!(c && c.active))); } catch (_) {}
+  // Au montage : si une sauvegarde tourne déjà (rechargement pendant un run), on affiche l'état.
+  try { App().BackupBusy().then((busy) => { if (busy) bkOnProgress({ active: true, phase: "prepare" }); }).catch(() => {}); } catch (_) {}
+}
+
+function bkTriggerLabel(t) { return t === "on_open" ? "à l'ouverture" : t === "on_close" ? "à la fermeture" : "manuelle"; }
+function bkWhereLabel(ev) {
+  return (ev.phase === "repo" && ev.total)
+    ? `dépôt ${ev.index}/${ev.total}${ev.repo ? " — " + esc(ev.repo) : ""}`
+    : "préparation…";
+}
+
+function bkIndEl() {
+  let n = el("bk-ind");
+  if (!n) {
+    n = document.createElement("div");
+    n.id = "bk-ind";
+    n.className = "bk-ind hidden";
+    n.title = "Voir le Journal des sauvegardes";
+    n.onclick = () => navTo("bkjournal");
+    document.body.appendChild(n);
+  }
+  return n;
+}
+
+function bkOnProgress(ev) {
+  const n = bkIndEl();
+  if (_bkIndTimer) { clearTimeout(_bkIndTimer); _bkIndTimer = null; }
+  if (ev.active) {
+    n.className = "bk-ind running";
+    n.innerHTML = `<span class="bk-ind-spin" aria-hidden="true"></span>
+      <div class="bk-ind-txt"><b>Sauvegarde ${esc(bkTriggerLabel(ev.trigger))} en cours</b>
+        <span class="bk-ind-sub">${ev.plan ? esc(ev.plan) + " · " : ""}${bkWhereLabel(ev)}</span></div>`;
+    bkClosingUpdate(ev); // reflète aussi l'avancement sur l'écran de fermeture s'il est affiché
+  } else {
+    const ko = !ev.ok, partial = ev.ok && ev.failed > 0;
+    const ico = ko ? "✕" : partial ? "⚠" : "✓";
+    n.className = "bk-ind done " + (ko ? "ko" : partial ? "warn" : "ok");
+    n.innerHTML = `<span class="bk-ind-ico">${ico}</span>
+      <div class="bk-ind-txt"><b>Sauvegarde ${ko ? "échouée" : partial ? "partielle" : "terminée"}</b>
+        <span class="bk-ind-sub">${ev.plan ? esc(ev.plan) : ""}${ev.failed ? " · " + ev.failed + " échec(s)" : ""} · voir le Journal</span></div>`;
+    _bkIndTimer = setTimeout(() => { n.className = "bk-ind hidden"; n.innerHTML = ""; }, 5000);
+    if (state.view === "backup") renderBackup(); // rafraîchit l'état des cartes si on est sur BACKUP
+  }
+}
+
+function bkClosingEl() {
+  let n = el("bk-closing");
+  if (!n) {
+    n = document.createElement("div");
+    n.id = "bk-closing";
+    n.className = "bk-closing hidden";
+    document.body.appendChild(n);
+  }
+  return n;
+}
+function bkOnClosing(active) {
+  const n = bkClosingEl();
+  if (!active) { n.className = "bk-closing hidden"; n.innerHTML = ""; return; }
+  n.className = "bk-closing";
+  n.innerHTML = `<div class="bk-closing-card">
+    <div class="bk-closing-spin" aria-hidden="true"></div>
+    <div class="bk-closing-h">💾 Sauvegarde avant fermeture</div>
+    <div class="bk-closing-d" id="bk-closing-d">Vos sauvegardes « à la fermeture » s'exécutent.<br>
+      Merci de patienter — <b>ne forcez pas la fermeture</b> : la fenêtre se fermera toute seule.</div></div>`;
+}
+function bkClosingUpdate(ev) {
+  const box = el("bk-closing");
+  if (!box || box.classList.contains("hidden")) return;
+  const d = el("bk-closing-d");
+  if (d) d.innerHTML = `<b>${ev.plan ? esc(ev.plan) : ""}</b> — ${bkWhereLabel(ev)}<br>
+    <span class="muted">Ne forcez pas la fermeture ; la fenêtre se fermera automatiquement.</span>`;
 }

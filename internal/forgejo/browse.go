@@ -53,9 +53,26 @@ type apiTag struct {
 type Commit struct {
 	SHA     string `json:"sha"`
 	Short   string `json:"short"`
-	Message string `json:"message"`
+	Message string `json:"message"` // 1re ligne (sujet) — le message complet n'est pas transporté
 	Author  string `json:"author"`
 	Date    string `json:"date"`
+	// Signed : le commit porte le sceau d'origine SituLab (trailer « SituLab-Approved: »). Calculé sur
+	// le message COMPLET côté serveur AVANT la troncature au sujet — sinon le trailer (sur une ligne
+	// ultérieure) serait invisible dans l'historique en ligne, et le sceau ne s'afficherait jamais.
+	Signed bool `json:"signed"`
+}
+
+// attestTrailerPrefix : préfixe du trailer d'attestation SituLab, cherché dans le message complet.
+const attestTrailerPrefix = "SituLab-Approved:"
+
+// hasApprovedTrailer : le message (COMPLET) porte-t-il le trailer d'attestation sur une ligne propre ?
+func hasApprovedTrailer(full string) bool {
+	for _, ln := range strings.Split(full, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), attestTrailerPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 type apiCommit struct {
@@ -126,6 +143,22 @@ func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]Tag, error
 	}
 }
 
+// LatestTag ne récupère que le tag le PLUS RÉCENT : une seule page, un seul élément. L'API renvoie les
+// tags du plus récent au plus ancien, donc le premier suffit. Évite de paginer tout l'historique des
+// versions quand seul le dernier compte (vitrines, barre de version) — gain réseau marqué sur les
+// affichages de dépôts (perf 1.17). ok=false si le dépôt n'a aucun tag.
+func (c *Client) LatestTag(ctx context.Context, owner, repo string) (Tag, bool, error) {
+	var raw []apiTag
+	p := fmt.Sprintf("/repos/%s/%s/tags?%s=1&page=1", esc(owner), esc(repo), c.limKey())
+	if err := c.do(ctx, p, &raw, maxAPIBody); err != nil {
+		return Tag{}, false, err
+	}
+	if len(raw) == 0 {
+		return Tag{}, false, nil
+	}
+	return Tag{Name: raw[0].Name, SHA: raw[0].Commit.SHA}, true, nil
+}
+
 // ListCommits renvoie les derniers commits d'une référence (branche/tag/sha). Pagine par
 // pages de taille FIXE (perPage) jusqu'à atteindre limit, puis tronque — une taille de page
 // variable provoquerait doublons et trous (la pagination par page suppose une page constante).
@@ -153,6 +186,7 @@ func (c *Client) ListCommits(ctx context.Context, owner, repo, ref string, limit
 				Message: firstLine(cm.Commit.Message),
 				Author:  cm.Commit.Author.Name,
 				Date:    cm.Commit.Author.Date,
+				Signed:  hasApprovedTrailer(cm.Commit.Message), // sceau détecté sur le message COMPLET
 			})
 		}
 		if len(raw) < perPage {

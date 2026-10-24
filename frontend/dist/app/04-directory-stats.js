@@ -61,7 +61,7 @@ function adminRow(u) {
     ? `<span class="muted" style="font-size:12px">vous</span>`
     : `<button class="btn btn-ghost btn-sm" data-act="detail" data-u="${esc(u.login)}">Droits</button>`
       + `<button class="btn btn-ghost btn-sm" data-act="susp" data-u="${esc(u.login)}" data-on="${u.prohibit_login ? "" : "1"}">${u.prohibit_login ? "Réactiver" : "Suspendre"}</button>`
-      + `<button class="btn btn-ghost btn-sm btn-danger" data-act="del" data-u="${esc(u.login)}">Supprimer</button>`;
+      + `<button class="icon-del" data-act="del" data-u="${esc(u.login)}" title="Supprimer « ${esc(u.login)} »" aria-label="Supprimer « ${esc(u.login)} »">${ICO_TRASH}</button>`;
   return `<div class="srow">
     <div><b>${esc(u.login)}</b> <span class="pill ${u.is_admin ? "ver" : ""}">${u.is_admin ? "Administrateur" : "Standard"}</span>
       <span class="pill ${st.cls}">${st.k}</span> <span class="muted">${esc(u.email || "")}</span></div>

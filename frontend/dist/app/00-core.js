@@ -4,6 +4,10 @@
 
 const App = () => window.go.main.App;
 const el = (id) => document.getElementById(id);
+// Corbeille discrète pour les actions « supprimer / retirer » des listes et cartes (1.17) : icône seule,
+// atténuée, rouge au survol (classe .icon-del). Définie ici (1er script) → disponible partout. Le texte
+// « supprimer » encombrait les rangées ; l'intitulé passe en title/aria-label pour rester accessible.
+const ICO_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6"/></svg>`;
 const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"'\/]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "/": "&#47;" }[c])));
 const cleanErr = (e) => String((e && e.message) || e).replace(/^Error:\s*/, "");
@@ -173,7 +177,7 @@ async function init() {
       // Charge utile {reason, detail, action, intent}. Compat : une ancienne chaîne seule reste gérée.
       // intent (Point 4) = phrase LIBRE de l'agent, montrée distinctement des actions constatées.
       const p = (payload && typeof payload === "object") ? payload : { reason: payload };
-      pinRequestModal(p.reason || "Autoriser l'opération", p.detail || null, p.action || "", p.intent || "");
+      pinRequestModal(p.reason || "Autoriser l'opération", p.detail || null, p.action || "", p.intent || "", p.deadlineMs || 0);
     }); pinEventBound = true; } catch (e) {}
   }
   let instances = [];

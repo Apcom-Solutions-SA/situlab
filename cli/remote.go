@@ -94,11 +94,17 @@ func (r *remote) call(op string, a daemon.Args, out any) error {
 		return err
 	}
 	// Réactivité agent : une mutation peut ouvrir la fenêtre PIN sur le poste et faire ATTENDRE l'appel.
-	// On le signale tout de suite sur stderr (en mode texte) pour que l'agent comprenne qu'il est en
-	// attente d'un geste humain, plutôt que de paraître figé. En --output json, le silence est préservé
-	// (l'issue — confirmé/refusé/expiré — est portée par le code et le type d'erreur).
-	if daemon.IsWriteOp(op) && flagOutput != "json" {
-		fmt.Fprintln(os.Stderr, "⏳ Action sensible : si un PIN est requis, validez la fenêtre SituLab sur le poste (max 120 s)…")
+	// On signale TOUT DE SUITE (avant de bloquer) que l'agent attend un geste humain, avec le délai MAX
+	// (source unique core.PINPromptTTL) : il sait combien de temps patienter, puis — à l'expiration —
+	// relancer. En mode texte : une phrase lisible. En --output json : un objet sur stderr (stdout reste
+	// propre), parsable, pour une boucle d'agent nette (besoin #6). L'issue réelle (confirmé/refusé/
+	// expiré) reste portée par le code de sortie et le type d'erreur.
+	if daemon.IsWriteOp(op) {
+		if flagOutput == "json" {
+			fmt.Fprintf(os.Stderr, "{\"situlab_pin_pending\":true,\"max_wait_sec\":%d}\n", core.PINPromptTTLSeconds())
+		} else {
+			fmt.Fprintf(os.Stderr, "⏳ Action sensible : si un PIN est requis, validez la fenêtre SituLab sur le poste (max %d s)…\n", core.PINPromptTTLSeconds())
+		}
 	}
 	// Point 4 : l'agent peut joindre son « pourquoi » (--intent) ; la fenêtre PIN le montre, distinct
 	// des actions que SituLab constate. Pur affichage, n'autorise rien.

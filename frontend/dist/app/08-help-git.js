@@ -101,7 +101,7 @@ async function renderHelp() {
   let tab = "guide";
   try { tab = localStorage.getItem("situlab.helptab") || "guide"; } catch (_) {}
   // Aide = le Guide, point (1.12). « À propos » (version, licence, NOTICE) vit désormais dans Réglages
-  // ▸ Versions / Licence — plus de doublon. La relance de la visite guidée reste ici, logiquement.
+  // ▸ À propos — plus de doublon. La relance de la visite guidée reste ici, logiquement.
   el("view").innerHTML = `
     <div class="view-head view-head-row">
       <div><div class="view-title">Aide</div><div class="view-sub">Le guide SituLab — pour vous comme pour vos agents.</div></div>
@@ -143,8 +143,8 @@ function buildTourSteps() {
   if (vis('.nav-item[data-view="backup"]')) steps.push({ ic: "🛡", sel: '.nav-item[data-view="backup"]', title: "BACKUP — vos sauvegardes", body: "Des plans de sauvegarde de vos dépôts vers vos clouds, en clé-en-main." });
   steps.push({ ic: "⎇", sel: '.nav-item[data-view="projects"]', title: "Dépôts git", body: "Appairez vos dépôts (local ↔ atelier ↔ vitrine), classez-les, et ouvrez leur détail. Le point de départ pour organiser votre poste." });
   if (vis("#health")) steps.push({ ic: "🟢", sel: "#health", title: "L'état en un coup d'œil", body: "Les pastilles disent si vos connexions git et cloud sont joignables — et combien de dépôts restent à appairer." });
-  steps.push({ ic: "⚙", sel: '.nav-item[data-view="settings"]', title: "Réglages", body: "Vos connexions git & cloud, la sécurité (PIN, lecture seule), les Modules (adapter l'interface à votre usage) et votre Assistant IA." });
-  steps.push({ ic: "?", sel: '.nav-item[data-view="help"]', title: "Aide & visite", body: "Toute la documentation est ici. Vous pourrez rejouer cette visite à tout moment depuis cette page." });
+  if (vis('.nav-item[data-view="ia"]')) steps.push({ ic: "🤖", sel: '.nav-item[data-view="ia"]', title: "Agent IA", body: "La porte de votre agent vers SituLab : enregistrez la fiche de collaboration (AGENTS.md) et obtenez, sur mesure, son message de première connexion." });
+  steps.push({ ic: "⚙", sel: '.nav-item[data-view="settings"]', title: "Réglages", body: "Vos connexions git & cloud, la sécurité (PIN, lecture seule), les Modules (adapter l'interface à votre usage) et l'Aide (le guide + cette visite)." });
   steps.push({ ic: "🤖", title: "Votre assistant IA", body: "Dernière chose : présentons SituLab à votre agent IA. Terminez pour choisir votre assistant et obtenir, sur mesure, son message de première connexion.", ai: true });
   return steps;
 }

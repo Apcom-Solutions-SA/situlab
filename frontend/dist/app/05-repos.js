@@ -5,6 +5,9 @@
 const LIVE_MS = 3500;         // fenêtre active, utilisateur présent
 const LIVE_SLOW_MS = 20000;   // ralenti après inactivité prolongée
 const IDLE_AFTER_MS = 120000; // 2 min sans interaction → ralenti
+// Vues qui dépendent du serveur courant (listes/état distants) : la sonde Whoami périodique ne tourne
+// que sur elles ; ailleurs elle est inutile (perf 1.17, Point 2).
+const LIVE_WHOAMI_VIEWS = ["projects", "detail", "project", "organize", "corpus", "admin", "directory", "stats", "tokens"];
 let lastInteraction = Date.now();
 let ecoInstalled = false;
 let liveGen = 0; // génération de la boucle : un tick en vol dont la génération a changé ne se replanifie pas
@@ -24,7 +27,11 @@ async function liveTickOnce() {
     if (!relocking && !pinModalOpen && !lockGrace && !el("app").classList.contains("hidden")) {
       if ((await App().Unlocked().catch(() => true)) === false) return handleLock();
     }
-    if (liveTick % 3 === 0) await refreshWhoami();
+    // Sonde « en ligne » périodique (besoin perf 1.17) : seulement sur les vues qui AFFICHENT des
+    // données du serveur courant. Sur une vue statique (Réglages, Aide, KERNEL, Agent IA…),
+    // marteler Whoami toutes les ~30 s ne sert à rien ; l'état en ligne sera re-sondé dès qu'on
+    // reviendra sur une vue connectée. Le contrôle de verrouillage ci-dessus, lui, reste à chaque tick.
+    if (liveTick % 3 === 0 && LIVE_WHOAMI_VIEWS.includes(state.view)) await refreshWhoami();
     if (state.view === "projects") await renderProjects(true);
     else if (state.view === "detail") {
       await refreshDetailLocal();

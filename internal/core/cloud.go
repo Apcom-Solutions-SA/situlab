@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"situlab/internal/config"
 	"situlab/internal/keyring"
@@ -415,6 +416,21 @@ func (s *Service) authorizeCloud(name string, a config.CloudAction, pin string) 
 	return s.gatePIN(pin)
 }
 
+// authorizeBackupCloud : autorisation DÉDIÉE aux sauvegardes. Un backup est une routine NON destructive
+// (copie additive vers le cloud de l'utilisateur) qui doit « se faire toute seule » à l'ouverture, à la
+// fermeture ou sur action manuelle — il ne demande JAMAIS le PIN, quelle que soit la politique du cloud.
+// Il requiert seulement une session déverrouillée (nécessaire pour déchiffrer le jeton du cloud) et
+// respecte le mode lecture seule (qui gèle tout envoi de façon délibérée).
+func (s *Service) authorizeBackupCloud(name string) error {
+	if s.ReadOnly() {
+		return ErrReadOnly
+	}
+	if !s.Unlocked() {
+		return ErrLocked
+	}
+	return nil
+}
+
 // CloudPathAllowed dit si un chemin est dans le périmètre autorisé à l'IA. Appelé à la frontière
 // agent (démon). Fail-closed : cloud inconnu ou allowlist vide → refus.
 func (s *Service) CloudPathAllowed(name, p string) bool {
@@ -483,24 +499,42 @@ type CloudHealthItem struct {
 // session est verrouillée (le secret est alors indisponible) ; sinon chaque item porte son état.
 func (s *Service) CloudHealth() ([]CloudHealthItem, error) {
 	clouds := s.FileClouds()
-	out := make([]CloudHealthItem, 0, len(clouds))
-	for _, fc := range clouds {
-		cl, _, err := s.fileCloudClientFor(fc.Name)
-		if err != nil {
-			if errors.Is(err, ErrLocked) {
-				return nil, err
+	// Perf (1.17, Point 2) : chaque test est un aller-retour réseau indépendant, avec un délai de garde
+	// par cloud (opCtx). En file, un seul cloud lent (jusqu'à l'expiration) retardait TOUS les suivants —
+	// les pastilles de santé mettaient alors des dizaines de secondes à s'afficher. On teste en parallèle ;
+	// chaque goroutine écrit SA case (pas de course), même modèle que boardFor.
+	out := make([]CloudHealthItem, len(clouds))
+	var mu sync.Mutex
+	locked := false
+	var wg sync.WaitGroup
+	for i, fc := range clouds {
+		wg.Add(1)
+		go func(i int, fc config.FileCloud) {
+			defer wg.Done()
+			cl, _, err := s.fileCloudClientFor(fc.Name)
+			if err != nil {
+				if errors.Is(err, ErrLocked) {
+					mu.Lock()
+					locked = true
+					mu.Unlock()
+				}
+				out[i] = CloudHealthItem{Name: fc.Name, OK: false, Err: err.Error()}
+				return
 			}
-			out = append(out, CloudHealthItem{Name: fc.Name, OK: false, Err: err.Error()})
-			continue
-		}
-		ctx, cancel := opCtx()
-		terr := cl.TestConnection(ctx)
-		cancel()
-		it := CloudHealthItem{Name: fc.Name, OK: terr == nil}
-		if terr != nil {
-			it.Err = terr.Error()
-		}
-		out = append(out, it)
+			ctx, cancel := opCtx()
+			terr := cl.TestConnection(ctx)
+			cancel()
+			it := CloudHealthItem{Name: fc.Name, OK: terr == nil}
+			if terr != nil {
+				it.Err = terr.Error()
+			}
+			out[i] = it
+		}(i, fc)
+	}
+	wg.Wait()
+	if locked {
+		// Session verrouillée : condition globale (tous les clouds) — on remonte ErrLocked comme avant.
+		return nil, ErrLocked
 	}
 	return out, nil
 }

@@ -40,12 +40,15 @@ async function renderDetail() {
   };
   if (el("open-web")) el("open-web").onclick = () => safeOpenURL(d.html_url || ((state.repos || []).find((x) => x.full_name === d.full_name) || {}).html_url);
   if (el("unfollow")) el("unfollow").onclick = () => {
-    // Protection (1.9.2) : « ne plus suivre » demande désormais une confirmation explicite. Le dossier
-    // local et son contenu ne sont PAS touchés — seul le suivi dans SituLab est retiré.
-    openModal("Ne plus suivre ce dépôt ?", `<div class="field"><div class="callout">SituLab cessera d'afficher le clone local <b>${esc(d.local_path)}</b>. <b>Aucun fichier n'est supprimé</b> : le dossier reste sur votre poste et peut être resuivi plus tard.</div></div>`, async () => {
-      try { await App().RemoveLocalRepo(d.local_path); closeModal(); toast("Dépôt retiré du suivi", "ok"); navTo("organize"); } catch (e) { toast(cleanErr(e), "err"); }
+    // « Ne plus suivre » : retire le clone local du suivi SituLab. AUCUN fichier n'est supprimé.
+    confirmDelete({
+      title: "Ne plus suivre ce dépôt ?",
+      lead: `SituLab cessera d'afficher le clone local <b>${esc(d.local_path)}</b>.`,
+      items: ["Le suivi de ce clone dans SituLab (l'appairage)"],
+      safe: ["Aucun fichier n'est supprimé : le dossier reste sur votre poste", "Vous pourrez le resuivre plus tard"],
+      confirmLabel: "Ne plus suivre",
+      onConfirm: async () => { await App().RemoveLocalRepo(d.local_path); toast("Dépôt retiré du suivi", "ok"); navTo("organize"); },
     });
-    el("modal-ok").textContent = "Ne plus suivre";
   };
   if (el("git-local")) el("git-local").onclick = () => gitLocalModal(d);
   if (el("repo-settings")) el("repo-settings").onclick = () => repoSettingsModal(d);
@@ -720,8 +723,10 @@ function paintHisto(body, liveOnly) {
     const subject = nl < 0 ? full : full.slice(0, nl);
     const bodyTxt = nl < 0 ? "" : full.slice(nl + 1).trim();
     const sha = esc(c.sha || "");
-    // Sceau d'après la PRÉSENCE du trailer dans le message en ligne (pas besoin de clone local).
-    const signed = hasAttestTrailer(c.message);
+    // Sceau d'après le drapeau calculé par le serveur sur le message COMPLET (le message transporté est
+    // tronqué au sujet, donc le trailer n'y est pas) — fonctionne en ligne, atelier ET vitrine, sans
+    // clone local. Repli : détection directe si un jour le message complet est présent.
+    const signed = !!c.signed || hasAttestTrailer(c.message);
     if (signed) signedN++;
     const badge = signed
       ? `<span class="att-badge ok" data-att="${sha}" title="Signé via SituLab — garantie d'origine">${SEAL_SVG}</span>`
@@ -780,10 +785,12 @@ async function enrichAttestation(d) {
   document.querySelectorAll(".cmt[data-sha]").forEach((row) => {
     shown++;
     const v = map[row.dataset.sha], badge = row.querySelector(".att-badge");
-    if (v && v.verified) {
-      if (badge) { badge.className = "att-badge ok"; badge.innerHTML = SEAL_SVG; badge.title = "Signé via SituLab — garantie d'origine vérifiée localement" + (v.subject ? " · " + v.subject : ""); }
-      row.classList.add("signed"); signed++;
-    }
+    // Le sceau posé par paintHisto d'après le drapeau serveur fait FOI : la vérification locale ne fait
+    // qu'ENRICHIR (confirmer cryptographiquement), jamais retirer un sceau — sinon un clone local absent
+    // ou périmé effacerait à tort des sceaux pourtant présents sur le commit en ligne.
+    const alreadySealed = !!(badge && badge.classList.contains("ok"));
+    if (v && v.verified && badge) { badge.className = "att-badge ok"; badge.innerHTML = SEAL_SVG; badge.title = "Signé via SituLab — garantie d'origine vérifiée localement" + (v.subject ? " · " + v.subject : ""); row.classList.add("signed"); }
+    if (alreadySealed || (v && v.verified)) signed++;
   });
   // Résumé recalculé d'après la vérification locale (remplace l'estimation faite sur le message en ligne).
   const sum = el("att-summary");

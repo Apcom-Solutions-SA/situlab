@@ -8,14 +8,16 @@ import (
 	"sync"
 	"time"
 
+	"situlab/internal/core"
 	"situlab/internal/daemon"
 
 	wailsrt "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // pinPromptTTL borne l'attente d'une saisie de PIN : au-delà, la demande expire (PINTimedOut) pour ne
-// jamais bloquer éternellement un appel d'agent. Durée volontairement affichée aussi dans ErrPINTimeout.
-const pinPromptTTL = 2 * time.Minute
+// jamais bloquer éternellement un appel d'agent. Source UNIQUE : core.PINPromptTTL (même durée que le
+// compte à rebours affiché et le message d'expiration — besoin #6).
+const pinPromptTTL = core.PINPromptTTL
 
 // guiPrompter réalise la demande de PIN « à la git » : quand le démon a besoin du PIN
 // (déverrouiller pour lire, confirmer pour écrire), il fait surgir une fenêtre de saisie
@@ -73,9 +75,13 @@ func (p *guiPrompter) PromptPIN(reason string, detail any, action, intent string
 	// STANDARD, sans le contexte de l'action. En répétant l'évènement, on garantit que la fenêtre de
 	// requête d'agent (contextuelle) finit par s'afficher et PRENNE LA MAIN sur l'écran standard.
 	// Idempotent côté frontend : une ré-émission est ignorée tant que la fenêtre est déjà ouverte.
-	payload := map[string]any{"reason": reason, "detail": detail, "action": action, "intent": intent}
-	wailsrt.EventsEmit(p.ctx, "situlab:pin-request", payload)
+	// Échéance calculée AVANT la charge utile pour la transmettre au frontend : il affiche un compte à
+	// rebours visible et bascule proprement en « délai écoulé » au lieu de rester figé (besoin #6). La
+	// même échéance borne le garde-fou ci-dessous : frontend et démon expirent ensemble.
 	deadline := time.Now().Add(pinPromptTTL)
+	payload := map[string]any{"reason": reason, "detail": detail, "action": action, "intent": intent,
+		"deadlineMs": deadline.UnixMilli(), "ttlSec": core.PINPromptTTLSeconds()}
+	wailsrt.EventsEmit(p.ctx, "situlab:pin-request", payload)
 	reping := time.NewTicker(500 * time.Millisecond)
 	defer reping.Stop()
 

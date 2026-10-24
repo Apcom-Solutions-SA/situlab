@@ -3,9 +3,9 @@
 > Court par choix. **SituLab EST la carte** : interroge-le (`situlab map`, `--output json`,
 > `situlab <groupe> --help`) au lieu de deviner. Ce fichier **cadre et oriente** ; il ne recopie pas la
 > référence des commandes (elle vit dans `situlab --help`, toujours à jour). Lisible aussi dans l'app
-> (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.16.3**.
+> (menu *Aide*). Binaire : `situlab` (Windows : `situlab.exe`). Version : **1.17.0**.
 
-## Si tu es l'assistant IA — commence ici
+## Si tu es l'agent IA — commence ici
 
 1. **SituLab est la porte unique** vers le **git** (Forgejo/GitHub), les **clouds souverains** (CORPUS)
    et les **sauvegardes** (BACKUP) de l'utilisateur. Tu passes **toujours** par lui ; tu n'as **jamais**
@@ -29,7 +29,7 @@
    service de garantie APCOM** (preuve « fait via SituLab », clé jamais sur le poste). Tu n'as rien à
    faire. **Ne retire ni n'altère jamais le trailer `SituLab-Approved:`** — cela efface la preuve.
 6. **Notre collaboration** : la section en bas (ajoutée au dépôt) donne la façon de travailler convenue
-   avec l'utilisateur. Lis-la ; tu peux l'enrichir. L'humain l'édite aussi dans *Réglages → Assistant IA*.
+   avec l'utilisateur. Lis-la ; tu peux l'enrichir. L'humain l'édite aussi dans *le menu Agent IA*.
 
 ## La carte — où est quoi
 
@@ -50,7 +50,8 @@
   (agent sans terminal). Mêmes opérations, même consentement PIN, même signature.
 - **Les quatre univers.** **KERNEL** = le dépôt qui *est* la mémoire. **SPOKES** = projections de
   mission rattachées à un KERNEL. **CORPUS** = clouds de fichiers souverains, **accès IA borné par
-  dossier** (tu ne vois que l'autorisé — fail-closed). **BACKUP** = plans de sauvegarde git → cloud.
+  dossier** (tu ne vois que l'autorisé — fail-closed). **BACKUP** = plans de sauvegarde git → cloud,
+  **sans PIN** (routine additive) : ils se font seuls à l'ouverture/fermeture ou sur action manuelle.
 - **local ↔ atelier ↔ vitrine.** Le clone **local** a pour `origin` l'**atelier** (lien **EXACT**, même
   URL). La **vitrine** (production) est un dépôt **séparé**, alimenté par **promotion** (version/tag)
   sous PIN — **jamais** par un push direct. Le local ne « connaît » que son atelier.
@@ -83,5 +84,5 @@ L'écran **Dépôts** se tient à jour tout seul ; un clic ouvre le détail (Ape
 Rien ne part en ligne sans ton **PIN**.
 
 ---
-<!-- Notre collaboration — section ajoutée au dépôt, éditable dans Réglages → Assistant IA.
+<!-- Notre collaboration — section ajoutée au dépôt, éditable dans le menu Agent IA.
      L'agent la lit au démarrage et peut l'enrichir (préférences, conventions, dépôts clés). -->

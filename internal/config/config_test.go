@@ -61,3 +61,18 @@ func TestAddLocalRepoDedup(t *testing.T) {
 		t.Errorf("déduplication ratée : %v", c.LocalRepos)
 	}
 }
+
+// AgentsDocPath (1.17) : la fiche de référence vit dans le dossier de config (survit aux mises à jour),
+// nommée AGENTS.md, à côté de config.json.
+func TestAgentsDocPath(t *testing.T) {
+	p := AgentsDocPath()
+	if filepath.Base(p) != "AGENTS.md" {
+		t.Fatalf("nom de fichier = %q, attendu AGENTS.md", filepath.Base(p))
+	}
+	if filepath.Dir(p) != Dir() {
+		t.Fatalf("dossier = %q, attendu %q (dossier de config)", filepath.Dir(p), Dir())
+	}
+	if filepath.Dir(p) != filepath.Dir(Path()) {
+		t.Fatalf("la fiche doit être à côté de config.json (%q vs %q)", filepath.Dir(p), filepath.Dir(Path()))
+	}
+}

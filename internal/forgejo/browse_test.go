@@ -219,3 +219,72 @@ func TestListCommitsRangeTruncatedAtMaxPages(t *testing.T) {
 		t.Errorf("dernière page demandée %d, attendu %d (pas de lecture au-delà de la borne)", rec.maxPage(), maxPages)
 	}
 }
+
+// LatestTag ne doit lire qu'UNE page d'UN élément (l'API renvoie les tags du plus récent au plus
+// ancien) : on vérifie le tag retourné, et qu'aucune pagination n'a lieu (perf 1.17).
+func TestLatestTagSinglePage(t *testing.T) {
+	var pages int
+	var gotPage, gotLimit string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/repos/apcom/glim/tags") {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"message":"not found"}`)
+			return
+		}
+		pages++
+		gotPage = r.URL.Query().Get("page")
+		gotLimit = r.URL.Query().Get("limit")
+		io.WriteString(w, `[{"name":"v1.4.0","commit":{"sha":"aaa"}},{"name":"v1.3.0","commit":{"sha":"bbb"}}]`)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewKind(srv.URL, "tok", "test", KindForgejo)
+
+	tag, ok, err := c.LatestTag(context.Background(), "apcom", "glim")
+	if err != nil {
+		t.Fatalf("LatestTag: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok attendu à true (le dépôt a des tags)")
+	}
+	if tag.Name != "v1.4.0" {
+		t.Fatalf("dernier tag = %q, attendu v1.4.0", tag.Name)
+	}
+	if pages != 1 {
+		t.Fatalf("%d requêtes servies, attendu 1 (aucune pagination)", pages)
+	}
+	if gotPage != "1" || gotLimit != "1" {
+		t.Fatalf("requête page=%q limit=%q, attendu page=1 limit=1", gotPage, gotLimit)
+	}
+}
+
+// Dépôt sans aucun tag : ok=false, sans erreur.
+func TestLatestTagNone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[]`)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewKind(srv.URL, "tok", "test", KindForgejo)
+
+	_, ok, err := c.LatestTag(context.Background(), "apcom", "glim")
+	if err != nil {
+		t.Fatalf("LatestTag: %v", err)
+	}
+	if ok {
+		t.Fatal("ok attendu à false (aucun tag)")
+	}
+}
+
+// Le sceau d'origine se détecte sur le message COMPLET (le trailer est sur une ligne après le sujet) :
+// sans quoi l'historique en ligne (message tronqué au sujet) ne le montrerait jamais.
+func TestHasApprovedTrailer(t *testing.T) {
+	signed := "Promotion v1.16.4 (depuis l'atelier)\n\nSituLab-Approved: eyJjZXJ0Ijp..."
+	if !hasApprovedTrailer(signed) {
+		t.Fatal("trailer d'attestation non détecté sur un message complet signé")
+	}
+	if hasApprovedTrailer("Un commit ordinaire\n\nsans sceau") {
+		t.Fatal("faux positif : trailer détecté sur un message non signé")
+	}
+	if hasApprovedTrailer("SituLab-Approved juste dans le sujet, pas un trailer") {
+		t.Fatal("faux positif : « SituLab-Approved » sans deux-points n'est pas le trailer")
+	}
+}

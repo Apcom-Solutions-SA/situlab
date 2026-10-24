@@ -44,7 +44,7 @@ async function renderSpokes() {
       : `<button type="button" class="lnk run-set" data-run="${esc(p.name)}">📄 Définir le fichier run</button>`;
     return `<div class="desig-wrap">${classeurCardHTML(p)}
       <div class="desig-meta">${link}</div>
-      <div class="desig-meta">${runLink}<button type="button" class="lnk danger" data-remove="${esc(p.name)}">Retirer</button></div></div>`;
+      <div class="desig-meta">${runLink}<button type="button" class="icon-del" data-remove="${esc(p.name)}" title="Retirer le spoke « ${esc(p.name)} »" aria-label="Retirer le spoke « ${esc(p.name)} »">${ICO_TRASH}</button></div></div>`;
   }).join("")}</div>`;
   home.onclick = (ev) => {
     const rm = ev.target.closest("[data-remove]");
@@ -102,11 +102,18 @@ async function setSpokeParent(name, kernel) {
 
 // removeSpokeFlow : retire la DÉSIGNATION spoke (le dépôt n'est pas touché).
 function removeSpokeFlow(name) {
-  openModal("Retirer ce spoke ?", `<div class="field"><div class="callout">« ${esc(name)} » ne sera plus marqué comme <b>spoke</b>. Le dépôt n'est <b>pas</b> touché — il reste dans vos dépôts appairés.</div></div>`, async () => {
-    try { await App().RemoveSpoke(name); closeModal(); toast("Spoke retiré", "ok"); renderSpokes(); }
-    catch (e) { if (isLocked(e)) return handleLock(); toast(cleanErr(e), "err"); }
+  confirmDelete({
+    title: `Retirer le spoke « ${esc(name)} » ?`,
+    lead: `« ${esc(name)} » ne sera plus <b>marqué comme spoke</b> dans SituLab.`,
+    items: ["La désignation spoke (marquage + fichier d'ouverture associé)"],
+    safe: ["Le dépôt n'est pas supprimé ni dé-cloné — il reste dans vos dépôts appairés", "Le contenu sur le disque et le serveur n'est pas touché"],
+    confirmLabel: "Retirer ce spoke",
+    onConfirm: async () => {
+      try { await App().RemoveSpoke(name); } catch (e) { if (isLocked(e)) { handleLock(); return; } throw e; }
+      toast("Spoke retiré", "ok");
+      renderSpokes();
+    },
   });
-  el("modal-ok").textContent = "Retirer";
 }
 
 // pickSpokeRepo : désigner un spoke = CHOISIR l'un de ses DÉPÔTS APPAIRÉS. Plug-and-play : au clic, on
@@ -219,7 +226,5 @@ function spokeModal(sp, prefill) {
     const cur = { name: el("sp-n").value.trim(), kernel: el("sp-k").value, mission: el("sp-m").value.trim(), instance: el("sp-i").value };
     openRepoPicker((r) => spokeModal(null, { name: cur.name || r.name, path: r.path, kernel: cur.kernel, mission: cur.mission, instance: cur.instance }));
   };
-  if (el("sp-rm")) el("sp-rm").onclick = async () => {
-    try { await App().RemoveSpoke(sp.name); closeModal(); toast("Spoke retiré", "ok"); renderSpokes(); } catch (e) { const er = el("sp-e"); er.textContent = cleanErr(e); er.classList.remove("hidden"); }
-  };
+  if (el("sp-rm")) el("sp-rm").onclick = () => removeSpokeFlow(sp.name);
 }

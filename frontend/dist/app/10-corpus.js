@@ -95,7 +95,7 @@ async function renderCorpusBoard(clouds) {
     return;
   }
   let health = {};
-  try { (await App().CloudHealth() || []).forEach((h) => { health[h.name] = h; }); } catch (_) {}
+  try { (await cloudHealthCached() || []).forEach((h) => { health[h.name] = h; }); } catch (_) {}
   board.innerHTML = clouds
     .map((fc) => {
       const h = health[fc.name], reach = h ? (h.ok ? "ok" : "ko") : "unknown";
@@ -130,7 +130,7 @@ function renderCorpusCloud(fc, clouds) {
         <button class="btn btn-ghost btn-sm" id="cc-ai">🤖 Accès IA</button>
         <button class="btn btn-ghost btn-sm" id="cc-pin">🔒 PIN</button>
         ${fc.default ? "" : `<button class="btn btn-ghost btn-sm" id="cc-def">Par défaut</button>`}
-        <button class="btn btn-ghost btn-sm" id="cc-del">Supprimer</button>
+        <button class="icon-del" id="cc-del" title="Supprimer ce cloud" aria-label="Supprimer ce cloud">${ICO_TRASH}</button>
       </div>
     </div>
     <div class="cc-allow" id="cc-allow"></div>
@@ -217,7 +217,7 @@ async function loadCorpusDir() {
       return `<div class="cc-row">
         <button class="cc-name${e.is_dir ? " dir" : ""}" ${e.is_dir ? `data-open="${i}"` : `data-dl="${i}"`}>
           ${dot}<span class="cc-ei">${e.is_dir ? "📁" : "📄"}</span>${esc(e.name)}${e.is_dir ? "" : `<span class="cc-size">${fmtBytes(e.size)}</span>`}</button>
-        <div class="cc-rowact">${e.is_dir ? "" : `<button class="btn btn-ghost btn-sm" data-dl="${i}" title="Télécharger">📥</button>`}<button class="btn btn-ghost btn-sm cc-del1" data-del="${i}" title="Supprimer">🗑</button></div>
+        <div class="cc-rowact">${e.is_dir ? "" : `<button class="btn btn-ghost btn-sm" data-dl="${i}" title="Télécharger">📥</button>`}<button class="icon-del cc-del1" data-del="${i}" title="Supprimer" aria-label="Supprimer">${ICO_TRASH}</button></div>
       </div>`;
     })
     .join("");
@@ -359,18 +359,20 @@ function pinConfirmOrSession(fc, action, reason, fn, done) {
 }
 
 function removeCloudFlow(fc, onDone) {
-  openModal("Déconnecter le cloud", `<div class="field"><p class="sub">Retirer la connexion <b>${esc(fc.name)}</b> ? Les fichiers du cloud ne sont pas touchés ; seule la connexion (et son mot de passe chiffré) est retirée de SituLab.</p></div>`, async () => {
-    try {
+  confirmDelete({
+    title: `Déconnecter le cloud « ${esc(fc.name)} » ?`,
+    lead: `La connexion cloud <b>${esc(fc.name)}</b> sera retirée de SituLab.`,
+    items: ["La connexion et son mot de passe chiffré", "Les périmètres d'accès IA définis pour ce cloud"],
+    safe: ["Vos fichiers sur le cloud ne sont pas touchés", "Les sauvegardes déjà déposées restent en place"],
+    confirmLabel: "Déconnecter le cloud",
+    onConfirm: async () => {
       await App().RemoveFileCloud(fc.name);
+      if (typeof invalidateCloudHealth === "function") invalidateCloudHealth();
       state.corpusCloud = "";
-      closeModal();
       toast("Cloud déconnecté", "ok");
       (onDone || renderCorpus)();
-    } catch (e) {
-      toast(cleanErr(e), "err");
-    }
+    },
   });
-  el("modal-ok").textContent = "Déconnecter";
 }
 
 // --- Aides URL pour les liens DYNAMIQUES du tunnel ---
@@ -497,6 +499,7 @@ function addCloudModal(onDone) {
       el("modal-ok").disabled = true; el("modal-ok").textContent = "Connexion…";
       try {
         await App().AddFileCloud(W.name, W.kind, W.url, user, pw);
+        if (typeof invalidateCloudHealth === "function") invalidateCloudHealth();
         closeModal();
         toast("Cloud « " + W.name + " » connecté", "ok");
         state.corpusCloud = W.name;

@@ -136,11 +136,37 @@ function pinConfirm(reason, onPin) {
     <label>Votre PIN SituLab</label><div id="pc-pin"></div>
     <div class="inline-error hidden" id="pc-err"></div></div>`, async () => {
     const err = el("pc-err"); err.classList.add("hidden");
-    try { await onPin(ci.read()); }
+    // Succès → on ferme la fenêtre ICI, de façon centrale : auparavant chaque appelant devait penser à
+    // le faire et certains l'oubliaient (ex. « Sauvegarder maintenant »), laissant la modale figée après
+    // un PIN pourtant accepté. Échec → on garde la fenêtre ouverte et on affiche l'erreur (ressaisie).
+    // Un closeModal() redondant d'un appelant reste sans effet (idempotent) ; aucun appelant n'ouvre de
+    // modale de suite dans onPin, donc rien à écraser.
+    try { await onPin(ci.read()); closeModal(); }
     catch (e) { err.textContent = cleanErr(e); err.classList.remove("hidden"); ci.clear(); }
   });
   el("modal-ok").textContent = "Confirmer";
   ci = codeInput(el("pc-pin"), true, () => modalOk(), true);
+}
+
+// connLogo : pastille-logo de marque pour une carte de connexion (git OU cloud). Tuile arrondie aux
+// couleurs de la marque + glyphe blanc inline (zéro dépendance, CSP-safe, net en clair comme en sombre).
+// kind : github | forgejo | gitea | nextcloud | kdrive (défaut : git générique).
+function connLogo(kind) {
+  const g = {
+    github: `<svg viewBox="0 0 16 16" fill="#fff" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>`,
+    forgejo: `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="5" r="2"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="9" r="2"/><path d="M7 7v10M17 11c0 3-2.2 4.5-5 4.5H7"/></svg>`,
+    nextcloud: `<svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><circle cx="12" cy="12" r="3.7"/><circle cx="4.4" cy="12" r="2.2"/><circle cx="19.6" cy="12" r="2.2"/></svg>`,
+    kdrive: `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/><path d="M10 9l-3 3 3 3M14 9l3 3-3 3"/></svg>`,
+  };
+  const k = kind === "gitea" ? "forgejo" : kind;
+  const glyph = g[k] || `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 8.2v7.6M8.1 7.1 15.4 9M6 15.8c0-3 .5-4.8 3.5-4.8H15"/></svg>`;
+  return `<span class="conn-logo conn-logo-${esc(k)}">${glyph}</span>`;
+}
+
+// connStatus : pastille d'état reprise du header (point coloré + libellé), répétée sur chaque carte.
+// state : ok | ko | warn | idle.
+function connStatus(st, label) {
+  return `<span class="conn-status ${st}"><span class="conn-status-dot"></span>${esc(label)}</span>`;
 }
 
 // providerLogo : logo inline (zéro dépendance, CSP-safe) pour les cartes de choix de serveur.
@@ -284,9 +310,33 @@ function reconnectModal(name, opts) {
 
 // purgeDataModal : effacement total des données locales (v1.4.1). Confirmation par saisie, puis
 // vide aussi le localStorage de la fenêtre (thème, mode avancé) et repart sur l'onboarding.
+// confirmDelete : dialogue STANDARD et soigné de confirmation de suppression (1.17) — utilisé par
+// TOUTES les suppressions non protégées par PIN, pour une UI cohérente qui énonce clairement les
+// conséquences. opts : title · lead (phrase d'accroche) · items[] (ce qui sera supprimé) · safe[] (ce
+// qui n'est PAS touché, rassurant) · irreversible (bool) · confirmLabel · onConfirm (async). Le texte
+// des listes est du contenu MAISON (HTML autorisé) ; les noms venant des données sont échappés par
+// l'appelant. Les erreurs de onConfirm s'affichent dans le dialogue ; succès → fermeture.
+function confirmDelete(opts) {
+  opts = opts || {};
+  const items = (opts.items || []).filter(Boolean).map((t) => `<li>${t}</li>`).join("");
+  const safe = (opts.safe || []).filter(Boolean).map((t) => `<li>${t}</li>`).join("");
+  openModal(opts.title || "Confirmer la suppression", `<div class="field confirm-del">
+    <div class="cd-head"><span class="cd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6"/></svg></span>
+      ${opts.lead ? `<p class="cd-lead">${opts.lead}</p>` : ""}</div>
+    ${items ? `<div class="cd-sec"><div class="cd-sec-h cd-rm">Sera supprimé</div><ul class="cd-list cd-list-rm">${items}</ul></div>` : ""}
+    ${safe ? `<div class="cd-sec"><div class="cd-sec-h cd-keep">N'est pas touché</div><ul class="cd-list cd-list-keep">${safe}</ul></div>` : ""}
+    ${opts.irreversible ? `<div class="cd-irrev">⚠ Action <b>irréversible</b>.</div>` : ""}
+    <div class="inline-error hidden" id="cd-err"></div></div>`, async () => {
+    const er = el("cd-err"); if (er) er.classList.add("hidden");
+    try { await opts.onConfirm(); closeModal(); }
+    catch (e) { if (er) { er.textContent = cleanErr(e); er.classList.remove("hidden"); } else { toast(cleanErr(e), "err"); } }
+  });
+  const ok = el("modal-ok"); if (ok) { ok.textContent = opts.confirmLabel || "Supprimer"; ok.classList.add("danger-btn"); }
+}
+
 function purgeDataModal() {
   openModal("Effacer mes données de ce poste", `<div class="field">
-    <div class="callout warn"><b>Action irréversible.</b> Vos connexions, votre trousseau chiffré (jetons), vos réglages et les jetons du coffre Windows seront supprimés de cette machine. Vos dépôts et fichiers déjà clonés sur le poste ne sont pas touchés.</div>
+    <div class="callout warn"><b>Action irréversible.</b> Seront supprimés de cette machine : <b>toutes vos connexions</b> (git <b>et</b> cloud) et leurs secrets (trousseau chiffré + jetons du coffre Windows), vos <b>réglages</b>, votre <b>classement</b> (KERNEL, spokes, tags, appairages, fichiers d'ouverture) et la <b>fiche AGENTS.md</b> de référence. Vos dépôts et fichiers déjà clonés sur le poste ne sont pas touchés.</div>
     <p class="sub">Le cache d'affichage (navigateur embarqué) étant utilisé par la fenêtre, il ne sera entièrement vidé qu'au prochain lancement — ou via la désinstallation avancée. Les éléments sensibles (jetons) sont, eux, effacés immédiatement.</p>
     <label>Pour confirmer, tapez <b>EFFACER</b><input id="pg-confirm" placeholder="EFFACER" autocomplete="off" /></label>
     <div class="inline-error hidden" id="pg-error"></div></div>`, async () => {
@@ -453,11 +503,11 @@ function pinFlowHTML(action, detail) {
   return "";
 }
 
-function pinRequestModal(reason, detail, action, intent) {
+function pinRequestModal(reason, detail, action, intent, deadlineMs) {
   // Le démon ré-émet "situlab:pin-request" jusqu'à réponse (fiabilité au démarrage à froid) : si la
   // fenêtre est déjà ouverte, on ignore la ré-émission (ne pas rouvrir ni vider la saisie en cours).
   if (pinModalOpen) return;
-  let ci;
+  let ci, pinTimer = null;
   pinModalOpen = true; // le poll d'arrière-plan ne doit pas empiler un second écran de déverrouillage
   // Au démarrage à froid, cette fenêtre peut s'ouvrir alors que le splash d'ouverture est encore
   // affiché (init() a rendu la main à la demande d'agent) : on masque le splash, sinon la modale
@@ -482,10 +532,12 @@ function pinRequestModal(reason, detail, action, intent) {
       <p class="tagline">${esc(reason)}</p>
       ${pinFlowHTML(action, detail)}
       ${pushPreviewHTML(detail)}</div>
-    <label>Votre PIN SituLab</label><div id="pin-input"></div>
-    <small>SituLab <b>constate</b> l'action réelle ci-dessus ; le message de l'agent est <b>déclaratif</b>. Votre PIN seul autorise — il ne quitte jamais SituLab. Si vous n'êtes pas à l'origine de cette demande, cliquez <b>Refuser</b>.</small></div>`, async () => {
+    <div id="pin-countdown" class="pin-countdown" aria-live="polite"></div>
+    <div id="pin-live"><label>Votre PIN SituLab</label><div id="pin-input"></div>
+    <small>SituLab <b>constate</b> l'action réelle ci-dessus ; le message de l'agent est <b>déclaratif</b>. Votre PIN seul autorise — il ne quitte jamais SituLab. Si vous n'êtes pas à l'origine de cette demande, cliquez <b>Refuser</b>.</small></div></div>`, async () => {
     let ok = false;
     try { await App().SubmitPIN(ci ? ci.read() : ""); ok = true; } catch (e) {}
+    if (pinTimer) { clearInterval(pinTimer); pinTimer = null; }
     pinModalOpen = false;
     closeModal();
     // Si l'écran de déverrouillage du frontend était affiché EN PARALLÈLE (le poll avait constaté le
@@ -500,12 +552,38 @@ function pinRequestModal(reason, detail, action, intent) {
   });
   ci = codeInput(el("pin-input"), true, () => modalOk(), true); // validation auto dès 6 chiffres
   if (isDel && el("modal-ok")) el("modal-ok").classList.add("danger-btn"); // bouton de confirmation rouge pour une suppression
-  // Refuser / fond / Échap : prévenir le démon tout de suite (sinon il attend 2 min).
-  const refuse = () => { pinModalOpen = false; try { App().CancelPIN(); } catch (e) {} closeModal(); };
+  // Refuser / fond / Échap : prévenir le démon tout de suite (sinon il attend le TTL complet).
+  const refuse = () => { if (pinTimer) { clearInterval(pinTimer); pinTimer = null; } pinModalOpen = false; try { App().CancelPIN(); } catch (e) {} closeModal(); };
   modalCancel = refuse;
   el("modal-cancel").textContent = "Refuser";
   el("modal-cancel").onclick = refuse;
   el("modal").onclick = (ev) => { if (ev.target === el("modal")) refuse(); };
+
+  // Compte à rebours visible (besoin #6) : l'utilisateur voit le temps qui reste pour valider. Le démon
+  // expire à la MÊME échéance (deadlineMs vient de lui) : à zéro, on bascule proprement en « délai
+  // écoulé » — saisie retirée, validation désactivée — au lieu de laisser la fenêtre figée. La demande
+  // est alors déjà refusée côté démon (PINTimedOut) ; « Fermer » referme simplement.
+  if (deadlineMs && deadlineMs > 0) {
+    const cd = el("pin-countdown");
+    const expire = () => {
+      if (pinTimer) { clearInterval(pinTimer); pinTimer = null; }
+      const live = el("pin-live"); if (live) live.classList.add("hidden");
+      if (cd) { cd.classList.add("pin-countdown-out"); cd.innerHTML = "⏱ Délai écoulé — la demande a expiré. Relancez l'action côté agent si besoin."; }
+      const ok = el("modal-ok"); if (ok) { ok.disabled = true; ok.classList.add("hidden"); }
+      const cx = el("modal-cancel"); if (cx) cx.textContent = "Fermer";
+    };
+    const tick = () => {
+      const left = Math.round((deadlineMs - Date.now()) / 1000);
+      if (left <= 0) return expire();
+      if (cd) {
+        const mm = Math.floor(left / 60), ss = left % 60;
+        cd.classList.toggle("pin-countdown-warn", left <= 20);
+        cd.innerHTML = `⏱ Temps pour valider : <b>${mm}:${String(ss).padStart(2, "0")}</b>`;
+      }
+    };
+    tick();
+    pinTimer = setInterval(tick, 1000);
+  }
 }
 
 /* ---------------- Aide contextuelle (1.9.11) ---------------- */

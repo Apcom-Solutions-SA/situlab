@@ -310,6 +310,8 @@ func (c *Client) Mkcol(ctx context.Context, p string) error {
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 		return nil
+	case http.StatusMethodNotAllowed:
+		return nil // le dossier existe déjà (MKCOL sur une collection existante) : pas une erreur
 	default:
 		return httpErr(resp)
 	}
@@ -329,6 +331,30 @@ func (c *Client) Delete(ctx context.Context, p string) error {
 	io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusNoContent, http.StatusNotFound:
+		return nil
+	default:
+		return httpErr(resp)
+	}
+}
+
+// Move déplace (renomme) une ressource d'un chemin cloud vers un autre (WebDAV MOVE). Le dossier de
+// destination doit exister. Overwrite=T : écrase une cible de même nom. Utilisé pour l'archivage des
+// bundles de sauvegarde (rotation). from/to sont des chemins cloud (échappés par urlFor).
+func (c *Client) Move(ctx context.Context, from, to string) error {
+	req, err := c.newReq(ctx, "MOVE", from, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Destination", c.urlFor(to))
+	req.Header.Set("Overwrite", "T")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 		return nil
 	default:
 		return httpErr(resp)

@@ -5,28 +5,17 @@ function applyModules() {
   const m = state.modules || {};
   const on = (k) => m[k] !== false;
   state.advanced = on("git_advanced"); // « Git avancé » = l'ancien mode avancé
-  [["corpus", "corpus"], ["spokes", "spokes"], ["backup", "backup"]].forEach(([mod, view]) => {
+  // Le module « agents » pilote l'entrée « Agent IA » du menu principal (v1.17, besoin #1).
+  [["corpus", "corpus"], ["spokes", "spokes"], ["backup", "backup"], ["agents", "ia"]].forEach(([mod, view]) => {
     const btn = document.querySelector(`.nav-item[data-view="${view}"]`);
     if (btn) btn.classList.toggle("hidden", !on(mod));
   });
   // Si la vue courante vient d'être masquée, on retombe sur KERNEL (toujours visible).
-  if ((state.view === "corpus" && !on("corpus")) || (state.view === "spokes" && !on("spokes")) || (state.view === "backup" && !on("backup"))) {
+  if ((state.view === "corpus" && !on("corpus")) || (state.view === "spokes" && !on("spokes")) || (state.view === "backup" && !on("backup")) || (state.view === "ia" && !on("agents"))) {
     if (typeof navTo === "function") navTo("kernel");
   }
 }
 
-// refreshOsboxNav : affiche l'entrée « Terminal » de la sidebar UNIQUEMENT quand l'OS de travail est
-// activé ET installé (sinon elle n'aurait aucun sens). Appelée au démarrage et à chaque changement
-// d'état de l'OS de travail (toggle, installation). Silencieuse si l'OS de travail est indisponible.
-async function refreshOsboxNav() {
-  const btn = el("nav-osterm");
-  if (!btn) return;
-  let show = false;
-  try { const st = await App().OSBoxStatus(); show = !!(st && st.enabled && st.installed); } catch (e) { show = false; }
-  btn.classList.toggle("hidden", !show);
-  // Si on était sur le terminal et qu'il vient de disparaître, on revient aux Réglages.
-  if (!show && state.view === "osterm" && typeof navTo === "function") navTo("settings");
-}
 
 async function showApp(instances) {
   hideBoot();
@@ -42,24 +31,33 @@ async function showApp(instances) {
   updateReadOnlyBanner();
   state.modules = await App().Modules().catch(() => ({}));
   applyModules();
-  refreshOsboxNav(); // entrée « Terminal » de la sidebar selon l'état de l'OS de travail (best-effort)
-  await updateGitBanner();
 
   // Revenir à la dernière vue de 1er niveau (ex. après une reconnexion admin qui recharge la page).
   try { const gv = sessionStorage.getItem("situlab.view"); if (gv && TOP_VIEWS.includes(gv)) state.view = gv; } catch (e) {}
 
-  await refreshDisconnected();
-  await refreshWhoami();
-  updateHealth(); // pastilles de santé git + cloud (remplace l'indicateur « en direct »)
-  if (typeof refreshPairingAlert === "function") refreshPairingAlert(); // pastille « à appairer » (best-effort)
-  // Mise en route canalisante (1.13) : calcule l'avancement et bride les menus de domaine tant que les
-  // étapes obligatoires ne sont pas faites ; atterrit sur la page « Mise en route » le cas échéant.
+  // Mise en route canalisante (1.13) : décide la vue d'atterrissage ; gardée AVANT le rendu (lectures
+  // locales : matrice, kernels, spokes, backups — pas d'allers-retours réseau).
   await refreshSetup();
   if (setupActive()) state.view = "setup";
+
+  // Peinture IMMÉDIATE avec le strict nécessaire local (modules → nav, lecture seule, vue). On n'enchaîne
+  // PLUS les appels réseau (Whoami, santé cloud, Doctor) AVANT le premier rendu — ils bloquaient la
+  // première peinture (perf 1.17, Point 2). Ils enrichissent ensuite en arrière-plan ; refreshWhoami
+  // re-rend tout seul si l'état « en ligne » bascule, et les pastilles se peignent une fois les données là.
   render();
   startLive();
   startAutoFetch(); // récupération de fond des nouveautés distantes (noyau : FetchAllLocal)
-  if (!setupActive()) maybeAutoTour(); // visite auto : seulement une fois la mise en route terminée
+  if (typeof installBackupProgress === "function") installBackupProgress(); // suivi visuel permanent des sauvegardes
+
+  Promise.allSettled([
+    updateGitBanner(),
+    refreshDisconnected(),
+    refreshWhoami(),
+    (typeof refreshPairingAlert === "function" ? refreshPairingAlert() : Promise.resolve()),
+  ]).then(() => {
+    updateHealth(); // pastilles de santé git + cloud, une fois les données fraîches
+    if (!setupActive()) maybeAutoTour(); // visite auto : seulement une fois la mise en route terminée
+  });
 }
 
 // updateGitBanner affiche un bandeau si git est absent du poste (SituLab pilote git, il ne le
@@ -158,6 +156,23 @@ function healthLabel(kind, tone, bad, total) {
   return (kind === "git" ? "Git" : "Cloud") + " " + (total - bad) + "/" + total;
 }
 
+// Cache court de la santé cloud (perf 1.17) : App().CloudHealth() teste chaque cloud par le réseau, et
+// plusieurs vues la réclament en rafale (pastilles d'en-tête + CORPUS + Réglages, souvent coup sur coup).
+// On mutualise le résultat quelques secondes et on dédoublonne les appels concurrents. Invalidé après une
+// mutation de cloud (ajout/suppression) ; sinon le TTL borne la fraîcheur.
+let _clHealth = { at: 0, data: null, inflight: null };
+const CLOUD_HEALTH_TTL = 15000;
+async function cloudHealthCached(force) {
+  if (!force && _clHealth.data && (Date.now() - _clHealth.at) < CLOUD_HEALTH_TTL) return _clHealth.data;
+  if (_clHealth.inflight) return _clHealth.inflight; // un seul ping en vol à la fois
+  _clHealth.inflight = App().CloudHealth().then((d) => {
+    _clHealth = { at: Date.now(), data: d || [], inflight: null };
+    return _clHealth.data;
+  }).catch((e) => { _clHealth.inflight = null; throw e; });
+  return _clHealth.inflight;
+}
+function invalidateCloudHealth() { _clHealth = { at: 0, data: null, inflight: null }; }
+
 let healthBusy = false;
 async function updateHealth() {
   const box = el("health");
@@ -175,7 +190,7 @@ async function updateHealth() {
     // Cloud : test best-effort de chaque connexion (peut être indisponible si session verrouillée).
     let cloudTone = "none", cloudBad = 0, cloudTotal = 0, cloudLocked = false;
     try {
-      const h = await App().CloudHealth();
+      const h = await cloudHealthCached();
       cloudTotal = (h || []).length;
       cloudBad = (h || []).filter((c) => !c.ok).length;
       cloudTone = healthTone(cloudBad, cloudTotal);
@@ -259,7 +274,7 @@ const isDisconnected = (name) => (state.disconnected || []).includes(name);
 
 // Vues de 1er niveau mémorisées (pour revenir au bon écran après un rechargement : reconnexion
 // admin, déverrouillage…). On exclut « detail » (dépend d'un état non reconstituable au reload).
-const TOP_VIEWS = ["projects", "organize", "corpus", "kernel", "spokes", "backup", "settings", "tokens", "admin", "directory", "stats", "help", "git"];
+const TOP_VIEWS = ["projects", "organize", "corpus", "kernel", "spokes", "backup", "ia", "settings", "tokens", "admin", "directory", "stats", "help", "git"];
 function navTo(view) {
   state.view = view;
   if (view !== "detail") state.detail = null;
@@ -278,7 +293,7 @@ function setNav(view) {
 const UM_VIEWS = ["admin", "directory", "stats"];
 // Écrans qui NE dépendent PAS de la connexion courante : restent ouverts même serveur déconnecté.
 // Projets (tableau de bord transverse), Réglages (où l'on se reconnecte), Aide (statique).
-const OFFLINE_OK_VIEWS = ["projects", "project", "corpus", "kernel", "spokes", "backup", "settings", "help", "git", "setup", "osterm"];
+const OFFLINE_OK_VIEWS = ["projects", "project", "corpus", "kernel", "spokes", "backup", "ia", "settings", "help", "git", "setup"];
 function render() {
   // La page « Dépôts » a été retirée (1.11) : son service (relier/assembler) vit désormais dans
   // Projets ▸ « Organiser mes dépôts ». On redirige toute vue « repos » résiduelle (vue mémorisée,
@@ -293,9 +308,6 @@ function render() {
   state._prevView = state.view;
   // Colonne plus étroite pour les écrans « formulaire » (Réglages, Projets) ; large ailleurs.
   const vw = el("view"); if (vw) vw.classList.toggle("narrow", state.view === "settings");
-  // Page terminal : la zone de contenu remplit sans padding ni scroll (le terminal gère son propre
-  // défilement interne) — évite un scroll vertical parasite qui masquerait la saisie.
-  const ct = document.querySelector(".content"); if (ct) ct.classList.toggle("content-term", state.view === "osterm");
   setNav((state.view === "detail" || state.view === "project" || state.view === "organize") ? "projects" : (UM_VIEWS.includes(state.view) ? "admin" : state.view));
   // Serveur courant déconnecté : on FIGE les écrans qui en dépendent et on explique comment revenir.
   // Projets et Réglages restent vivants (voir OFFLINE_OK_VIEWS).
@@ -308,7 +320,7 @@ function render() {
   else if (state.view === "spokes") renderSpokes();
   else if (state.view === "backup") renderBackup();
   else if (state.view === "bkjournal") renderBkJournal();
-  else if (state.view === "osterm") renderOSTerm();
+  else if (state.view === "ia") renderAssistantIA();
   else if (state.view === "project") renderProject(state.projectName);
   else if (state.view === "help") renderHelp();
   else if (state.view === "git") renderGit();

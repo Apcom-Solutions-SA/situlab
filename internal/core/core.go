@@ -30,8 +30,16 @@ import (
 	"situlab/internal/forgejo"
 	"situlab/internal/gitx"
 	"situlab/internal/keyring"
-	"situlab/internal/osbox"
 )
+
+// PINPromptTTL est la SOURCE UNIQUE du délai de garde d'une saisie de PIN (fenêtre de confirmation
+// déclenchée par un agent). Tout le reste en découle — le garde-fou du prompteur, le compte à rebours
+// affiché, le message d'expiration, l'indice CLI — pour qu'aucune durée ne soit recopiée en dur ailleurs
+// (v1.17, besoin #6). PINPromptTTLSeconds en donne la valeur entière, prête à insérer dans un texte.
+const PINPromptTTL = 2 * time.Minute
+
+// PINPromptTTLSeconds : le TTL en secondes (entier), pour les messages (« max 120 s »).
+func PINPromptTTLSeconds() int { return int(PINPromptTTL.Seconds()) }
 
 // Erreurs sentinelles mappées sur des codes de sortie CLI.
 var (
@@ -39,8 +47,9 @@ var (
 	ErrPINNeeded  = errors.New("PIN requis : confirmez l'action dans la fenêtre SituLab")
 	// ErrPINTimeout distingue, pour l'agent, le DÉLAI écoulé (personne n'a validé dans la fenêtre à
 	// temps) d'un refus explicite (ErrPINNeeded). Permet à la CLI/au MCP de dire « relance et valide »
-	// plutôt que « refusé ». La fenêtre reste le seul point de saisie (invariant inchangé).
-	ErrPINTimeout = errors.New("délai de confirmation du PIN écoulé : relancez l'action et validez la fenêtre SituLab sur le poste (max 120 s)")
+	// plutôt que « refusé ». La fenêtre reste le seul point de saisie (invariant inchangé). Durée tirée
+	// de PINPromptTTL (source unique) pour rester synchrone avec le compte à rebours affiché.
+	ErrPINTimeout = fmt.Errorf("délai de confirmation du PIN écoulé : relancez l'action et validez la fenêtre SituLab sur le poste (max %d s)", PINPromptTTLSeconds())
 	ErrNoGit      = errors.New("git n'est pas installé sur cette machine")
 	ErrPINLocked  = errors.New("trop d'essais : PIN temporairement verrouillé")
 	ErrLocked     = errors.New("session verrouillée : déverrouillez avec le PIN")
@@ -104,21 +113,15 @@ type Service struct {
 	pinFails  int
 	pinLockTo int64 // instant de fin de verrou (Unix s) ; 0 = pas de verrou
 
-	// Progression LIVE de l'installation de l'OS de travail (v1.15), tenue EN MÉMOIRE (éphémère,
-	// non persistée) : alimentée étape par étape par OSBoxPrepare, lue par OSBoxStatus. osboxProg.Active
-	// sert aussi de garde anti-double-lancement. Protégée par osboxMu.
-	osboxMu   sync.Mutex
-	osboxProg osbox.Progress
-
-	// Cache de la DÉTECTION LIVE des logiciels présents dans la box (sondage wsl coûteux) : évite de
-	// relancer une commande dans la box à chaque appel d'OSBoxStatus (polling). TTL court. Protégé par osboxDetMu.
-	osboxDetMu sync.Mutex
-	osboxDetAt time.Time
-	osboxDetSW []string
-
 	// migrated : l'import depuis l'ancien coffre OS est retenté à chaque ouverture de
 	// session TANT QUE non entièrement réussi (ne passe à true que sur succès complet).
 	migrated bool
+
+	// Avancement des SAUVEGARDES, poussé vers l'UI (événement "backup:progress") pour un suivi visuel
+	// permanent (manuel / ouverture / fermeture). bkBusy compte les sauvegardes en cours (≥1 = occupé).
+	bkMu   sync.Mutex
+	bkBusy int
+	bkProg func(BackupProgress)
 }
 
 type repoCache struct {

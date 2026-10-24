@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"situlab/internal/attest"
 	"situlab/internal/config"
@@ -17,7 +18,6 @@ import (
 	"situlab/internal/forgejo"
 	"situlab/internal/gitx"
 	"situlab/internal/ipc"
-	"situlab/internal/osbox"
 	"situlab/internal/webdav"
 
 	wailsrt "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -66,8 +66,7 @@ type App struct {
 	initErr   error // non nil si le noyau n'a pas pu s'initialiser
 	prompter  *guiPrompter
 	daemonSrv *ipc.Server
-	ptys      *ptyManager // sessions PTY du terminal de l'OS de travail (v1.15.1)
-	bh        *bridgeHost // pont hôte ⇄ box (situlab-bridge), v1.15.1
+	closing   atomic.Bool // vrai pendant la séquence « sauvegarde avant fermeture » (beforeClose)
 }
 
 // NewApp construit l'app GUI (le noyau est chargé au démarrage).
@@ -75,16 +74,51 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.ptys = newPtyManager()
 	a.svc, a.initErr = core.New(version)
 	if a.svc == nil {
 		return
 	}
 	a.svc.ImportModulesSeed() // primo-paramètres déposés par l'installateur (1er lancement), best-effort
+	// Suivi VISUEL des sauvegardes : on relaie l'avancement du cœur vers l'interface (événement Wails),
+	// pour un indicateur permanent, quel que soit le déclencheur (manuel / ouverture / fermeture).
+	a.svc.SetBackupProgress(func(ev core.BackupProgress) {
+		if a.ctx != nil {
+			wailsrt.EventsEmit(a.ctx, "backup:progress", ev)
+		}
+	})
 	// Cette fenêtre est aussi le DÉMON résident : elle sert les commandes CLI et détient
 	// la session. La modale PIN surgit ici quand une opération l'exige.
 	a.prompter = newGUIPrompter(ctx)
 	a.startDaemon()
+}
+
+// BackupBusy : une sauvegarde est-elle en cours ? (pour l'indicateur, au montage de l'interface.)
+func (a *App) BackupBusy() bool {
+	if a.svc == nil {
+		return false
+	}
+	return a.svc.BackupBusy()
+}
+
+// beforeClose (OnBeforeClose) : si des sauvegardes « à la fermeture » sont prévues, on NE ferme pas
+// tout de suite — on affiche un écran « sauvegarde en cours avant fermeture », on exécute les plans
+// (avec leur suivi visuel), puis on quitte. L'utilisateur voit ce qui se passe et sait qu'il ne doit
+// pas forcer la fermeture. Retourner true = empêcher la fermeture immédiate.
+func (a *App) beforeClose(ctx context.Context) bool {
+	if a.svc == nil || a.closing.Load() {
+		return false // rien à faire, ou fermeture déjà en cours → laisser fermer
+	}
+	if !a.svc.HasDueBackups("on_close") {
+		return false // aucune sauvegarde de fermeture → fermer tout de suite
+	}
+	a.closing.Store(true)
+	wailsrt.EventsEmit(a.ctx, "backup:closing", map[string]any{"active": true})
+	go func() {
+		a.svc.RunDueBackups("on_close")
+		wailsrt.EventsEmit(a.ctx, "backup:closing", map[string]any{"active": false})
+		wailsrt.Quit(a.ctx)
+	}()
+	return true
 }
 
 // startDaemon démarre le serveur IPC, sauf si un démon tourne déjà (autre fenêtre ouverte).
@@ -125,8 +159,45 @@ func (a *App) ready() error {
 // AppVersion renvoie la version.
 func (a *App) AppVersion() string { return version }
 
-// Doc renvoie la documentation embarquée (Markdown) — utile aux humains comme aux agents.
-func (a *App) Doc() string { return agentsDoc }
+// Doc renvoie la fiche AGENTS.md (Markdown) — utile aux humains comme aux agents. On lit d'abord la
+// copie « administrée à la source » (dossier de config, survit aux mises à jour) si elle existe ;
+// sinon on retombe sur le fichier embarqué. L'utilisateur voit ainsi toujours la fiche de référence.
+func (a *App) Doc() string {
+	if b, err := os.ReadFile(config.AgentsDocPath()); err == nil && len(b) > 0 {
+		return string(b)
+	}
+	return agentsDoc
+}
+
+// AgentsDocPath renvoie le chemin de la fiche AGENTS.md administrée à la source (toujours le même,
+// qu'elle existe déjà ou non) — pour l'afficher et pour le communiquer à l'agent IA.
+func (a *App) AgentsDocPath() string { return config.AgentsDocPath() }
+
+// AgentsDocExists indique si la fiche de référence a déjà été enregistrée à la source.
+func (a *App) AgentsDocExists() bool {
+	fi, err := os.Stat(config.AgentsDocPath())
+	return err == nil && !fi.IsDir()
+}
+
+// SaveAgentsDocToSource écrit (ou réécrit) la fiche de référence AGENTS.md dans le dossier de
+// configuration de SituLab. Contrairement à un dépôt dans un projet, cette copie est UNIQUE, stable
+// et survit aux mises à jour : c'est elle que l'agent lira au chemin indiqué (v1.17). Renvoie le chemin.
+func (a *App) SaveAgentsDocToSource() (string, error) {
+	if err := a.ready(); err != nil {
+		return "", err
+	}
+	p := config.AgentsDocPath()
+	content := agentsDoc + "\n\n## Notre collaboration (maintenue avec mon IA)\n\n" +
+		"_Cette section est la nôtre : notes de travail entre moi et mon assistant. Mon IA peut la compléter ; je peux l'éditer dans SituLab (Agent IA)._\n\n" +
+		strings.TrimSpace(a.svc.AgentNotes()) + "\n"
+	if err := os.MkdirAll(config.Dir(), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return p, nil
+}
 
 // Modules renvoie l'état des groupes de modules d'interface (v1.13).
 func (a *App) Modules() map[string]bool { return a.svc.Modules() }
@@ -145,80 +216,6 @@ func (a *App) SetModules(mods map[string]bool) error {
 		return err
 	}
 	return a.svc.SetModules(mods)
-}
-
-// --- OS de travail séparé (v1.15), OPT-IN ---
-
-// OSBoxStatus : état consolidé (config + détection live).
-func (a *App) OSBoxStatus() osbox.Status { return a.svc.OSBoxStatus() }
-
-// OSBoxSetEnabled : active/désactive l'OPTION (ne crée rien ; la préparation est un geste distinct).
-func (a *App) OSBoxSetEnabled(on bool) error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	if !on {
-		a.stopBridge()
-	}
-	return a.svc.OSBoxSetEnabled(on)
-}
-
-// OSBoxPrepare : installe la box (long). Lancé en ARRIÈRE-PLAN ; l'interface suit via OSBoxStatus.
-func (a *App) OSBoxPrepare() error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	go func() { _ = a.svc.OSBoxPrepare() }()
-	return nil
-}
-
-func (a *App) OSBoxStart() error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	if err := a.svc.OSBoxStart(); err != nil {
-		return err
-	}
-	go a.reprovisionBridge() // re-synchronise le canal situlab-bridge si installé (best-effort)
-	return nil
-}
-func (a *App) OSBoxStop() error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	a.stopBridge()
-	return a.svc.OSBoxStop()
-}
-func (a *App) OSBoxReset() error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	a.stopBridge()
-	return a.svc.OSBoxReset()
-}
-func (a *App) OSBoxExec(line string) (string, error) {
-	if err := a.ready(); err != nil {
-		return "", err
-	}
-	return a.svc.OSBoxExec(line)
-}
-
-// OSBoxExecSession : exécute une commande dans un répertoire donné et renvoie sortie + nouveau cwd
-// (persistance de `cd` par onglet de terminal).
-func (a *App) OSBoxExecSession(cwd, line string) (core.OSBoxExecResult, error) {
-	if err := a.ready(); err != nil {
-		return core.OSBoxExecResult{}, err
-	}
-	return a.svc.OSBoxExecSession(cwd, line)
-}
-
-// OSBoxInstallSoftware : installe un logiciel dans la box (carte), en arrière-plan.
-func (a *App) OSBoxInstallSoftware(id string) error {
-	if err := a.ready(); err != nil {
-		return err
-	}
-	go func() { _, _ = a.svc.OSBoxInstallSoftware(id) }()
-	return nil
 }
 
 // License renvoie le texte complet de la licence (Apache 2.0).
@@ -510,15 +507,12 @@ func (a *App) Unlock(pin string) error {
 	return nil
 }
 
-// shutdown : à la fermeture de la fenêtre, exécute (synchronement, best-effort) les plans de
-// sauvegarde « à la fermeture » qui n'exigent pas de PIN. L'utilisateur a choisi cette routine : on
-// accepte d'attendre la fin de l'envoi avant de quitter.
+// shutdown : la fenêtre se ferme. Les sauvegardes « à la fermeture » sont exécutées EN AMONT par
+// beforeClose (avec l'écran de suivi), pas ici — pour que l'utilisateur voie la procédure avant que la
+// fenêtre disparaisse. Filet : si on arrive ici sans être passé par beforeClose (ex. arrêt système),
+// on tente quand même les plans de fermeture, best-effort.
 func (a *App) shutdown(ctx context.Context) {
-	if a.ptys != nil {
-		a.ptys.closeAll() // ferme les terminaux PTY de la box
-	}
-	a.stopBridge() // ferme le pont hôte ⇄ box
-	if a.svc != nil {
+	if a.svc != nil && !a.closing.Load() {
 		a.svc.RunDueBackups("on_close")
 	}
 }
@@ -1108,7 +1102,7 @@ func (a *App) InstallAgentsDoc(dir string) (string, error) {
 	// Le guide embarqué + la fiche de collaboration (consignes du user) : l'IA lit l'ensemble au
 	// démarrage et peut enrichir la section « Notre collaboration » directement dans ce fichier.
 	content := agentsDoc + "\n\n## Notre collaboration (maintenue avec mon IA)\n\n" +
-		"_Cette section est la nôtre : notes de travail entre moi et mon assistant. Mon IA peut la compléter ; je peux l'éditer dans SituLab (Réglages → Assistant IA)._\n\n" +
+		"_Cette section est la nôtre : notes de travail entre moi et mon assistant. Mon IA peut la compléter ; je peux l'éditer dans SituLab (le menu Agent IA)._\n\n" +
 		strings.TrimSpace(a.svc.AgentNotes()) + "\n"
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		return "", err
@@ -1506,11 +1500,11 @@ func (a *App) RemoveBackupPlan(name string) error {
 	return a.svc.RemoveBackupPlan(name)
 }
 
-func (a *App) RunBackup(name, pin string) (string, error) {
+func (a *App) RunBackup(name string) (string, error) {
 	if err := a.ready(); err != nil {
 		return "", err
 	}
-	out, err := a.svc.RunBackup(name, pin)
+	out, err := a.svc.RunBackup(name)
 	if err == nil {
 		a.afterWrite()
 	}
@@ -1527,12 +1521,13 @@ func (a *App) SaveBackupPlan(in config.BackupPlan) error {
 	return a.svc.SaveBackupPlan(in)
 }
 
-// RunBackupPlan exécute un plan v1.14 (déclencheur « manual » depuis la fenêtre).
-func (a *App) RunBackupPlan(name, pin string) (string, error) {
+// RunBackupPlan exécute un plan v1.14 (déclencheur « manual » depuis la fenêtre). Sans PIN : une
+// sauvegarde est une routine additive qui doit se faire (voir authorizeBackupCloud).
+func (a *App) RunBackupPlan(name string) (string, error) {
 	if err := a.ready(); err != nil {
 		return "", err
 	}
-	out, err := a.svc.RunBackupPlan(name, pin, "manual")
+	out, err := a.svc.RunBackupPlan(name, "manual")
 	if err == nil {
 		a.afterWrite()
 	}

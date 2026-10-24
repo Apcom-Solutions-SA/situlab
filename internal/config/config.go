@@ -251,19 +251,12 @@ type BackupPlan struct {
 	Form    string   `json:"form,omitempty"`    // "bundle" (léger, re-clonable) | "mirror" (fichiers lisibles) ; défaut "bundle"
 	Routine string   `json:"routine,omitempty"` // "manual" | "on_open" | "on_close" (défaut "manual")
 	Repos   []string `json:"repos,omitempty"`   // targeted : chemins locaux inscrits (absolus, nettoyés)
-}
-
-// OSBox : état de l'« OS de travail séparé » (v1.15). Aucun secret. L'image et le relais sont
-// TÉLÉCHARGÉS/créés à l'activation, jamais bundlés. Machine à états : none → preparing → ready →
-// stopped → error.
-type OSBox struct {
-	Enabled bool   `json:"enabled"`            // OPT-IN : false par défaut → le module ne fait rien
-	State   string `json:"state,omitempty"`    // none | preparing | ready | stopped | error
-	Backend string `json:"backend,omitempty"`  // "wsl2" (seul moteur en v1.15)
-	Distro  string `json:"distro,omitempty"`   // nom de la distribution WSL dédiée (ex. SituLab-Box)
-	LastErr string `json:"last_err,omitempty"` // dernière erreur (affichage)
-	// Logiciels installés dans la box (ex. ["claude-code"]) — état des cartes.
-	Software []string `json:"software,omitempty"`
+	// Rétention (v1.17). Overwrite=false (défaut, et plans existants) = CUMULATIF : chaque exécution
+	// garde son bundle horodaté, rien n'est supprimé (le cloud grossit). Overwrite=true = ÉCRASE :
+	// seul le dernier bundle reste à la racine du dépôt, les précédents sont déplacés dans un
+	// sous-dossier « archive/ » dont on ne garde que les Archives plus récents (0 = aucune archive).
+	Overwrite bool `json:"overwrite,omitempty"`
+	Archives  int  `json:"archives,omitempty"` // 0..3 : nombre d'archives conservées quand Overwrite
 }
 
 // BackupRun : une entrée du JOURNAL de sauvegarde (v1.14). Non sensible.
@@ -361,10 +354,6 @@ type Config struct {
 	// l'utilisateur a rangées (suggestion jugée non pertinente). On les masque de « en attente » sans
 	// rien supprimer ; l'utilisateur peut les repasser en appairage depuis l'archive.
 	ArchivedPairings []string `json:"archived_pairings,omitempty"`
-	// OS DE TRAVAIL SÉPARÉ (v1.15) — OPT-IN, désactivé par défaut. Fait travailler une IA dans une VM
-	// invitée jetable (WSL2 sous Windows) sans jamais lui donner les clés : SituLab reste la seule porte
-	// vers git/cloud. Tant que Enabled=false, AUCUNE VM/image/relais n'est créé (règle non négociable).
-	OSBox *OSBox `json:"osbox,omitempty"`
 	// MODULES d'interface (v1.13) : groupes de fonctions activables/désactivables selon le profil
 	// (utilisateur « porté » vs développeur). Clé = groupe (agents, git_advanced, spokes, corpus,
 	// backup). Un groupe ABSENT de la map est ACTIVÉ par défaut (tout est montré tant qu'on n'a pas
@@ -518,6 +507,12 @@ func Dir() string {
 
 // Path renvoie le chemin du fichier config.json.
 func Path() string { return filepath.Join(Dir(), "config.json") }
+
+// AgentsDocPath renvoie le chemin de la fiche AGENTS.md « administrée à la source » : une copie
+// canonique, éditable, qui vit dans le dossier de configuration de SituLab et SURVIT aux mises à
+// jour de l'application (le dossier de config n'est jamais touché par l'installateur, contrairement
+// au fichier embarqué). C'est ce chemin que l'on communique à l'agent IA (v1.17).
+func AgentsDocPath() string { return filepath.Join(Dir(), "AGENTS.md") }
 
 // Load charge la configuration. Un fichier absent donne une config vide ; un fichier
 // présent mais illisible est préservé en .bak et remplacé par une config vide (l'app

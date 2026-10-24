@@ -253,7 +253,7 @@ func cmdBackup() *cobra.Command {
 	}
 
 	run := &cobra.Command{
-		Use: "run <nom>", Short: "Exécute un plan de sauvegarde (bundle → cloud, PIN selon la connexion)", Args: cobra.ExactArgs(1),
+		Use: "run <nom>", Short: "Exécute un plan de sauvegarde (bundle → cloud, sans PIN)", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out, err := svc.RunBackup(args[0])
 			if err != nil {

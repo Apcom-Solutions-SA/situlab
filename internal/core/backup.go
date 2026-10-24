@@ -99,7 +99,7 @@ func (s *Service) RemoveBackupPlan(name string) error {
 // RunBackup exécute un plan : bundle git de tout l'historique → envoi dans le dossier cloud.
 // Gardé par la politique PIN d'écriture de la connexion cloud de destination. Renvoie le chemin
 // cloud du fichier écrit.
-func (s *Service) RunBackup(name, pin string) (string, error) {
+func (s *Service) RunBackup(name string) (string, error) {
 	s.mu.Lock()
 	s.lockedReload()
 	bp := s.cfg.FindBackup(name)
@@ -109,7 +109,8 @@ func (s *Service) RunBackup(name, pin string) (string, error) {
 	}
 	plan := *bp
 
-	if err := s.authorizeCloud(plan.Cloud, config.CloudWrite, pin); err != nil {
+	// Pas de PIN pour une sauvegarde (routine additive) — voir authorizeBackupCloud.
+	if err := s.authorizeBackupCloud(plan.Cloud); err != nil {
 		return "", err
 	}
 	if !gitx.Available() {

@@ -183,6 +183,24 @@ func (s *Service) latestTags(ref config.RepoRef) (tags []string, latest string, 
 	return tags, latest, nil
 }
 
+// latestTag ne lit QUE le tag le plus récent d'un dépôt, sans paginer tout l'historique des versions
+// (forgejo.LatestTag). À réserver aux cas où seul le dernier tag compte — vitrines, barre de version —
+// par opposition à latestTags qui ramène la liste complète (nécessaire à l'atelier pour l'index de
+// retard). Best-effort : une erreur remonte via err (perf 1.17, Point 2).
+func (s *Service) latestTag(ref config.RepoRef) (string, error) {
+	cl, _, err := s.clientFor(ref.Instance)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := opCtx()
+	defer cancel()
+	t, ok, err := cl.LatestTag(ctx, ref.Owner, ref.Repo)
+	if err != nil || !ok {
+		return "", err
+	}
+	return t.Name, nil
+}
+
 // ProjectStatus calcule l'état d'équilibre d'un projet : version de l'atelier, version de chaque
 // prod, « équilibré » ou « en retard de N versions », et la dernière version promue connue.
 // Best-effort : chaque dépôt illisible renvoie son erreur sans bloquer les autres.
@@ -224,7 +242,9 @@ func tagIndex(atelierTags []string) map[string]int {
 // versions d'atelier plus récentes) et dernière version promue connue. Lecture illisible → Error.
 func (s *Service) prodLine(pr config.RepoRef, idx map[string]int, atelierLatest string, promos map[string]config.Promo) ProdLine {
 	line := ProdLine{RepoLine: RepoLine{Instance: pr.Instance, Owner: pr.Owner, Repo: pr.Repo}}
-	if _, pv, err := s.latestTags(pr); err != nil {
+	// Vitrine : seul son dernier tag compte (comparé à l'index de l'atelier) — on ne pagine donc pas
+	// tout son historique de versions (latestTag, pas latestTags).
+	if pv, err := s.latestTag(pr); err != nil {
 		line.Error = cleanClientErr(err)
 	} else {
 		line.Version = pv
@@ -310,7 +330,9 @@ func (s *Service) boardFor(p config.Project, localIdx map[string]string) Project
 	prodCh := make([]chan tagRes, len(p.Productions))
 	for i, pr := range p.Productions {
 		prodCh[i] = make(chan tagRes, 1)
-		go func(i int, pr config.RepoRef) { t, l, e := s.latestTags(pr); prodCh[i] <- tagRes{t, l, e} }(i, pr)
+		// Vitrine : seul son dernier tag sert (comparé à l'index de l'atelier) — latestTag, sans paginer
+		// tout son historique (le GitHub lent d'une vitrine était une cause directe de lenteur).
+		go func(i int, pr config.RepoRef) { l, e := s.latestTag(pr); prodCh[i] <- tagRes{latest: l, err: e} }(i, pr)
 	}
 
 	// Clone local (lecture disque) en parallèle du réseau.
@@ -698,7 +720,7 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 		version = gitx.NearestTagOf(path, "origin/"+srcBranch) // dernier tag joignable sur l'atelier
 		srcRef = version
 	default:
-		_, version, _ = s.latestTags(proj.Atelier) // dernier tag de l'atelier
+		version, _ = s.latestTag(proj.Atelier) // dernier tag de l'atelier (seul le plus récent compte)
 		srcRef = version
 	}
 	if version == "" || srcRef == "" {

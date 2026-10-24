@@ -21,17 +21,21 @@ import (
 // Rappel d'architecture : la GUI (et le futur démon, Phase 4) est un process long qui
 // porte cette session ; une commande CLI one-shot repart toujours verrouillée.
 
-// Purge efface TOUTES les données locales de SituLab de ce poste (v1.4.1), pour repartir à blanc
-// ou céder une machine : jetons résiduels du coffre OS, puis le dossier de configuration entier
-// (config.json, keyring.json chiffré, socket, .bak), et — best-effort — le dossier de données
-// WebView2 de cet exécutable. IRRÉVERSIBLE. N'exige ni PIN ni session (c'est aussi une issue de
-// secours quand le PIN est oublié) ; la confirmation se fait côté interface/CLI.
+// Purge efface TOUTES les données locales de SituLab de ce poste, pour repartir à blanc ou céder une
+// machine. IRRÉVERSIBLE. N'exige ni PIN ni session (c'est aussi l'issue de secours quand le PIN est
+// oublié) ; la confirmation se fait côté interface/CLI. Vérification de complétude (1.17) — tout ce que
+// SituLab garde est couvert :
+//   - jetons des connexions GIT        → coffre OS (vault), effacés par connexion (boucle 1) ;
+//   - secrets des connexions GIT & CLOUD → trousseau chiffré (keyring.json), dans le dossier de config ;
+//   - fiche AGENTS.md administrée à la source, config.json, device.key (signature), pinguard.json
+//     (anti-bruteforce), journal des sauvegardes, socket → dossier de config ;
+//   - données du navigateur embarqué (WebView2) → best-effort (verrouillées tant que la fenêtre tourne).
 //
-// Les données WebView2 sont verrouillées tant que la fenêtre tourne : leur suppression ici est
-// best-effort. Depuis la fenêtre, l'interface vide en plus son localStorage ; le désinstalleur
-// avancé (fenêtre fermée) retire le dossier complet.
+// Les connexions CLOUD n'utilisent PAS le coffre OS (uniquement le trousseau) — supprimer le dossier de
+// config les efface donc toutes. L'interface vide en plus son localStorage et recharge.
 func (s *Service) Purge() error {
-	// 1) Retirer du coffre OS les jetons des instances connues, AVANT d'effacer la config.
+	// 1) Connexions GIT : retirer du coffre OS le jeton de chaque connexion connue, AVANT d'effacer la
+	//    config (après, on ne saurait plus lesquelles énumérer). Les clouds ne sont pas au coffre OS.
 	if cfg, err := config.Load(); err == nil {
 		for _, in := range cfg.Instances {
 			_ = vault.DeleteToken(in.Name)
@@ -39,11 +43,15 @@ func (s *Service) Purge() error {
 	}
 	// 2) Fermer la session en mémoire (DEK).
 	s.Lock()
-	// 3) Effacer le dossier de configuration (config, trousseau, socket, sauvegardes).
 	s.ioMu.Lock()
 	defer s.ioMu.Unlock()
+	// 3) Fiche AGENTS.md administrée à la source : effacement EXPLICITE (elle vit dans le dossier de
+	//    config, donc le RemoveAll ci-dessous la retire aussi — on l'enlève d'abord par clarté/robustesse).
+	_ = os.Remove(config.AgentsDocPath())
+	// 4) Effacer le dossier de configuration ENTIER : trousseau (tous les secrets git & cloud), config,
+	//    device.key, pinguard.json, journal des sauvegardes, socket, .bak…
 	err := os.RemoveAll(config.Dir())
-	// 4) Best-effort : le dossier de données WebView2 de cet exécutable (%AppData%\<exe>).
+	// 5) Best-effort : le dossier de données WebView2 de cet exécutable (%AppData%\<exe>).
 	if exe, e := os.Executable(); e == nil {
 		if base, be := os.UserConfigDir(); be == nil {
 			_ = os.RemoveAll(filepath.Join(base, filepath.Base(exe)))
