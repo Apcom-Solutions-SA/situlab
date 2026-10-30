@@ -1,0 +1,14 @@
+# Config golangci-lint — jeu volontairement sobre (lisible, peu de bruit).
+run:
+  timeout: 5m
+issues:
+  exclude-dirs:
+    - frontend/wailsjs # code généré par Wails
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - errcheck
+    - misspell

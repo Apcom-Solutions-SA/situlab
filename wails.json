@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "SituLab",
+  "outputfilename": "situlab",
+  "frontend:install": "",
+  "frontend:build": "",
+  "author": {
+    "name": "APCOM Solutions SA"
+  },
+  "info": {
+    "companyName": "APCOM Solutions SA",
+    "productName": "SituLab",
+    "productVersion": "1.18.3",
+    "copyright": "© 2026 APCOM Solutions SA",
+    "comments": "Client Forgejo de bureau — l'utilitaire git pour tous"
+  }
+}

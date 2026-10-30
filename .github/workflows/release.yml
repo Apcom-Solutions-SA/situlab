@@ -1,0 +1,206 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SituLab — build des installateurs Windows / macOS / Linux
+#
+# ⚠️ À VALIDER AU 1er RUN : ce pipeline n'a pas encore tourné. Les points fragiles
+#    sont commentés (signature/notarisation macOS, variante WebKit Linux). Lancer
+#    d'abord via « Run workflow » (workflow_dispatch) sur une branche de test.
+#
+# Déclencheurs :
+#   - tag « v* » (ex. v1.1.0) → build + publication d'une Release GitHub avec les 3 artefacts.
+#   - manuel (workflow_dispatch) → build + artefacts téléchargeables (sans Release).
+#
+# Pourquoi 3 jobs distincts (et pas un simple matrix `wails build`) :
+#   - WINDOWS : on NE veut PAS le sous-système « windowsgui » par défaut de Wails. SituLab est
+#     un binaire CONSOLE (un double-clic ouvre la fenêtre ; avec un argument il agit en CLI/MCP
+#     et peut écrire dans le terminal appelant). On compile donc à la main `go build -tags
+#     "desktop,production"` puis on empaquette avec NSIS (build/installer.nsi).
+#   - macOS : `wails build` produit le .app (pas de souci de console sur mac) → on en fait un .dmg.
+#   - LINUX : `wails build` produit le binaire natif (cgo + WebKit2GTK) → archive tar.gz.
+#
+# Toolchain commune : Go 1.27.3 (plancher directive go.mod, corrige GO-2026-6809), Wails CLI v2.16.0.
+# ─────────────────────────────────────────────────────────────────────────────
+name: build-installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # nécessaire pour créer la Release et y attacher les artefacts
+
+env:
+  GO_VERSION: "1.27.3" # plancher = directive go.mod (go 1.27.3) — inclut le correctif GO-2026-6809 (crypto/x509)
+  WAILS_VERSION: "v2.16.0"
+
+jobs:
+  # ── WINDOWS : binaire console + installateur NSIS ───────────────────────────
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+
+      - name: Version (depuis le tag, sinon 0.0.0-dev)
+        id: ver
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF#refs/tags/}" != "${GITHUB_REF}" ] || V="0.0.0-dev"
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+
+      # Métadonnées Windows (icône + version du fichier) : on RÉGÉNÈRE le .syso au niveau du tag AVANT de
+      # compiler. Les rsrc_windows_*.syso versionnés sont figés (une version passée) ; sans cette étape,
+      # go build embarquerait cette version périmée dans les propriétés de l'exe (régression « syso figé »).
+      - name: Métadonnées Windows (go-winres → .syso au niveau du tag)
+        shell: bash
+        run: |
+          go install github.com/tc-hib/go-winres@latest
+          "$(go env GOPATH)/bin/go-winres" simply --icon build/appicon.png \
+            --product-version "${{ steps.ver.outputs.v }}" --file-version "${{ steps.ver.outputs.v }}"
+
+      # SituLab pilote le git du système : WebView2 est présent par défaut sur les runners
+      # windows-latest, aucune dépendance système à installer pour compiler.
+      - name: Build (console, tags desktop,production)
+        shell: bash
+        run: |
+          go build -tags "desktop,production" \
+            -ldflags "-X main.version=${{ steps.ver.outputs.v }} -s -w" \
+            -o build/bin/situlab.exe .
+
+      - name: Installer NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Empaqueter (NSIS → SituLab-Setup.exe)
+        shell: pwsh
+        run: |
+          # Aligne la version de l'installateur sur le tag. IMPORTANT : réécrire en UTF-8 AVEC BOM —
+          # NSIS (Unicode) lit l'UTF-8 seulement s'il y a un BOM, sinon il garble les accents français
+          # (ex. la question de désinstallation). Set-Content par défaut en pwsh = UTF-8 SANS BOM.
+          (Get-Content build/installer.nsi) -replace '!define VERSION ".*"', '!define VERSION "${{ steps.ver.outputs.v }}"' | Set-Content build/installer.nsi -Encoding utf8BOM
+          # makensis : le PATH de l'étape « choco install » n'est pas repris ici, et l'emplacement
+          # varie (shim Chocolatey, dossier lib du paquet, ou install NSIS). On cherche dans une liste
+          # de chemins connus, puis en dernier recours par recherche récursive, et on ÉCHOUE
+          # explicitement si rien n'est trouvé (plutôt que de lancer un chemin inexistant).
+          $makensis = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
+          if (-not $makensis) {
+            $cands = @(
+              "$env:ChocolateyInstall\bin\makensis.exe",
+              "C:\ProgramData\chocolatey\bin\makensis.exe",
+              "$env:ChocolateyInstall\lib\nsis\tools\makensis.exe",
+              "C:\ProgramData\chocolatey\lib\nsis\tools\makensis.exe",
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+              "$env:ProgramFiles\NSIS\makensis.exe"
+            )
+            $makensis = $cands | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          }
+          if (-not $makensis) {
+            $roots = @("$env:ChocolateyInstall", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") | Where-Object { $_ -and (Test-Path $_) }
+            $found = Get-ChildItem -Path $roots -Filter makensis.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $makensis = $found.FullName }
+          }
+          if (-not $makensis) { throw "makensis introuvable après l'installation de NSIS (Chocolatey)" }
+          Write-Host "makensis = $makensis"
+          cd build
+          & $makensis installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis a échoué (code $LASTEXITCODE)" }
+          Rename-Item SituLab-Setup.exe "SituLab-${{ steps.ver.outputs.v }}-windows-amd64-setup.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: build/SituLab-*-windows-amd64-setup.exe
+
+  # ── macOS : .app via Wails → .dmg ───────────────────────────────────────────
+  macos:
+    runs-on: macos-14 # runner Apple Silicon, Xcode préinstallé
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+
+      - name: Version
+        id: ver
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF#refs/tags/}" != "${GITHUB_REF}" ] || V="0.0.0-dev"
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Installer Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build (.app universel)
+        run: |
+          wails build -platform darwin/universal -clean \
+            -ldflags "-X main.version=${{ steps.ver.outputs.v }}"
+          # ⚠️ NON SIGNÉ / NON NOTARISÉ : Gatekeeper affichera un avertissement au 1er lancement.
+          # Pour une diffusion propre, ajouter la signature (certificat « Developer ID » Apple) et
+          # la notarisation (notarytool) — nécessite des SECRETS Apple + un compte développeur.
+
+      - name: Empaqueter (.dmg)
+        run: |
+          hdiutil create -volname "SituLab" -srcfolder "build/bin/SituLab.app" \
+            -ov -format UDZO "SituLab-${{ steps.ver.outputs.v }}-macos-universal.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: SituLab-*-macos-universal.dmg
+
+  # ── LINUX : binaire natif via Wails (cgo + WebKit2GTK) → tar.gz ─────────────
+  linux:
+    runs-on: ubuntu-22.04 # 22.04 fournit webkit2gtk-4.0 (défaut Wails v2) ; 24.04 l'a retiré
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+
+      - name: Dépendances système (GTK3 + WebKit2GTK pour la fenêtre Wails)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Version
+        id: ver
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF#refs/tags/}" != "${GITHUB_REF}" ] || V="0.0.0-dev"
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Installer Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build (binaire Linux)
+        run: |
+          wails build -platform linux/amd64 -clean \
+            -ldflags "-X main.version=${{ steps.ver.outputs.v }}"
+
+      - name: "Empaqueter (tar.gz : binaire + LICENSE + NOTICE)"
+        run: |
+          d="SituLab-${{ steps.ver.outputs.v }}-linux-amd64"
+          mkdir -p "$d"
+          cp build/bin/SituLab "$d/situlab" 2>/dev/null || cp build/bin/situlab "$d/situlab"
+          cp LICENSE NOTICE "$d/"
+          tar czf "$d.tar.gz" "$d"
+          # Option future : paquet .deb/.AppImage via nfpm/linuxdeploy (non requis ici).
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: SituLab-*-linux-amd64.tar.gz
+
+  # ── Publication : attache les 3 artefacts à une Release (uniquement sur tag) ─
+  release:
+    needs: [windows, macos, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: Release GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
