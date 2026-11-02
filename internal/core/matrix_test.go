@@ -44,7 +44,7 @@ func TestRowScore(t *testing.T) {
 	pending := MatrixRow{Atelier: MatrixCell{Present: true}, Pending: true, Local: MatrixCell{Present: true}}
 	ranged := MatrixRow{Atelier: MatrixCell{Present: true}, Local: MatrixCell{Present: true}}
 	orphan := MatrixRow{Local: MatrixCell{Present: true}}
-	if !(rowScore(pending) > rowScore(ranged) && rowScore(ranged) > rowScore(orphan)) {
+	if rowScore(pending) <= rowScore(ranged) || rowScore(ranged) <= rowScore(orphan) {
 		t.Fatalf("ordre attendu pending > rangé > orphelin : %d %d %d", rowScore(pending), rowScore(ranged), rowScore(orphan))
 	}
 }

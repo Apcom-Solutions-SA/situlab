@@ -1,14 +1,27 @@
-# Config golangci-lint — jeu volontairement sobre (lisible, peu de bruit).
+version: "2"
+# Jeu de linters solide et sans bruit, adapté à un code commenté en FRANÇAIS.
+# misspell est volontairement EXCLU : correcteur anglais, il prend les mots
+# français (« commandes », « existant », « démarrage »…) pour des fautes.
 run:
   timeout: 5m
-issues:
-  exclude-dirs:
-    - frontend/wailsjs # code généré par Wails
 linters:
-  enable:
-    - govet
-    - staticcheck
-    - ineffassign
-    - unused
-    - errcheck
-    - misspell
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - frontend/wailsjs
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

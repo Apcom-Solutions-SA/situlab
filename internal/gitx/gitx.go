@@ -182,7 +182,7 @@ func StatusOf(dir string) (*Status, error) {
 		return s, err
 	}
 	parseStatus(out, s)
-	if name, remote := detectRemote(dir); name != "" {
+	if name, remote := detectRemote(dir, s.Upstream); name != "" {
 		s.RemoteName, s.Remote = name, remote
 	}
 	return s, nil
@@ -252,11 +252,13 @@ func changedPath(line string) string {
 }
 
 // detectRemote renvoie le nom et l'URL du distant de suivi de la branche courante,
-// à défaut « origin », à défaut le premier distant configuré.
-func detectRemote(dir string) (name, url string) {
-	if head, err := run(dir, LocalTimeout, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"); err == nil {
-		if i := strings.IndexByte(strings.TrimSpace(head), '/'); i > 0 {
-			name = strings.TrimSpace(head)[:i]
+// à défaut « origin », à défaut le premier distant configuré. `upstream` est le distant de suivi
+// déjà connu (ex. « origin/main », lu dans `status --branch`) : quand il est fourni, on en déduit le
+// nom SANS appel git supplémentaire ; vide, on retombe sur la découverte par `git remote`.
+func detectRemote(dir, upstream string) (name, url string) {
+	if upstream != "" {
+		if i := strings.IndexByte(upstream, '/'); i > 0 {
+			name = upstream[:i]
 		}
 	}
 	if name == "" {
@@ -345,7 +347,7 @@ func HasRemote(dir string) bool {
 
 // remoteName renvoie le distant à viser pour un envoi : le distant de suivi s'il existe, sinon « origin ».
 func remoteName(dir string) string {
-	if name, _ := detectRemote(dir); name != "" {
+	if name, _ := detectRemote(dir, ""); name != "" {
 		return name
 	}
 	return "origin"

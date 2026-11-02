@@ -78,6 +78,7 @@ func cmdMCP() *cobra.Command {
 // runMCP lit les requêtes JSON-RPC ligne par ligne et écrit les réponses sur out. Seules
 // des trames JSON-RPC sont émises sur stdout ; toute trace éventuelle irait sur stderr.
 func runMCP(in io.Reader, out io.Writer) error {
+	clientActor = "mcp" // les relais au démon seront journalisés comme venant du MCP
 	tools := mcpTools()
 	byName := map[string]mcpTool{}
 	for _, t := range tools {
@@ -640,6 +641,16 @@ func mcpTools() []mcpTool {
 		// --- CARTE pour l'IA : la couche de classement SituLab (v1.11) ---
 		{"situlab_map", "Carte des dépôts : pour chaque dépôt appairé, son rôle (KERNEL/spoke/normal), ses tags projet, le clone LOCAL, le dépôt ATELIER et le nombre de VITRINES, ainsi que la correspondance CORPUS↔dépôt (champ corpus), c'est-à-dire les dossiers et fichiers de clouds souverains reliés à ce projet, chacun avec son état d'accès IA (actif/partiel/inactif), filtrés par ton périmètre autorisé. La mémoire situative d'un projet tient à la fois dans son git et dans ses fichiers cloud reliés. Le lien local↔atelier est l'origin (exact) ; la vitrine est une PRODUCTION séparée reliée par promotion. Point d'entrée pour comprendre l'organisation du poste.", obj(map[string]any{}),
 			func(a map[string]any) (any, error) { return svc.ProjectsLight() }},
+
+		// --- Journal local des opérations (1.20) ---
+		{"journal_read", "Lit le JOURNAL LOCAL des opérations SituLab (récentes d'abord) : quoi, quand, surface (cli/mcp/fenêtre), succès ou échec, erreur épurée, durée. Sert à comprendre ce qui a été fait et pourquoi un geste best-effort (sauvegarde, attestation…) a échoué. Lecture seule, aucun secret, rien n'est envoyé. limit (défaut 50) ; errors_only pour ne voir que les échecs.", obj(map[string]any{"limit": intProp("nombre d'entrées (défaut 50)"), "errors_only": boolProp("seulement les échecs")}),
+			func(a map[string]any) (any, error) {
+				lim := argInt(a, "limit")
+				if lim == 0 {
+					lim = 50
+				}
+				return svc.JournalRead(lim, argBool(a, "errors_only", false))
+			}},
 	}
 }
 

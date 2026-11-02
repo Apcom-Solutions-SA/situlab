@@ -1,5 +1,7 @@
 # SituLab
 
+[![ci](https://github.com/Apcom-Solutions-SA/situlab/actions/workflows/ci.yml/badge.svg)](https://github.com/Apcom-Solutions-SA/situlab/actions/workflows/ci.yml)
+
 **L'utilitaire git et mémoire pour tous.** Une application de bureau, multiplateforme, qui rend lisible
 ce que vous avez en ligne et en local, sans navigateur et sans connaître git en profondeur, et qui garde
 votre mémoire de travail en ordre, pour vous comme pour vos agents IA.
@@ -67,6 +69,25 @@ go build -tags "desktop,production" -o build/bin/situlab.exe .
 Les installateurs Windows, macOS et Linux sont produits par intégration continue
 (`.github/workflows/release.yml`) sur un tag `v*`. Chaque OS a sa toolchain native, ils ne se
 cross-compilent pas.
+
+## Développement & qualité
+
+Le dépôt applique les mêmes portes que l'intégration continue (`.github/workflows/ci.yml`), toutes
+bloquantes :
+
+```bash
+gofmt -l .            # format (zéro écart)
+go vet ./...          # analyse statique
+golangci-lint run     # lint (jeu standard, config v2)
+go test -race ./...   # tests, détecteur de courses (matrice Linux/Windows/macOS en CI)
+govulncheck ./...     # vulnérabilités des dépendances
+```
+
+## Contribuer
+
+Les contributions sont bienvenues. Lisez [`CONTRIBUTING.md`](CONTRIBUTING.md) pour le flux de travail et
+les portes de qualité, et le [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Une vulnérabilité se signale en
+privé, jamais en issue publique : voir [`SECURITY.md`](SECURITY.md).
 
 ## Licence
 

@@ -294,9 +294,8 @@ func (s *Service) PushPreview(path string) *PushPreview {
 		p.Branch = st.Branch
 		p.Remote = st.Remote
 		p.Ahead = st.Ahead
-		for _, f := range st.Changed { // ne garde que les fichiers suivis ici (les non suivis sont listés à part)
-			p.Changed = append(p.Changed, f)
-		}
+		// ne garde que les fichiers suivis ici (les non suivis sont listés à part)
+		p.Changed = append(p.Changed, st.Changed...)
 	}
 	p.Commits = gitx.UnpushedSubjects(path, 20)
 	p.Untracked = gitx.Untracked(path, 50)

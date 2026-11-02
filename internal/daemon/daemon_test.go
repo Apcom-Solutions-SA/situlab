@@ -142,7 +142,7 @@ func TestUnlockViaModal(t *testing.T) {
 	if err := d.svc.SetPIN("", "123456"); err != nil {
 		t.Fatalf("SetPIN : %v", err)
 	}
-	d.dispatch(OpLock, Args{})
+	_, _ = d.dispatch(OpLock, Args{})
 
 	// OpUnlock sans PIN explicite : le démon doit solliciter la modale.
 	if _, err := d.dispatch(OpUnlock, Args{}); err != nil {
@@ -160,7 +160,7 @@ func TestEnsureUnlockedCancelled(t *testing.T) {
 	p := &fakePrompter{ok: false} // l'humain annule
 	d := newDaemon(t, p)
 	_ = d.svc.SetPIN("", "123456")
-	d.dispatch(OpLock, Args{})
+	_, _ = d.dispatch(OpLock, Args{})
 	if err := d.ensureUnlocked(); !errors.Is(err, core.ErrLocked) {
 		t.Fatalf("annulation : attendu ErrLocked, obtenu %v", err)
 	}
@@ -206,7 +206,7 @@ func TestEnsureUnlockedTimeout(t *testing.T) {
 	p := &fakePrompter{timeout: true}
 	d := newDaemon(t, p)
 	_ = d.svc.SetPIN("", "123456")
-	d.dispatch(OpLock, Args{})
+	_, _ = d.dispatch(OpLock, Args{})
 	if err := d.ensureUnlocked(); !errors.Is(err, core.ErrPINTimeout) {
 		t.Fatalf("délai déverrouillage : attendu ErrPINTimeout, obtenu %v", err)
 	}

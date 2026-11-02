@@ -739,6 +739,28 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .icon-save { width: 30px; height: 30px; }
 .icon-del:hover, .icon-del:focus-visible { opacity: 1; color: var(--danger); background: var(--danger-soft); }
 .icon-del svg { width: 15px; height: 15px; }
+/* Icône de rafraîchissement à la demande (1.20, à côté de « Modifier ») : même gabarit que .icon-del,
+   survol en ACCENT (geste neutre, non destructif). .spinning = rotation le temps de la récupération. */
+.icon-refresh { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: var(--text-soft); opacity: .55; border-radius: var(--r-sm); cursor: pointer; flex: 0 0 auto; }
+.icon-refresh:hover, .icon-refresh:focus-visible { opacity: 1; color: var(--accent); background: var(--accent-soft); }
+.icon-refresh svg { width: 15px; height: 15px; }
+.icon-refresh.spinning svg { animation: spin .7s linear infinite; }
+/* Journal local des opérations (1.20, Réglages → Journaux) */
+.jnl-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 16px 0 10px; }
+.jnl-bar-r { display: flex; align-items: center; gap: 10px; }
+.toggle-inline { display: inline-flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text); cursor: pointer; }
+.jnl-list { max-height: 460px; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-md, 12px); }
+.jnl-empty { padding: 32px 16px; text-align: center; color: var(--text-soft); font-size: 13px; }
+.jnl-row { display: grid; grid-template-columns: 148px 54px 180px 1fr; gap: 12px; align-items: baseline; padding: 7px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.jnl-row:last-child { border-bottom: 0; }
+.jnl-row:nth-child(even) { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.jnl-row.jnl-err { background: var(--danger-soft); }
+.jnl-t { color: var(--text-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.jnl-actor { color: var(--accent); font-weight: 600; }
+.jnl-op { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.jnl-tg { color: var(--text-soft); word-break: break-all; }
+.jnl-e { grid-column: 1 / -1; color: var(--danger); padding-left: 2px; }
+.jnl-why { grid-column: 1 / -1; color: var(--text-soft); font-style: italic; padding-left: 2px; }
 .srow-act { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; }
 .lnk { display: inline-flex; align-items: center; gap: 5px; background: none; border: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; padding: 4px 7px; border-radius: var(--r-sm); transition: background var(--t-fast); }
 .lnk:hover { background: var(--accent-soft); }

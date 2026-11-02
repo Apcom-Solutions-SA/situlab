@@ -54,7 +54,7 @@ func commitsServer(t *testing.T, pageFn func(page int) []fakeCommit) (*Client, *
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/apcom/glim/commits" {
 			w.WriteHeader(http.StatusNotFound)
-			io.WriteString(w, `{"message":"not found"}`)
+			_, _ = io.WriteString(w, `{"message":"not found"}`)
 			return
 		}
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -81,7 +81,7 @@ func writeCommits(w http.ResponseWriter, cs []fakeCommit) {
 			c.sha, c.authorName, c.date, c.login, c.adds, c.dels)
 	}
 	b.WriteByte(']')
-	io.WriteString(w, b.String())
+	_, _ = io.WriteString(w, b.String())
 }
 
 // find localise un commit du résultat par son SHA.
@@ -228,13 +228,13 @@ func TestLatestTagSinglePage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/repos/apcom/glim/tags") {
 			w.WriteHeader(http.StatusNotFound)
-			io.WriteString(w, `{"message":"not found"}`)
+			_, _ = io.WriteString(w, `{"message":"not found"}`)
 			return
 		}
 		pages++
 		gotPage = r.URL.Query().Get("page")
 		gotLimit = r.URL.Query().Get("limit")
-		io.WriteString(w, `[{"name":"v1.4.0","commit":{"sha":"aaa"}},{"name":"v1.3.0","commit":{"sha":"bbb"}}]`)
+		_, _ = io.WriteString(w, `[{"name":"v1.4.0","commit":{"sha":"aaa"}},{"name":"v1.3.0","commit":{"sha":"bbb"}}]`)
 	}))
 	t.Cleanup(srv.Close)
 	c := NewKind(srv.URL, "tok", "test", KindForgejo)
@@ -291,7 +291,7 @@ func TestLatestSemverTag(t *testing.T) {
 // Dépôt sans aucun tag : ok=false, sans erreur.
 func TestLatestTagNone(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `[]`)
+		_, _ = io.WriteString(w, `[]`)
 	}))
 	t.Cleanup(srv.Close)
 	c := NewKind(srv.URL, "tok", "test", KindForgejo)

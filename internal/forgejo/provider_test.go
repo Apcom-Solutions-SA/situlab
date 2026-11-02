@@ -4,6 +4,7 @@
 package forgejo
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"testing"
@@ -60,10 +61,10 @@ func TestNormalizeUserGitHub(t *testing.T) {
 
 func TestAdminBlockedOnGitHub(t *testing.T) {
 	gh := NewKind("https://github.com", "", "1", KindGitHub)
-	if _, err := gh.ListUsers(nil); !errors.Is(err, ErrGitHubUnsupported) {
+	if _, err := gh.ListUsers(context.TODO()); !errors.Is(err, ErrGitHubUnsupported) {
 		t.Errorf("ListUsers on github = %v", err)
 	}
-	if _, err := gh.TokenCreate(nil, "u", "p", "", "n", nil, nil); !errors.Is(err, ErrGitHubUnsupported) {
+	if _, err := gh.TokenCreate(context.TODO(), "u", "p", "", "n", nil, nil); !errors.Is(err, ErrGitHubUnsupported) {
 		t.Errorf("TokenCreate on github = %v", err)
 	}
 }

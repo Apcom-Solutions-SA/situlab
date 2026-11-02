@@ -33,14 +33,14 @@ func TestPushPreview(t *testing.T) {
 	run("config", "user.email", "t@t.t")
 	run("config", "user.name", "T")
 	run("config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(dir, "suivi.txt"), []byte("v1\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "suivi.txt"), []byte("v1\n"), 0o644)
 	run("add", "-A")
 	run("commit", "-m", "init")
 	// Un commit de plus (à envoyer), un fichier suivi modifié, un fichier NOUVEAU non suivi.
-	os.WriteFile(filepath.Join(dir, "suivi.txt"), []byte("v1\nv2\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "suivi.txt"), []byte("v1\nv2\n"), 0o644)
 	run("commit", "-am", "ajoute v2")
-	os.WriteFile(filepath.Join(dir, "suivi.txt"), []byte("v1\nv2\nwip\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "nouveau.txt"), []byte("secret?\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "suivi.txt"), []byte("v1\nv2\nwip\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "nouveau.txt"), []byte("secret?\n"), 0o644)
 
 	p := s.PushPreview(dir)
 	if p == nil {

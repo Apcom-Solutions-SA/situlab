@@ -46,5 +46,5 @@ func flashTaskbarAttention() {
 		hwnd:    hwnd,
 	}
 	fi.cbSize = uint32(unsafe.Sizeof(fi))
-	flashWindowEx.Call(uintptr(unsafe.Pointer(&fi)))
+	_, _, _ = flashWindowEx.Call(uintptr(unsafe.Pointer(&fi)))
 }

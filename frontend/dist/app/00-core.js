@@ -8,6 +8,7 @@ const el = (id) => document.getElementById(id);
 // atténuée, rouge au survol (classe .icon-del). Définie ici (1er script) → disponible partout. Le texte
 // « supprimer » encombrait les rangées ; l'intitulé passe en title/aria-label pour rester accessible.
 const ICO_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6M14 11v6"/></svg>`;
+const ICO_REFRESH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>`;
 
 // --- Registre d'icônes UNIQUE (1.18.3) ------------------------------------------------------------
 // Une seule bibliothèque : trait 1.7, viewBox 24, currentColor, MONOCHROME. La couleur est réservée
@@ -64,7 +65,7 @@ function ico(name, size) {
   const s = size || 16;
   return `<svg class="ico" viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 }
-const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"'\/]/g, (c) =>
+const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"'/]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "/": "&#47;" }[c])));
 
 // pageHero (1.18.4, retour #1) : en-tête de page « hero » décliné par univers — même langage que la
@@ -480,6 +481,7 @@ function playPinChime() {
 }
 
 let pinEventBound = false;
+let gitEventBound = false;
 async function init() {
   try { el("version").textContent = "SituLab " + (await App().AppVersion()); } catch (e) {}
   // Le démon (cette fenêtre) demande le PIN sur le bureau quand une commande CLI/agent
@@ -495,6 +497,12 @@ async function init() {
       if (!pinModalOpen) playPinChime();
       pinRequestModal(p.reason || "Autoriser l'opération", p.detail || null, p.action || "", p.intent || "", p.deadlineMs || 0);
     }); pinEventBound = true; } catch (e) {}
+  }
+  // « git:changed » (optimisation 1.20) : le cœur signale toute mutation git aboutie (geste CLI/agent via
+  // le démon, OU geste dans la fenêtre) ; on rafraîchit la vue courante tout de suite, sans attendre la
+  // récupération périodique ni redémarrer. Lié une seule fois (init peut être rejoué).
+  if (!gitEventBound) {
+    try { window.runtime.EventsOn("git:changed", () => { try { scheduleGitRefresh(); } catch (_) {} }); gitEventBound = true; } catch (e) {}
   }
   let instances = [];
   try { instances = await App().GetInstances(); }

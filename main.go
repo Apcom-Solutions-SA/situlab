@@ -21,7 +21,7 @@ import (
 )
 
 // version est injectée au build (-ldflags "-X main.version=0.1").
-var version = "1.19.0-dev"
+var version = "1.20.0"
 
 //go:embed all:frontend/dist
 var assets embed.FS

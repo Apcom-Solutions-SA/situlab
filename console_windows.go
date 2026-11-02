@@ -25,6 +25,6 @@ func releaseOwnConsole() {
 	var pids [8]uint32
 	n, _, _ := getList.Call(uintptr(unsafe.Pointer(&pids[0])), uintptr(len(pids)))
 	if n <= 1 { // console allouée pour nous seuls -> on la libère
-		freeConsole.Call()
+		_, _, _ = freeConsole.Call()
 	}
 }

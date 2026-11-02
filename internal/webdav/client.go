@@ -176,7 +176,7 @@ func (c *Client) TestConnection(ctx context.Context) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 	if resp.StatusCode == http.StatusMultiStatus || resp.StatusCode == http.StatusOK {
 		return nil
 	}
@@ -203,7 +203,7 @@ func (c *Client) List(ctx context.Context, dir string) ([]Entry, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusMultiStatus {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 		return nil, httpErr(resp)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
@@ -234,7 +234,7 @@ func (c *Client) List(ctx context.Context, dir string) ([]Entry, error) {
 			IsDir:    pr.ResourceType.Collection != nil,
 			Modified: strings.TrimSpace(pr.LastModified),
 		}
-		fmt.Sscan(pr.ContentLength, &e.Size)
+		_, _ = fmt.Sscan(pr.ContentLength, &e.Size)
 		// Nextcloud : propriétaire ≠ utilisateur connecté → partagé AVEC MOI (#24). Un cloud qui n'expose
 		// pas oc:owner-id (ex. kDrive WebDAV) laisse OwnerID vide → non partagé, comportement inchangé.
 		if oid := strings.TrimSpace(pr.OwnerID); oid != "" && !strings.EqualFold(oid, c.user) {
@@ -273,7 +273,7 @@ func (c *Client) Get(ctx context.Context, p string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 		return nil, httpErr(resp)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
@@ -298,7 +298,7 @@ func (c *Client) Put(ctx context.Context, p string, content []byte) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 		return nil
@@ -318,7 +318,7 @@ func (c *Client) Mkcol(ctx context.Context, p string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 		return nil
@@ -340,7 +340,7 @@ func (c *Client) Delete(ctx context.Context, p string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusNoContent, http.StatusNotFound:
 		return nil
@@ -364,7 +364,7 @@ func (c *Client) Move(ctx context.Context, from, to string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 		return nil

@@ -32,10 +32,31 @@ func (s *Service) repoMu(path string) *sync.Mutex {
 }
 
 // lockRepo prend le verrou du dépôt et renvoie la fonction de libération (usage : defer s.lockRepo(p)()).
+// À la libération, on SIGNALE que l'état git a pu changer : toute mutation locale ou distante d'un dépôt
+// passe par ce verrou (commit, merge, rebase, reset, push, fetch, pull, sync, tag local…), donc c'est le
+// point unique où relancer le rafraîchissement de l'UI (optimisation 1.20). Un sur-déclenchement (geste
+// sans effet, échec) est inoffensif : l'UI compare les signatures et ne repeint que si besoin.
 func (s *Service) lockRepo(path string) func() {
 	m := s.repoMu(path)
 	m.Lock()
-	return m.Unlock
+	return func() {
+		m.Unlock()
+		s.SignalGitChange()
+	}
+}
+
+// SetGitChanged enregistre le relais « l'état git a changé » (l'App le câble sur un événement Wails
+// « git:changed »). Posé une fois au démarrage, avant tout geste.
+func (s *Service) SetGitChanged(fn func()) { s.gitChg = fn }
+
+// SignalGitChange notifie l'UI qu'une mutation git a eu lieu (best-effort, non bloquant, nil-safe).
+// Déclenché à la libération du verrou de dépôt (gestes locaux/distants portant sur un dépôt local) et
+// appelé par les frontières (démon, fenêtre) pour les gestes d'API distante qui ne verrouillent aucun
+// dépôt local (création de dépôt/version/tag côté serveur, suppression de branche distante…).
+func (s *Service) SignalGitChange() {
+	if cb := s.gitChg; cb != nil {
+		cb()
+	}
 }
 
 // tryLockRepo tente de prendre le verrou sans bloquer. Renvoie (release, true) si obtenu, (nil, false)

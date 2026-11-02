@@ -25,21 +25,21 @@ func fakeForgejo(t *testing.T) (*Client, *recorder) {
 		rec.lastAuth = r.Header.Get("Authorization")
 		switch {
 		case r.URL.Path == "/api/v1/user":
-			io.WriteString(w, `{"id":7,"login":"greg","full_name":"Greg","is_admin":true}`)
+			_, _ = io.WriteString(w, `{"id":7,"login":"greg","full_name":"Greg","is_admin":true}`)
 		case r.URL.Path == "/api/v1/repos/apcom/glim":
-			io.WriteString(w, `{"full_name":"apcom/glim","name":"glim","private":true,"default_branch":"main","clone_url":"x"}`)
+			_, _ = io.WriteString(w, `{"full_name":"apcom/glim","name":"glim","private":true,"default_branch":"main","clone_url":"x"}`)
 		case r.URL.Path == "/api/v1/repos/apcom/glim/issues" && r.Method == http.MethodGet:
 			// Un vrai ticket + une PR (que ListIssues doit écarter).
-			io.WriteString(w, `[{"number":1,"title":"bug","state":"open"},{"number":2,"title":"pr","pull_request":{}}]`)
+			_, _ = io.WriteString(w, `[{"number":1,"title":"bug","state":"open"},{"number":2,"title":"pr","pull_request":{}}]`)
 		case r.URL.Path == "/api/v1/repos/apcom/glim/issues" && r.Method == http.MethodPost:
 			b, _ := io.ReadAll(r.Body)
 			rec.lastBody = string(b)
-			io.WriteString(w, `{"number":3,"title":"créée"}`)
+			_, _ = io.WriteString(w, `{"number":3,"title":"créée"}`)
 		case r.URL.Path == "/api/v1/repos/apcom/glim/branches":
-			io.WriteString(w, `[{"name":"main","commit":{"id":"abc","timestamp":"2026-01-01T00:00:00Z"}}]`)
+			_, _ = io.WriteString(w, `[{"name":"main","commit":{"id":"abc","timestamp":"2026-01-01T00:00:00Z"}}]`)
 		default:
 			w.WriteHeader(404)
-			io.WriteString(w, `{"message":"not found"}`)
+			_, _ = io.WriteString(w, `{"message":"not found"}`)
 		}
 	}))
 	t.Cleanup(srv.Close)

@@ -27,6 +27,10 @@ type remote struct{ cl *ipc.Client }
 
 func newRemote() *remote { return &remote{} }
 
+// clientActor : surface de l'appelant, jointe à chaque requête démon pour le journal local. « cli »
+// par défaut ; runMCP la bascule sur « mcp » (processus distinct, donc var process-globale correcte).
+var clientActor = "cli"
+
 // ensure garantit une connexion au démon ; s'il est absent, le démarre puis réessaie.
 func (r *remote) ensure() error {
 	if r.cl != nil {
@@ -112,7 +116,7 @@ func (r *remote) call(op string, a daemon.Args, out any) error {
 		a.Intent = flagIntent
 	}
 	raw, _ := json.Marshal(a)
-	resp, err := r.cl.Call(ipc.Request{Op: op, Args: raw})
+	resp, err := r.cl.Call(ipc.Request{Op: op, Args: raw, Actor: clientActor})
 	if err != nil {
 		return err
 	}

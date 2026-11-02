@@ -25,23 +25,6 @@ const attestNotesRef = "situlab"
 // attestTrailerKey : clé du trailer de commit qui porte l'attestation v2 (immuable, dans l'objet commit).
 const attestTrailerKey = "SituLab-Approved"
 
-// signCertFor charge le certificat d'appareil d'une instance (config, non secret), ou nil.
-func (s *Service) signCertFor(instance string) *attest.Cert {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil
-	}
-	in := cfg.Resolve(instance)
-	if in == nil || in.SignCert == "" {
-		return nil
-	}
-	var c attest.Cert
-	if json.Unmarshal([]byte(in.SignCert), &c) != nil {
-		return nil
-	}
-	return &c
-}
-
 // signKeyFor charge la clé PRIVÉE d'appareil d'une instance depuis le trousseau (session ouverte).
 // L'appelant efface le privé (zero). nil si pas de clé, session fermée ou trousseau illisible.
 func (s *Service) signKeyFor(instance string) ed25519.PrivateKey {

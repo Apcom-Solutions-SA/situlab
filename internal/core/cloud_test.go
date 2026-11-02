@@ -20,7 +20,7 @@ func fakeCloud(t *testing.T) *httptest.Server {
 		}
 		if r.Method == "PROPFIND" {
 			w.WriteHeader(http.StatusMultiStatus)
-			w.Write([]byte(`<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"></d:multistatus>`))
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"></d:multistatus>`))
 			return
 		}
 		w.WriteHeader(http.StatusCreated)

@@ -74,11 +74,11 @@ func setWindowIcon() {
 	hBig, _, _ := loadImage.Call(0, uintptr(unsafe.Pointer(tmpPtr)), imageIcon, 0, 0, lrLoadFile|lrDefaultSize)
 	hSmall, _, _ := loadImage.Call(0, uintptr(unsafe.Pointer(tmpPtr)), imageIcon, 16, 16, lrLoadFile)
 	if hBig != 0 {
-		sendMessage.Call(hwnd, wmSetIcon, iconBig, hBig)
-		setClassLong.Call(hwnd, gclpHIcon, hBig)
+		_, _, _ = sendMessage.Call(hwnd, wmSetIcon, iconBig, hBig)
+		_, _, _ = setClassLong.Call(hwnd, gclpHIcon, hBig)
 	}
 	if hSmall != 0 {
-		sendMessage.Call(hwnd, wmSetIcon, iconSmall, hSmall)
-		setClassLong.Call(hwnd, gclpHIconSm, hSmall)
+		_, _, _ = sendMessage.Call(hwnd, wmSetIcon, iconSmall, hSmall)
+		_, _, _ = setClassLong.Call(hwnd, gclpHIconSm, hSmall)
 	}
 }

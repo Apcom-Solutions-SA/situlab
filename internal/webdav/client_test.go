@@ -31,9 +31,9 @@ func fakeDAV(t *testing.T, basePath string) *httptest.Server {
 		switch r.Method {
 		case "PROPFIND":
 			w.WriteHeader(http.StatusMultiStatus)
-			w.Write([]byte(ms))
+			_, _ = w.Write([]byte(ms))
 		case http.MethodGet:
-			w.Write([]byte("hello world!"))
+			_, _ = w.Write([]byte("hello world!"))
 		case http.MethodPut, "MKCOL":
 			w.WriteHeader(http.StatusCreated)
 		case http.MethodDelete:

@@ -55,6 +55,9 @@ var ErrFrameTooLarge = errors.New("message IPC trop volumineux")
 type Request struct {
 	Op   string          `json:"op"`
 	Args json.RawMessage `json:"args,omitempty"`
+	// Actor : surface d'où vient l'appel (« cli » | « mcp »), pour le journal local. Purement
+	// informatif (n'autorise rien). Vide = « cli » par défaut côté démon.
+	Actor string `json:"actor,omitempty"`
 }
 
 // Response est la réponse du démon. Kind classe l'erreur pour que la CLI retrouve son code

@@ -112,6 +112,33 @@ function startAutoFetch() {
   autoFetchTimer = setInterval(autoFetchOnce, AUTOFETCH_MS);
 }
 
+// scheduleGitRefresh (optimisation 1.20) : rafraîchissement de la vue DÉTAIL PROJET dès qu'une mutation
+// git aboutit en CLI/MCP/agent (relayé par l'événement « git:changed » du cœur), SANS clignotement et
+// ESPACÉ. Deux garde-fous demandés par l'usage :
+//   1. intervalle MINIMUM de 30 s entre deux rafraîchissements auto (les rafales — une synchro = fetch
+//      + enregistrer + envoyer — se regroupent en un seul) ;
+//   2. repeinture EN PLACE et seulement si l'état a VRAIMENT changé (même signature ⇒ aucun repaint),
+//      au lieu de reconstruire la page (qui faisait « clignoter » l'écran).
+// Le rafraîchissement IMMÉDIAT à la demande se fait par l'icône ↻ à côté de « Modifier » (manualProjectRefresh).
+const GITREFRESH_MIN_MS = 30 * 1000;
+let gitRefreshLast = 0;
+let gitRefreshTimer = null;
+function scheduleGitRefresh() {
+  // On n'agit que sur le détail d'un projet (la vue à matrice que l'on regarde). Ailleurs, l'icône
+  // manuelle et la récupération périodique suffisent — aucun repaint intempestif.
+  if (state.view !== "project" || !state.projectName) return;
+  if (gitRefreshTimer) return; // un rafraîchissement est déjà programmé : on ne l'empile pas
+  const wait = Math.max(0, GITREFRESH_MIN_MS - (Date.now() - gitRefreshLast));
+  gitRefreshTimer = setTimeout(() => {
+    gitRefreshTimer = null;
+    gitRefreshLast = Date.now();
+    const name = state.projectName;
+    if (state.view === "project" && name && typeof refreshProjectInPlace === "function") {
+      refreshProjectInPlace(name, { doFetch: true });
+    }
+  }, wait);
+}
+
 // roleOf renvoie le rôle effectif d'une connexion par son nom (défaut : atelier).
 function roleOf(name) {
   const inst = (state.instances || []).find((i) => i.name === name);

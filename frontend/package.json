@@ -1,0 +1,11 @@
+{
+  "name": "situlab-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint dist/app"
+  },
+  "devDependencies": {
+    "eslint": "^9.15.0"
+  }
+}

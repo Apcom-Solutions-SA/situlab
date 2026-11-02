@@ -12,7 +12,7 @@ async function renderSettings() {
   // « Agent IA » est sorti des Réglages (v1.17) → entrée du menu principal (voir renderAssistantIA).
   // « Aide » est entrée dans les Réglages (v1.17) → onglet ci-dessous, à la place de l'entrée de menu.
   const navItems = [["secu", `${ico("lock", 15)} Compte & sécurité`], ["conn", `${ico("link", 15)} Connexions git`], ["cloud", `${ico("cloud", 15)} Connexions cloud`], ["app", `${ico("palette", 15)} Apparence`], ["modules", `${ico("puzzle", 15)} Modules`],
-    ["diag", `${ico("activity", 15)} Diagnostic`], ["help", `${ico("help", 15)} Aide`], ["about", `${ico("info", 15)} À propos`]];
+    ["diag", `${ico("activity", 15)} Diagnostic`], ["journal", `${ico("activity", 15)} Journaux`], ["help", `${ico("help", 15)} Aide`], ["about", `${ico("info", 15)} À propos`]];
   let setTab = "secu";
   try { setTab = localStorage.getItem("situlab.settab") || "secu"; } catch (_) {}
   // Garde-fou : un onglet mémorisé qui n'existe plus (ex. « osbox » retiré en 1.17) laisserait la page
@@ -25,6 +25,23 @@ async function renderSettings() {
     <div class="set-layout">
       <nav class="set-nav">${navItems.map(([k, l]) => `<button class="set-navbtn" data-settab="${k}">${l}</button>`).join("")}</nav>
       <div class="set-panels">
+
+    <section class="set-sec set-panel" data-panel="journal"><div class="set-sec-h">${ico("activity", 15)} Journaux</div>
+      <div class="set-sec-d">Trace <b>locale</b> des opérations (surface, succès/échec, durée). Elle reste sur ce poste, n'est <b>jamais envoyée</b>, et ne contient aucun secret. Utile pour comprendre ce qu'un agent a fait, ou pourquoi un geste de fond (sauvegarde, attestation) a échoué sans le dire.</div>
+      <div class="set-row"><div class="set-row-l">Niveau d'enregistrement <small>« échecs » suffit au quotidien ; « tout » pour diagnostiquer</small></div>
+        <div class="set-row-c"><select id="jnl-level" class="select">
+          <option value="off">désactivé</option>
+          <option value="errors">échecs seulement</option>
+          <option value="all">tout</option></select></div></div>
+      <div class="jnl-bar">
+        <label class="toggle-inline"><span class="switch"><input type="checkbox" id="jnl-onlyerr" /><span class="track"></span></span> Échecs seulement</label>
+        <div class="jnl-bar-r">
+          <button class="btn btn-ghost btn-sm" id="jnl-refresh">↻ Rafraîchir</button>
+          <button class="lnk danger" id="jnl-clear">Effacer</button>
+        </div>
+      </div>
+      <div id="jnl-list" class="jnl-list"><div class="skeleton"></div></div>
+    </section>
 
     <section class="set-sec set-panel" data-panel="secu"><div class="set-sec-h">${ico("lock", 15)} Compte &amp; sécurité</div>
       <div class="set-sec-d">Votre PIN déverrouille vos accès (jetons chiffrés sur ce poste) et confirme chaque envoi vers le serveur. Personne ne peut lire vos accès sans lui.</div>
@@ -159,6 +176,7 @@ async function renderSettings() {
   if (el("go-git")) el("go-git").onclick = () => navTo("git");
   // Chapitre « Connexions cloud » : liste + admin (réutilise les tunnels CORPUS avec retour Réglages).
   renderSettingsClouds();
+  renderJournalPanel();
   if (el("sc-add-cloud")) el("sc-add-cloud").onclick = () => addCloudModal(renderSettings);
   // Export / import de la configuration (P18).
   if (el("cfgbk-create")) {
@@ -439,6 +457,41 @@ async function renderDiagnostic() {
 
 // renderSettingsClouds : liste et administre les connexions cloud dans les Réglages (1.11). La vue
 // d'exploration des fichiers reste dans CORPUS ; ici on ajoute, règle l'accès IA/PIN et retire.
+// renderJournalPanel : onglet « Journaux » des Réglages — niveau d'enregistrement + liste des dernières
+// entrées du journal local (lecture seule, aucun secret) + effacement. Tout vit sur le poste.
+async function renderJournalPanel() {
+  const sel = el("jnl-level");
+  if (!sel) return;
+  try { sel.value = await App().JournalLevel(); } catch (_) {}
+  sel.onchange = async () => {
+    try { await App().SetJournalLevel(sel.value); toast("Niveau du journal mis à jour", "ok"); load(); }
+    catch (e) { toast(cleanErr(e), "err"); }
+  };
+  const onlyErr = el("jnl-onlyerr");
+  async function load() {
+    const box = el("jnl-list");
+    if (!box) return;
+    try {
+      const ents = await App().JournalRead(100, !!(onlyErr && onlyErr.checked));
+      if (!ents || !ents.length) { box.innerHTML = `<div class="jnl-empty">Aucune opération enregistrée pour ce filtre.</div>`; return; }
+      box.innerHTML = ents.map((e) => {
+        const t = String(e.t || "").replace("T", " ").slice(0, 19);
+        const cls = e.ok ? "jnl-ok" : "jnl-err";
+        const err = e.err ? `<span class="jnl-e">${esc(e.err)}</span>` : "";
+        const intent = e.intent ? `<span class="jnl-why" title="${esc(e.intent)}">« ${esc(e.intent)} »</span>` : "";
+        return `<div class="jnl-row ${cls}"><span class="jnl-t">${esc(t)}</span><span class="jnl-actor">${esc(e.actor || "")}</span><span class="jnl-op">${esc(e.op || "")}</span><span class="jnl-tg">${esc(e.target || "")}</span>${err}${intent}</div>`;
+      }).join("");
+    } catch (e) { box.innerHTML = `<div class="inline-error">${esc(cleanErr(e))}</div>`; }
+  }
+  if (el("jnl-refresh")) el("jnl-refresh").onclick = load;
+  if (onlyErr) onlyErr.onchange = load;
+  if (el("jnl-clear")) el("jnl-clear").onclick = async () => {
+    try { await App().JournalClear(); toast("Journal effacé", "ok"); load(); }
+    catch (e) { toast(cleanErr(e), "err"); }
+  };
+  load();
+}
+
 async function renderSettingsClouds() {
   const box = el("sc-cloud-list"); if (!box) return;
   let clouds = [];

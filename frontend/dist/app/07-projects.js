@@ -177,7 +177,7 @@ function projectGraphCard(b, idx) {
   return `<div class="pboard">
     <div class="pboard-h">
       <div class="pboard-ttl">${ico}<b class="pboard-name">${esc(b.name)}</b> <span class="muted">${esc(atl.owner)}/${esc(atl.repo)}</span></div>
-      <div class="pbc-act">${syncBtn}${publishBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">Modifier</button><button class="icon-del" data-delproj="${esc(b.name)}" title="Retirer ce projet (aucun dépôt n'est supprimé)" aria-label="Retirer le projet « ${esc(b.name)} »">${ICO_TRASH}</button></div>
+      <div class="pbc-act">${syncBtn}${publishBtn}${cloneBtn}${prodBtns}<button class="lnk" data-editproj="${esc(b.name)}" title="Renommer, changer l'icône, l'atelier ou les vitrines du projet">Modifier</button><button class="icon-refresh" data-refreshproj="${esc(b.name)}" title="Rafraîchir l'état maintenant (local + atelier/vitrine)" aria-label="Rafraîchir le projet « ${esc(b.name)} »">${ICO_REFRESH}</button><button class="icon-del" data-delproj="${esc(b.name)}" title="Retirer ce projet (aucun dépôt n'est supprimé)" aria-label="Retirer le projet « ${esc(b.name)} »">${ICO_TRASH}</button></div>
     </div>
     <div class="pgraph" id="pg-${idx}"><div class="skeleton"></div></div>
   </div>`;
@@ -422,6 +422,7 @@ function bindProjectBoard(boards) {
     const pr = ev.target.closest("[data-promote]");
     if (pr) return promoteWizard(byName[pr.dataset.promote], parseInt(pr.dataset.idx, 10), pr.dataset.label);
     const rc = ev.target.closest("[data-reconinst]"); if (rc) return reconnectModal(rc.dataset.reconinst);
+    const rf = ev.target.closest("[data-refreshproj]"); if (rf) return manualProjectRefresh(rf.dataset.refreshproj, rf);
     const ep = ev.target.closest("[data-editproj]"); if (ep) return editProjectModal(byName[ep.dataset.editproj]);
     const av = ev.target.closest("[data-addvitrine]"); if (av) return editProjectModal(byName[av.dataset.addvitrine], { addVitrine: true });
     const sy = ev.target.closest("[data-sync]"); if (sy) return projectSync(byName[sy.dataset.sync]);
@@ -1538,6 +1539,45 @@ async function reloadProjectGit(b) {
   await refreshProjectLocal(b);
   fillGitTab(b);
   repaintProjectCard(b);
+}
+
+// refreshProjectInPlace (optimisation 1.20) : relit l'état du projet et NE REPEINT QUE SI quelque chose
+// a VRAIMENT changé (zéro clignotement, contrairement à une reconstruction de page). doFetch=true
+// récupère d'abord les refs distantes pour que le RETARD local vs atelier et les pastilles de branches
+// soient à jour après un geste distant. Best-effort, non bloquant ; abandonne si la vue a changé.
+async function refreshProjectInPlace(name, opts) {
+  opts = opts || {};
+  const alive = () => state.view === "project" && state.projectName === name;
+  if (!alive()) return;
+  let bb;
+  try { bb = await App().ProjectBoardOne(name); } catch (_) { return; }
+  if (!alive() || !bb) return;
+  if (opts.doFetch && bb.local && bb.local.path && bb.atelier && bb.atelier.instance) {
+    try { await App().Fetch(bb.atelier.instance, bb.local.path); } catch (_) {}
+    if (!alive()) return;
+    await refreshProjectLocal(bb); // relit avance/retard après le fetch
+    if (!alive()) return;
+  }
+  // Repeindre UNIQUEMENT en cas de changement réel : on compare à l'état connu (cache swr). Même
+  // signature ⇒ on ne touche pas au DOM (pas de clignotement sur un signal sans effet).
+  const sig = JSON.stringify(bb);
+  const prev = (typeof swrPeek === "function") ? swrPeek("board:" + name) : null;
+  if (prev && JSON.stringify(prev) === sig) return;
+  if (typeof __swrMem !== "undefined" && __swrMem && __swrMem.set) __swrMem.set("board:" + name, { data: bb, sig });
+  try { App().UICacheSave("board:" + name, sig); } catch (_) {}
+  repaintProjectCard(bb);
+}
+
+// manualProjectRefresh : rafraîchissement IMMÉDIAT à la demande (icône ↻ à côté de « Modifier »), sans
+// attendre l'intervalle auto. Rotation de l'icône le temps de la récupération. Réaligne l'horloge du
+// throttle auto pour éviter un double rafraîchissement juste après.
+async function manualProjectRefresh(name, btn) {
+  gitRefreshLast = Date.now();
+  if (gitRefreshTimer) { clearTimeout(gitRefreshTimer); gitRefreshTimer = null; }
+  if (btn) btn.classList.add("spinning");
+  try { await refreshProjectInPlace(name, { doFetch: true }); }
+  catch (_) {}
+  finally { if (btn) btn.classList.remove("spinning"); }
 }
 
 // Cache des dépôts accessibles par connexion (évite de recharger à chaque changement).

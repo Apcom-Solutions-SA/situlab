@@ -6,6 +6,38 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : [SemVer]
 étaient des itérations internes, hors production : elles ne sont ni distribuées ni documentées ici.
 L'historique public et le développement communautaire commencent à la 1.19.
 
+## [1.20.0] — 2026-11-02
+
+Des nouveautés pour l'utilisateur et un travail de fond sur la qualité, en vue de l'ouverture à la
+communauté.
+
+### Ajouté
+
+- **Journal local des opérations.** Une trace locale (qui reste sur le poste, n'est jamais envoyée et
+  ne contient aucun secret) de ce que fait SituLab : surface (fenêtre, ligne de commande, agent),
+  succès ou échec, erreur, durée. Consultable dans **Réglages → Journaux**, en ligne de commande
+  (`situlab journal tail|level|clear`) et par un agent via l'outil MCP `journal_read` (lecture seule).
+  Trois niveaux d'enregistrement : désactivé, échecs seulement (par défaut), tout.
+- **Rafraîchissement automatique de l'état.** Après une opération git (en ligne de commande, par un
+  agent ou dans la fenêtre), la vue se met à jour d'elle-même, sans attendre la récupération périodique.
+  Une **icône de rafraîchissement manuel** s'ajoute sur le détail d'un projet.
+
+### Modifié
+
+- **Performance.** Lire l'état d'un dépôt déclenche un processus git de moins : gain sur les listes et la
+  matrice de dépôts.
+
+### Qualité et développement (pour les contributeurs)
+
+- Analyse de style (`golangci-lint`) **réelle et bloquante** en intégration continue : configuration
+  migrée, jeu standard, zéro signalement.
+- Intégration continue étendue à une **matrice de trois systèmes** (Linux, Windows, macOS), avec test du
+  détecteur de courses et vérification au lancement sur chaque système.
+- Analyse de style du frontend (ESLint) ajoutée.
+- Fichiers d'accueil des contributions : `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` ; `README` étoffé.
+- Code réorganisé par domaine : fichiers plus courts, aucun au-dessus de 900 lignes.
+- Journal des décisions d'architecture : `docs/DECISIONS/0001` sur la clé de signature embarquée.
+
 ## [1.19.0]
 
 Première version publique. Cette entrée présente SituLab dans son état 1.19 : ses fonctions, ses
