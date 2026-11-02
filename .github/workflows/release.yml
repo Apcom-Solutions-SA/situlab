@@ -39,7 +39,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ env.GO_VERSION }}" }
 
       - name: Version (depuis le tag, sinon 0.0.0-dev)
@@ -118,7 +118,7 @@ jobs:
     runs-on: macos-14 # runner Apple Silicon, Xcode préinstallé
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ env.GO_VERSION }}" }
 
       - name: Version
@@ -154,7 +154,7 @@ jobs:
     runs-on: ubuntu-22.04 # 22.04 fournit webkit2gtk-4.0 (défaut Wails v2) ; 24.04 l'a retiré
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ env.GO_VERSION }}" }
 
       - name: Dépendances système (GTK3 + WebKit2GTK pour la fenêtre Wails)
