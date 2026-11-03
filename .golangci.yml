@@ -1,0 +1,27 @@
+version: "2"
+# Jeu de linters solide et sans bruit, adapté à un code commenté en FRANÇAIS.
+# misspell est volontairement EXCLU : correcteur anglais, il prend les mots
+# français (« commandes », « existant », « démarrage »…) pour des fautes.
+run:
+  timeout: 5m
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - frontend/wailsjs
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

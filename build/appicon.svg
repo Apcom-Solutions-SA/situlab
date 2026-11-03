@@ -1,0 +1,23 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>SituLab — icône</title>
+  <defs>
+    <linearGradient id="tile" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#335A9C"/>
+      <stop offset="1" stop-color="#2A4D85"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="120" y1="120" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F2C14E"/>
+      <stop offset="1" stop-color="#D29922"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="116" fill="url(#tile)"/>
+  <rect x="32.5" y="32.5" width="447" height="447" rx="115.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.10"/>
+
+  <!-- le S, colonne du graphe -->
+  <path d="M322 182 C322 148 292 136 252 136 C203 136 176 163 176 201 C176 238 208 252 252 261 C296 270 328 284 328 321 C328 359 300 384 252 384 C208 384 190 371 190 350"
+        fill="none" stroke="#FFFFFF" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- points de commit aux deux extrémités du S : plus gros que le trait -> débordent du S, halo blanc -->
+  <circle cx="322" cy="182" r="38" fill="url(#acc)" stroke="#FFFFFF" stroke-width="9"/>
+  <circle cx="190" cy="350" r="38" fill="url(#acc)" stroke="#FFFFFF" stroke-width="9"/>
+</svg>
