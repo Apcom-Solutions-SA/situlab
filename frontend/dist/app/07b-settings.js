@@ -121,7 +121,8 @@ async function renderSettings() {
     <section class="set-sec set-panel" data-panel="about"><div class="set-sec-h">${ico("info", 15)} À propos</div>
       <div class="set-sub-h">Version</div>
       <div class="set-row"><div class="set-row-l">Version installée <b id="app-ver">…</b></div>
-        <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-check">Vérifier les mises à jour ↗</button></div></div>
+        <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-check">Vérifier les mises à jour</button></div></div>
+      <div class="ver-status" id="ver-status" hidden></div>
       <div class="set-row"><div class="set-row-l">Téléchargements (votre OS)</div>
         <div class="set-row-c"><button class="btn btn-ghost btn-sm" id="ver-site">situememoring.com ↗</button><button class="btn btn-ghost btn-sm" id="ver-gh">GitHub ↗</button></div></div>
       <div class="set-sub-h" style="margin-top:16px">Licence</div>
@@ -219,9 +220,12 @@ async function renderSettings() {
   // d'une API externe depuis la fenêtre) ; le bouton ouvre donc la page des versions dans le navigateur.
   const openURL = (u) => safeOpenURL(u);
   try { el("app-ver").textContent = await App().AppVersion(); } catch (_) { el("app-ver").textContent = "?"; }
-  if (el("ver-check")) el("ver-check").onclick = () => openURL("https://situememoring.com/#telecharger");
+  // 1.21.1 (besoin #3) : vérification ACTIVE. Le backend lit la dernière Release publique (la CSP
+  // interdit ce fetch depuis la fenêtre) et compare. Si une MAJ existe, on propose la mise à jour
+  // « clé en main » (téléchargement de l'installeur + lancement, l'app se ferme pour libérer le binaire).
+  if (el("ver-check")) el("ver-check").onclick = () => runUpdateCheck();
   if (el("ver-site")) el("ver-site").onclick = () => openURL("https://situememoring.com/");
-  if (el("ver-gh")) el("ver-gh").onclick = () => openURL("https://situememoring.com/#telecharger");
+  if (el("ver-gh")) el("ver-gh").onclick = () => openURL("https://github.com/Apcom-Solutions-SA/situlab/releases/latest");
   // Section Licence : texte Apache-2.0 + NOTICE embarqués (go:embed), affichés en modale.
   if (el("lic-show")) el("lic-show").onclick = async () => { try { infoModal("Licence Apache-2.0", `<pre class="filebox" style="user-select:text;white-space:pre-wrap">${esc(await App().License())}</pre>`); } catch (_) {} };
   if (el("notice-show")) el("notice-show").onclick = async () => { try { infoModal("NOTICE", `<pre class="filebox" style="user-select:text;white-space:pre-wrap">${esc(await App().Notice())}</pre>`); } catch (_) {} };
@@ -619,4 +623,62 @@ function importConfigModal() {
     catch (e) { if (isLocked(e)) return handleLock(); const er = el("cfgimp2-e"); if (er) { er.textContent = cleanErr(e); er.classList.remove("hidden"); } }
   });
   if (el("modal-ok")) el("modal-ok").textContent = "Choisir un fichier et importer";
+}
+
+// --- Mise à jour (1.21.1, besoin #3) -------------------------------------------------------------
+// renderVerStatus : affiche le verdict de version dans la zone #ver-status (À propos). tone = état,
+// html = contenu. Toujours visible une fois peint.
+function renderVerStatus(tone, html) {
+  const box = el("ver-status"); if (!box) return;
+  box.hidden = false;
+  box.className = "ver-status ver-" + tone;
+  box.innerHTML = html;
+}
+
+// runUpdateCheck : interroge le backend (CheckUpdate), puis rend « à jour » / « MAJ dispo » / erreur.
+// En cas de MAJ, propose « Mettre à jour maintenant » (clé en main) + un lien vers les notes.
+async function runUpdateCheck() {
+  const btn = el("ver-check");
+  if (btn) { btn.disabled = true; btn.textContent = "Vérification…"; }
+  renderVerStatus("wait", `<span class="vs-ic">${ico("clock", 15)}</span> Recherche de la dernière version…`);
+  let info;
+  try { info = await App().CheckUpdate(); }
+  catch (e) { info = { error: cleanErr(e) }; }
+  if (btn) { btn.disabled = false; btn.textContent = "Vérifier les mises à jour"; }
+  if (!info || info.error) {
+    renderVerStatus("err", `<span class="vs-ic">${ico("warning", 15)}</span> Vérification impossible : ${esc((info && info.error) || "erreur inconnue")}. <button class="lnk" id="vs-web">Voir la page des versions</button>`);
+    if (el("vs-web")) el("vs-web").onclick = () => safeOpenURL("https://github.com/Apcom-Solutions-SA/situlab/releases/latest");
+    return;
+  }
+  if (!info.update_available) {
+    renderVerStatus("ok", `<span class="vs-ic">${ico("check", 15)}</span> Vous êtes à jour (version ${esc(info.current)}).`);
+    return;
+  }
+  const notes = info.html_url ? ` <button class="lnk" id="vs-notes">Notes de version</button>` : "";
+  const act = info.asset_url
+    ? `<button class="btn btn-primary btn-sm" id="vs-do">Mettre à jour maintenant</button>`
+    : `<button class="btn btn-primary btn-sm" id="vs-web2">Télécharger</button>`;
+  renderVerStatus("upd", `<span class="vs-ic">${ico("download", 15)}</span> Mise à jour disponible : <b>${esc(info.latest)}</b> (installée : ${esc(info.current)}). ${act}${notes}`);
+  if (el("vs-notes")) el("vs-notes").onclick = () => safeOpenURL(info.html_url);
+  if (el("vs-web2")) el("vs-web2").onclick = () => safeOpenURL(info.html_url || "https://github.com/Apcom-Solutions-SA/situlab/releases/latest");
+  if (el("vs-do")) el("vs-do").onclick = () => confirmUpdateNow(info);
+}
+
+// confirmUpdateNow : confirmation avant la MAJ clé en main — SituLab télécharge l'installeur et le
+// lance ; la fenêtre se ferme pour libérer le binaire, puis l'installeur applique la nouvelle version.
+function confirmUpdateNow(info) {
+  openModal("Mettre à jour maintenant ?", `<div class="field">
+    <div class="callout">SituLab va télécharger l'installeur de la version <b>${esc(info.latest)}</b> puis le lancer. <b>La fenêtre se fermera</b> pour permettre l'installation ; suivez l'installeur, puis rouvrez SituLab.</div>
+    <p class="sub" style="margin:8px 0 0">Fichier : <code>${esc(info.asset_name || "installeur")}</code></p></div>`, async () => {
+    try {
+      renderVerStatus("wait", `<span class="vs-ic">${ico("clock", 15)}</span> Téléchargement de l'installeur…`);
+      toast("Téléchargement de la mise à jour…", "ok");
+      await App().DownloadAndRunUpdate();
+      // L'app se ferme d'elle-même (côté backend) une fois l'installeur lancé.
+    } catch (e) {
+      renderVerStatus("err", `<span class="vs-ic">${ico("warning", 15)}</span> Mise à jour impossible : ${esc(cleanErr(e))}. <button class="lnk" id="vs-web3">Télécharger manuellement</button>`);
+      if (el("vs-web3")) el("vs-web3").onclick = () => safeOpenURL(info.html_url || "https://github.com/Apcom-Solutions-SA/situlab/releases/latest");
+    }
+  });
+  if (el("modal-ok")) el("modal-ok").textContent = "Télécharger et installer";
 }

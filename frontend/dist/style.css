@@ -2865,3 +2865,91 @@ button.cst-core.cst-nav:hover { filter: brightness(1.08); box-shadow: 0 0 0 2px 
 .pinreq-del .pinreq-entry { border-color: color-mix(in srgb, var(--danger) 30%, transparent); background: color-mix(in srgb, var(--danger) 6%, var(--bg-raised)); }
 .pinreq-entry-h { display: flex; flex-direction: row; align-items: center; gap: 7px; font-weight: 700; font-size: var(--fs-sm); color: var(--text); }
 .pinreq-note { color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.5; }
+
+/* ============================================================================================= */
+/* 1.21.1 — Raccourci « Dire bonjour » (nav), modale de choix, vérification de MAJ, pastille active */
+/* ============================================================================================= */
+
+/* Pastille « bonjour » accolée à l'entrée Agent IA, poussée à droite de la ligne de nav. */
+.ia-hello-pastille {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: var(--r-full);
+  color: var(--text-soft); background: transparent; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast);
+}
+.ia-hello-pastille:hover { background: var(--accent-soft); color: var(--accent); transform: translateY(-1px); }
+.nav-item[data-view="ia"].active .ia-hello-pastille { color: inherit; }
+
+/* Modale « Dire bonjour » — design futuriste : eyebrow mono, cartes de mode à barre de teinte,
+   grille de puces-cibles teintées par domaine avec halo de sélection. Tout est scopé sous .hello. */
+.modal-card.hello-card { width: 468px; }
+.modal-card.hello-card #modal-body { position: relative; }
+/* Filet d'accent en tête de la modale (signature « système »). */
+.modal-card.hello-card #modal-title { position: relative; padding-bottom: 10px; }
+.modal-card.hello-card #modal-title::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 46px; border-radius: 2px; background: linear-gradient(90deg, var(--accent), transparent); }
+.hello { display: flex; flex-direction: column; gap: 12px; margin-bottom: 4px; }
+.hello-eyebrow { font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: var(--accent); opacity: .85; }
+.hello-q { margin: -4px 0 2px; font-size: var(--fs-base); font-weight: 600; color: var(--text); }
+
+.hello-modes { display: flex; flex-direction: column; gap: 8px; }
+.hello-mode {
+  position: relative; display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 12px 14px 12px 16px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--bg-raised); color: var(--text); cursor: pointer; overflow: hidden;
+  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
+}
+.hello-mode::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); transform: scaleY(0); transform-origin: center; transition: transform var(--t-mid); }
+.hello-mode:hover:not(.off) { border-color: var(--accent); transform: translateY(-1px); }
+.hello-mode.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset, 0 6px 22px -12px var(--accent); }
+.hello-mode.on::before { transform: scaleY(1); }
+.hello-mode.off { opacity: .5; cursor: not-allowed; }
+.hello-mode .hm-ic { flex: 0 0 auto; display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; border-radius: var(--r-sm); background: var(--bg-surface); color: var(--accent); }
+.hello-mode .hm-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hello-mode .hm-txt b { font-size: var(--fs-base); font-weight: 650; }
+.hello-mode .hm-txt small { font-size: var(--fs-xs); font-weight: 500; color: var(--text-soft); line-height: 1.4; }
+.hello-mode .hm-radio { flex: 0 0 auto; margin-left: auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-strong); transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.hello-mode.on .hm-radio { border-color: var(--accent); box-shadow: inset 0 0 0 3px var(--accent); }
+
+.hello-tgts { display: flex; flex-direction: column; gap: 8px; animation: helloReveal var(--t-mid) ease both; }
+@keyframes helloReveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.hello-tgts-h { display: flex; align-items: baseline; justify-content: space-between; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }
+.hello-count { font-family: ui-monospace, Consolas, monospace; letter-spacing: 0; text-transform: none; color: var(--accent); }
+.hello-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 232px; overflow: auto; padding: 2px; }
+.hello-chip {
+  position: relative; display: flex; align-items: center; gap: 9px; text-align: left; width: 100%;
+  padding: 10px 11px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--bg-raised); color: var(--text); cursor: pointer; overflow: hidden;
+  transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
+}
+.hello-chip[data-kind="kernel"] { --hue: var(--kernel); --hue-soft: var(--kernel-soft); }
+.hello-chip[data-kind="spoke"]  { --hue: var(--spoke);  --hue-soft: var(--spoke-soft); }
+.hello-chip:hover { border-color: var(--hue); transform: translateY(-1px); }
+.hello-chip.on { border-color: var(--hue); background: var(--hue-soft); box-shadow: 0 0 0 1px var(--hue) inset, 0 8px 24px -14px var(--hue); }
+.hello-chip .hc-ic { flex: 0 0 auto; display: inline-flex; width: 18px; height: 18px; color: var(--hue); }
+.hello-chip .hc-n { flex: 1 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hello-chip .hc-k { flex: 0 0 auto; font-family: ui-monospace, Consolas, monospace; font-size: 9px; font-weight: 700; letter-spacing: .12em; padding: 2px 6px; border-radius: var(--r-full); color: var(--hue); background: var(--hue-soft); }
+.hello-chip .hc-check { flex: 0 0 auto; width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid var(--border-strong); color: transparent; background: transparent; transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast); }
+.hello-chip .hc-check .ico { width: 11px; height: 11px; stroke-width: 3; }
+.hello-chip.on .hc-check { border-color: var(--hue); background: var(--hue); color: #fff; }
+@media (prefers-reduced-motion: reduce) {
+  .hello-mode, .hello-chip, .hello-mode::before, .hello-chip .hc-check { transition: none; }
+  .hello-tgts { animation: none; }
+}
+
+/* Zone de statut de version (Réglages › À propos). */
+.ver-status { margin: 4px 0 8px; padding: 9px 12px; border-radius: var(--r-md); font-size: var(--fs-sm); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 1px solid var(--border); }
+.ver-status .vs-ic { display: inline-flex; }
+.ver-status.ver-ok { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.ver-status.ver-upd { color: var(--text); background: var(--warn-soft); border-color: transparent; }
+.ver-status.ver-upd .vs-ic { color: var(--warn); }
+.ver-status.ver-err { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.ver-status.ver-wait { color: var(--text-soft); }
+.ver-status .btn, .ver-status .lnk { margin-left: 4px; }
+
+/* Pastille de version active (bas de nav). La couleur = SENS (design-system §3) : une mise à jour
+   demande d'INTERVENIR → teinte d'attention (--warn, l'or de la charte), jamais le bleu d'accent. */
+.version-btn { cursor: pointer; border-radius: var(--r-sm); padding: 2px 4px; transition: background var(--t-fast), color var(--t-fast); }
+.version-btn:hover { background: var(--bg-raised); color: var(--text); }
+.version-btn.version-upd { color: var(--text-soft); font-weight: 600; }
+.version-btn .ver-dot { display: none; }
+.version-btn .ver-upd-tag { margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--warn); background: var(--warn-soft); padding: 1px 6px; border-radius: var(--r-full); vertical-align: middle; white-space: nowrap; }

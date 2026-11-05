@@ -26,6 +26,15 @@ async function showApp(instances) {
   state.instance = (instances.find((i) => i.default) || instances[0]).name;
 
   document.querySelectorAll(".nav-item[data-view]").forEach((b) => { b.onclick = () => navTo(b.dataset.view); });
+  // Pastille « Dire bonjour » (1.21.1, besoin #1) : raccourci dans la nav, à côté d'« Agent IA ».
+  // Un clic ouvre la modale de choix (prompt global / ouverture ciblée) SANS naviguer — on stoppe la
+  // propagation pour ne pas déclencher le navTo du bouton parent. Accessible au clavier (Entrée/Espace).
+  const pastille = el("ia-hello-pastille");
+  if (pastille) {
+    const fire = (ev) => { ev.stopPropagation(); ev.preventDefault(); aiHelloModal("cli"); };
+    pastille.onclick = fire;
+    pastille.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") fire(ev); };
+  }
 
   state.readOnly = await App().ReadOnly().catch(() => false);
   updateReadOnlyBanner();

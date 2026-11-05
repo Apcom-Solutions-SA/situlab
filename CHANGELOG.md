@@ -2,6 +2,26 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : [SemVer](https://semver.org/lang/fr/).
 
+## [1.21.1] — 2026-11-05
+
+Version de maintenance centrée sur la mise en route de l'agent IA et le suivi des versions.
+
+### Ajouté
+
+- **Raccourci « Dire bonjour à mon agent »** dans la barre de navigation, à côté d'Agent IA : un message
+  de présentation est accessible sans ouvrir la page.
+- **Choix du message au moment de dire bonjour** : un prompt global (l'agent lit la fiche, liste les
+  KERNEL et spokes et propose quoi ouvrir), ou une ouverture ciblée qui lance directement un ou plusieurs
+  KERNEL/spokes disposant d'un fichier de lancement. Le message est adapté au type d'agent (terminal ou MCP).
+- **Vérification des versions** active : SituLab compare la version installée à la dernière Release
+  publiée et signale si une mise à jour est disponible, depuis la pastille de version et depuis
+  Réglages › À propos. Quand une mise à jour existe, elle peut être téléchargée et lancée depuis l'application.
+
+### Modifié
+
+- **Code de conduite** réécrit : une contribution est du travail livré (code ou module) ; un désaccord
+  prend la forme d'une contre-proposition. Voir `CODE_OF_CONDUCT.md`.
+
 ## [1.21.0] — 2026-11-03
 
 Première version publique de SituLab. Cette entrée présente le logiciel dans son état 1.21 : ses

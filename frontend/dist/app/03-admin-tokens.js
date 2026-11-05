@@ -298,6 +298,136 @@ function firstPromptText(kind, exe, docPath) {
   ].join("\n");
 }
 
+// targetedPromptText : message TÉLÉDIRIGÉ vers une ou plusieurs ouvertures précises (1.21.1, besoin #2).
+// Au lieu de faire lister puis demander « ouvre xxx », on remet un prompt qui aboutit DIRECTEMENT à
+// l'ouverture des cibles choisies. Volontairement SEC : accès + fiche + ordre d'ouverture. targets =
+// [{type:"kernel"|"spoke", name}]. Si targets vide → retombe sur le message global (firstPromptText).
+function targetedPromptText(kind, exe, docPath, targets) {
+  if (!targets || !targets.length) return firstPromptText(kind, exe, docPath);
+  exe = exe || "situlab";
+  const isMcp = kind === "mcp";
+  const acces = isMcp
+    ? "Tu me pilotes SituLab par les outils MCP « situlab » : lectures libres, toute écriture distante passe par mon PIN sur le poste."
+    : `SituLab est ici : "${exe}". Appelle-le par ce chemin complet. Toute écriture distante passe par mon PIN sur le poste.`;
+  const fiche = docPath
+    ? `Lis d'abord ma fiche de collaboration : "${docPath}".`
+    : "Lis d'abord le fichier AGENTS.md près de mes dépôts.";
+  const liste = targets.map((t) => t.name).join(", ");
+  // Ordre d'ouverture, sec. CLI : commandes exactes ; MCP : outils d'ouverture. Pour chaque cible,
+  // ouvrir → lire le fichier d'ouverture renvoyé → le suivre. Rien de plus.
+  let ordre;
+  if (targets.length === 1) {
+    const t = targets[0];
+    ordre = isMcp
+      ? `Ouvre ${t.name} (outil d'ouverture ${t.type === "kernel" ? "kernel" : "spoke"}), lis son fichier d'ouverture et suis-le.`
+      : `Ouvre ${t.name} : « ${exe} ${t.type === "kernel" ? "kernel" : "spoke"} open ${t.name} », lis le fichier d'ouverture renvoyé et suis-le.`;
+  } else {
+    const detail = targets
+      .map((t) => (isMcp ? `${t.name} (${t.type})` : `${t.name} → « ${exe} ${t.type === "kernel" ? "kernel" : "spoke"} open ${t.name} »`))
+      .join(" ; ");
+    ordre = isMcp
+      ? `Ouvre dans l'ordre : ${liste}. Pour chaque cible : ${detail}. Lis son fichier d'ouverture et suis-le avant la suivante.`
+      : `Ouvre dans l'ordre : ${liste}. Pour chaque cible, lis le fichier d'ouverture renvoyé et suis-le avant la suivante : ${detail}.`;
+  }
+  return [
+    "On travaille ensemble avec SituLab, mon utilitaire git : tu prépares, je garde la main (PIN quand il le faut).",
+    "",
+    acces,
+    fiche,
+    ordre,
+  ].join("\n");
+}
+
+// aiHelloModal : au clic sur « Dire bonjour » (bouton de la page Agent IA OU pastille de la nav,
+// 1.21.1, besoin #1+#2), on n'impose plus le message de base : une modale propose soit un prompt
+// GLOBAL (rien ouvrir, l'existant), soit une ou plusieurs OUVERTURES ciblées (KERNEL/spokes qui ont
+// un fichier de lancement). Le prompt copié est adapté au type d'agent déjà choisi (cli/mcp).
+async function aiHelloModal(kind) {
+  kind = kind === "mcp" ? "mcp" : "cli";
+  let exe = "situlab";
+  try { exe = (await App().ExePath()) || "situlab"; } catch (e) {}
+  let docPath = "";
+  try { if (await App().AgentsDocExists()) docPath = await App().AgentsDocPath(); } catch (e) {}
+  // Cibles ouvrables = KERNEL + spokes AYANT un fichier d'ouverture (run_file). Sans run_file, pas
+  // d'ouverture possible → on ne les propose pas (ils restent joignables par le prompt global).
+  let targets = [];
+  try {
+    const ks = (await App().Kernels()) || [];
+    const sp = (await App().Spokes()) || [];
+    ks.forEach((k) => { if (k && k.run_file) targets.push({ type: "kernel", name: k.name }); });
+    sp.forEach((s) => { if (s && s.run_file) targets.push({ type: "spoke", name: s.name }); });
+  } catch (e) {}
+
+  const hasTargets = targets.length > 0;
+  // Grille de PUCES sélectionnables (1.21.1) — pas de <label>/<input> nus (la règle globale
+  // `label{flex-direction:column}` cassait l'alignement) : des boutons qui portent leur propre état
+  // `.on`, teintés par domaine (KERNEL / spoke), avec halo de sélection. Toute la puce est cliquable.
+  const chips = targets.map((t, i) =>
+    `<button type="button" class="hello-chip" data-i="${i}" data-kind="${t.type}" aria-pressed="false">
+       <span class="hc-check" aria-hidden="true">${ico("check", 13)}</span>
+       <span class="hc-ic" aria-hidden="true">${t.type === "kernel" ? NAV_ICO.kernel : NAV_ICO.spokes}</span>
+       <span class="hc-n">${esc(t.name)}</span>
+       <span class="hc-k">${t.type === "kernel" ? "KERNEL" : "SPOKE"}</span>
+     </button>`).join("");
+
+  const modeCard = (mode, icoName, title, sub, on, off) =>
+    `<button type="button" class="hello-mode${on ? " on" : ""}${off ? " off" : ""}" data-mode="${mode}" aria-pressed="${on ? "true" : "false"}"${off ? " disabled" : ""}>
+       <span class="hm-ic" aria-hidden="true">${ico(icoName, 18)}</span>
+       <span class="hm-txt"><b>${title}</b><small>${sub}</small></span>
+       <span class="hm-radio" aria-hidden="true"></span>
+     </button>`;
+
+  const body = `<div class="hello">
+    <div class="hello-eyebrow">Message de présentation</div>
+    <p class="hello-q">Que voulez-vous remettre à votre agent&nbsp;?</p>
+    <div class="hello-modes">
+      ${modeCard("global", "chat", "Prompt global", "Il lit la fiche, liste KERNEL et spokes et vous propose quoi ouvrir.", true, false)}
+      ${modeCard("open", "rocket", "Lancer une ou des ouvertures", hasTargets ? "Un prompt qui ouvre directement les cibles choisies." : "Aucune cible avec fichier de lancement.", false, !hasTargets)}
+    </div>
+    <div id="hello-tgts" class="hello-tgts" hidden>
+      <div class="hello-tgts-h"><span>Cibles à ouvrir</span><span class="hello-count" id="hello-count">0 sélectionnée</span></div>
+      <div class="hello-grid">${chips}</div>
+    </div>
+  </div>`;
+
+  let mode = "global";
+  openModal("Dire bonjour à mon agent", body, async () => {
+    if (mode === "open") {
+      const chosen = Array.from(document.querySelectorAll(".hello-chip.on")).map((c) => targets[+c.dataset.i]);
+      if (!chosen.length) { toast("Choisissez au moins une cible à ouvrir", "err"); return; }
+      await copyPrompt(targetedPromptText(kind, exe, docPath, chosen), { close: true, title: "Message d'ouverture" });
+    } else {
+      await copyPrompt(firstPromptText(kind, exe, docPath), { close: true, title: "Message de présentation" });
+    }
+  });
+  const card = document.querySelector("#modal .modal-card");
+  if (card) card.classList.add("hello-card");
+  if (el("modal-ok")) el("modal-ok").textContent = "Copier le message";
+
+  const countBox = el("hello-count");
+  const refreshCount = () => {
+    const n = document.querySelectorAll(".hello-chip.on").length;
+    if (countBox) countBox.textContent = n === 0 ? "0 sélectionnée" : n + (n > 1 ? " sélectionnées" : " sélectionnée");
+  };
+  // Sélection d'un mode : bascule les cartes + dévoile la grille de cibles pour « open ».
+  document.querySelectorAll(".hello-mode").forEach((b) => {
+    b.onclick = () => {
+      if (b.disabled) return;
+      mode = b.dataset.mode;
+      document.querySelectorAll(".hello-mode").forEach((x) => {
+        const on = x === b; x.classList.toggle("on", on); x.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      if (el("hello-tgts")) el("hello-tgts").hidden = mode !== "open";
+    };
+  });
+  // Sélection d'une cible : toute la puce bascule son état.
+  document.querySelectorAll(".hello-chip").forEach((c) => {
+    c.onclick = () => {
+      const on = c.classList.toggle("on"); c.setAttribute("aria-pressed", on ? "true" : "false"); refreshCount();
+    };
+  });
+}
+
 // renderAssistantIA : vue de 1er niveau « Agent IA » (v1.17, besoin #1). Sortie des Réglages pour
 // devenir une entrée du menu principal. Deux temps clairs : (1) la fiche de collaboration AGENTS.md
 // administrée « à la source » (besoin #8), (2) brancher son agent (le choix CLI/MCP, inline ici).
@@ -457,10 +587,12 @@ async function aiAgentShow(kind) {
   const step1 = kind === "mcp" ? "2" : "1";
   out.innerHTML = mcpBlock + `
     <div class="ai-step"><div class="ai-step-h">${step1}. Dites bonjour à votre agent</div>
-      <p class="sub">Copiez ce message et collez-le dans votre assistant : il lui dit où est SituLab, l'invite à lire la fiche de collaboration (au chemin enregistré à la source), puis à lister vos KERNEL et spokes et à vous proposer lequel ouvrir.</p>
-      <button type="button" class="btn btn-primary btn-sm" id="ai-prompt">Copier le message de présentation</button></div>`;
+      <p class="sub">Un message à coller dans votre assistant. Au choix : un <b>prompt global</b> (il lit la fiche, liste vos KERNEL et spokes et vous propose quoi ouvrir), ou une <b>ouverture ciblée</b> qui lance directement un ou plusieurs KERNEL/spokes.</p>
+      <button type="button" class="btn btn-primary btn-sm" id="ai-prompt">Dire bonjour à mon agent…</button></div>`;
   if (el("ai-cfg")) el("ai-cfg").onclick = () => copyPrompt(cfg, { close: false, title: "Configuration MCP" });
-  el("ai-prompt").onclick = () => copyPrompt(firstPromptText(kind, exe, docPath), { close: false, title: "Message de présentation" });
+  // 1.21.1 (besoin #2) : le clic n'impose plus le message de base — il ouvre une modale de choix
+  // (prompt global, ou ouverture(s) ciblée(s) KERNEL/spokes). Le type d'agent (cli/mcp) est repris.
+  el("ai-prompt").onclick = () => aiHelloModal(kind);
 }
 
 // installDirectives : choisit un dossier et y écrit le guide AGENTS.md pour l'agent de l'utilisateur.

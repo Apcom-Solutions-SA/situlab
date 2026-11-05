@@ -484,6 +484,10 @@ let pinEventBound = false;
 let gitEventBound = false;
 async function init() {
   try { el("version").textContent = "SituLab " + (await App().AppVersion()); } catch (e) {}
+  // Pastille de version ACTIVE (1.21.1, besoin #3) : un clic ouvre les Réglages › À propos et lance la
+  // vérification. En arrière-plan, on interroge la dernière Release publique (backend, hors CSP) et, si
+  // une MAJ existe, on signale « ● MAJ vX » sur la pastille. Silencieux en cas d'échec réseau.
+  checkVersionBadge();
   // Le démon (cette fenêtre) demande le PIN sur le bureau quand une commande CLI/agent
   // doit déverrouiller ou confirmer une écriture. Le PIN ne quitte jamais l'app. On ne lie
   // l'écoute qu'une fois (init peut être rejoué après un déverrouillage).
@@ -608,3 +612,34 @@ function showFatal(msg) {
   el("view").innerHTML = surfaceError("SituLab n'a pas pu démarrer", msg, null);
 }
 
+
+// checkVersionBadge (1.21.1, besoin #3) : rend la pastille de version cliquable (→ Réglages/À propos
+// + vérification) et, en arrière-plan, signale discrètement une MAJ disponible. Tout échec est avalé :
+// la pastille reste un simple numéro de version, jamais de fausse alerte.
+function checkVersionBadge() {
+  const box = el("version"); if (!box) return;
+  box.classList.add("version-btn");
+  box.setAttribute("role", "button");
+  box.setAttribute("tabindex", "0");
+  box.title = "Vérifier les mises à jour";
+  const go = () => {
+    // Cible l'onglet « À propos » (pas l'onglet par défaut « Compte & sécurité ») : state.settabTarget
+    // est consommé une fois par renderSettings (cf. 07b-settings.js).
+    try { state.settabTarget = "about"; } catch (e) {}
+    try { navTo("settings"); } catch (e) {}
+    setTimeout(() => { if (typeof runUpdateCheck === "function") runUpdateCheck(); }, 160);
+  };
+  box.onclick = go;
+  box.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); } };
+  // Sonde silencieuse de MAJ.
+  (async () => {
+    try {
+      const info = await App().CheckUpdate();
+      if (info && !info.error && info.update_available) {
+        box.classList.add("version-upd");
+        box.title = "Mise à jour disponible : " + (info.latest || "") + " — cliquez pour mettre à jour";
+        box.innerHTML = "SituLab " + esc(info.current) + ` <span class="ver-upd-tag">MAJ ${esc(info.latest)}</span>`;
+      }
+    } catch (e) { /* silencieux */ }
+  })();
+}
