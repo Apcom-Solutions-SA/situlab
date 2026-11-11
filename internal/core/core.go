@@ -282,21 +282,8 @@ func (s *Service) instanceBaseURL(instance string) string {
 	return in.URL
 }
 
-// connFor résout en UNE passe le jeton, le type (GitHub) et l'URL de base d'une connexion, pour
-// éviter de relire la config trois fois (utile dans la boucle de fetch de fond).
-func (s *Service) connFor(instance string) (token string, github bool, baseURL string) {
-	s.mu.Lock()
-	s.lockedReload()
-	in := s.cfg.Resolve(instance)
-	s.mu.Unlock()
-	if in == nil {
-		return "", false, ""
-	}
-	token, _ = s.tokenFor(in.Name)
-	return token, in.IsGitHub(), in.URL
-}
-
-// connForPeek est connFor SANS glissement d'inactivité : le jeton est lu par la boucle de FETCH DE
+// connForPeek est le pendant SANS glissement d'inactivité (ancien connFor, retiré car son seul
+// appelant — la boucle de fetch de fond — utilise désormais cette variante) : le jeton est lu par la boucle de FETCH DE
 // FOND (sonde automatique), pas par une action de l'utilisateur ou de l'agent. Voir sessionDEKPeek.
 func (s *Service) connForPeek(instance string) (token string, github bool, baseURL string) {
 	s.mu.Lock()

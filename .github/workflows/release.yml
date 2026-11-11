@@ -115,7 +115,7 @@ jobs:
 
   # ── macOS : .app via Wails → .dmg ───────────────────────────────────────────
   macos:
-    runs-on: macos-14 # runner Apple Silicon, Xcode préinstallé
+    runs-on: macos-15 # runner Apple Silicon, Xcode préinstallé (macos-14 retiré par GitHub)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v7
