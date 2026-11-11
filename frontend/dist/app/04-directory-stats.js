@@ -396,11 +396,14 @@ function statsDrawAuthorTable(rep) {
   });
 }
 
-async function refreshWhoami() {
+async function refreshWhoami(probe) {
   const w = el("whoami"), live = el("live");
   const was = state.online;
   try {
-    const u = await App().Whoami(state.instance);
+    // probe=true : sonde périodique de la boucle live → WhoamiProbe, qui ne prolonge PAS la session
+    // (sinon l'auto-verrouillage ne tomberait jamais sur une vue connectée). Les appels déclenchés par
+    // une navigation/un clic de l'utilisateur gardent Whoami (glissement normal de la session).
+    const u = await (probe ? App().WhoamiProbe(state.instance) : App().Whoami(state.instance));
     state.online = true; state.offlineReason = null;
     state.isAdmin = !!u.is_admin;
     state.login = u.login;

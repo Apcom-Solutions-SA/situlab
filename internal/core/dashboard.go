@@ -437,7 +437,10 @@ func (s *Service) FetchAllLocal() (int, error) {
 			continue
 		}
 		inst := s.instanceForHost(hostOf(st.Remote))
-		token, github, baseURL := s.connFor(inst) // une seule résolution de config par dépôt
+		// connForPeek (pas connFor) : ce fetch est une sonde d'arrière-plan, pas une activité de
+		// l'utilisateur — il ne doit donc pas repousser l'échéance d'auto-verrouillage (sinon, avec un
+		// intervalle d'auto-fetch < délai de verrouillage, la session ne se verrouille jamais).
+		token, github, baseURL := s.connForPeek(inst) // une seule résolution de config par dépôt
 		if _, err := gitx.Fetch(p, token, github, baseURL); err == nil {
 			n++
 		}

@@ -415,6 +415,20 @@ func (s *Service) Whoami(instance string) (*forgejo.User, error) {
 	return cl.CurrentUser(ctx)
 }
 
+// WhoamiProbe est Whoami pour la SONDE « en ligne » PÉRIODIQUE de la fenêtre : identique, mais le jeton
+// est lu SANS faire glisser le timeout d'inactivité (une sonde automatique n'est pas une activité de
+// l'utilisateur) — sans quoi l'auto-verrouillage ne tomberait jamais tant qu'on reste sur une vue
+// connectée. Voir sessionDEKPeek.
+func (s *Service) WhoamiProbe(instance string) (*forgejo.User, error) {
+	cl, _, err := s.clientForPeek(instance)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := opCtx()
+	defer cancel()
+	return cl.CurrentUser(ctx)
+}
+
 // ActiveTokenName renvoie le nom EXACT du token que SituLab utilise pour une instance
 // (`SituLab@<poste>/<instance>`), pour que l'UI ne protège QUE celui-là (les autres
 // `SituLab@…` sont des résidus supprimables).

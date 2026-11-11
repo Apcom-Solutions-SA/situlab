@@ -31,7 +31,7 @@ async function liveTickOnce() {
     // données du serveur courant. Sur une vue statique (Réglages, Aide, KERNEL, Agent IA…),
     // marteler Whoami toutes les ~30 s ne sert à rien ; l'état en ligne sera re-sondé dès qu'on
     // reviendra sur une vue connectée. Le contrôle de verrouillage ci-dessus, lui, reste à chaque tick.
-    if (liveTick % 3 === 0 && LIVE_WHOAMI_VIEWS.includes(state.view)) await refreshWhoami();
+    if (liveTick % 3 === 0 && LIVE_WHOAMI_VIEWS.includes(state.view)) await refreshWhoami(true); // sonde : ne prolonge pas la session
     if (state.view === "projects") await renderProjects(true);
     else if (state.view === "detail") {
       await refreshDetailLocal();

@@ -64,12 +64,20 @@ async function renderProjectCorpusPanel(projectName) {
     const rows = l.paths.map((p) => {
       const vis = fc ? cloudVisState(p, true, A, D) : "none";
       const visLbl = vis === "on" ? "IA : accès complet" : vis === "partial" ? "IA : accès partiel" : "IA : aucun accès";
-      const name = p.split("/").filter(Boolean).pop() || p;
-      return `<div class="pcx-flow pcx-vis-${vis}">
+      const segs = p.split("/").filter(Boolean);
+      const name = segs.pop() || p;
+      // Chemin RACINE du dossier (son emplacement dans le cloud) affiché en petit sous la ligne (1.21.2) :
+      // le nom seul (« Elevage ») ne dit pas d'où vient le dossier. Nom + racine reconstituent le chemin
+      // complet ; le cloud est nommé en tête de carte. « / » = racine du cloud. Complet au survol (title).
+      const root = segs.length ? "/" + segs.join("/") : "/";
+      return `<div class="pcx-flowwrap">
+        <div class="pcx-flow pcx-vis-${vis}">
         <span class="pcx-node pcx-src" title="${esc(p)}">${ico("folder", 15)}<span class="pcx-nname">${esc(name)}</span></span>
         <span class="pcx-wire" aria-hidden="true"><i></i></span>
         <span class="pcx-node pcx-ainode" title="${esc(visLbl)}">${ico("robot", 15)}<span class="pcx-nname">IA</span></span>
         <button class="btn-icon danger pcx-unlink" data-unlink="${esc(l.cloud)}||${esc(p)}" title="Délier ce dossier" aria-label="Délier">${ICO_TRASH}</button>
+        </div>
+        <div class="pcx-src-path" title="${esc("/" + p.split("/").filter(Boolean).join("/"))}">${ico("folder", 11)}<span>${esc(root)}</span></div>
       </div>`;
     }).join("");
     return `<div class="pcx-card pcx-magic">${head}${rows}</div>`;

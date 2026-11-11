@@ -180,6 +180,27 @@ func (s *Service) clientFor(name string) (*forgejo.Client, config.Instance, erro
 	return forgejo.NewKind(inst.URL, token, s.version, providerKind(inst)), inst, nil
 }
 
+// clientForPeek est clientFor SANS glissement d'inactivité : le jeton est lu par une SONDE
+// d'arrière-plan (sonde « en ligne » périodique), pas par une action de l'utilisateur ou de l'agent.
+// Voir sessionDEKPeek — indispensable pour que l'auto-verrouillage tombe même sur une vue connectée.
+func (s *Service) clientForPeek(name string) (*forgejo.Client, config.Instance, error) {
+	s.mu.Lock()
+	s.lockedReload()
+	in := s.cfg.Resolve(name)
+	if in == nil {
+		s.mu.Unlock()
+		return nil, config.Instance{}, ErrNoInstance
+	}
+	inst := *in
+	s.mu.Unlock()
+
+	token, err := s.tokenForPeek(inst.Name)
+	if err != nil {
+		return nil, inst, err
+	}
+	return forgejo.NewKind(inst.URL, token, s.version, providerKind(inst)), inst, nil
+}
+
 // providerKind traduit le fournisseur d'une instance en type de client.
 func providerKind(inst config.Instance) forgejo.Kind {
 	if inst.IsGitHub() {
@@ -272,5 +293,19 @@ func (s *Service) connFor(instance string) (token string, github bool, baseURL s
 		return "", false, ""
 	}
 	token, _ = s.tokenFor(in.Name)
+	return token, in.IsGitHub(), in.URL
+}
+
+// connForPeek est connFor SANS glissement d'inactivité : le jeton est lu par la boucle de FETCH DE
+// FOND (sonde automatique), pas par une action de l'utilisateur ou de l'agent. Voir sessionDEKPeek.
+func (s *Service) connForPeek(instance string) (token string, github bool, baseURL string) {
+	s.mu.Lock()
+	s.lockedReload()
+	in := s.cfg.Resolve(instance)
+	s.mu.Unlock()
+	if in == nil {
+		return "", false, ""
+	}
+	token, _ = s.tokenForPeek(in.Name)
 	return token, in.IsGitHub(), in.URL
 }

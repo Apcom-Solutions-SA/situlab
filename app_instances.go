@@ -94,6 +94,16 @@ func (a *App) Whoami(instance string) (*forgejo.User, error) {
 	return a.svc.Whoami(instance)
 }
 
+// WhoamiProbe : variante de Whoami pour la sonde « en ligne » PÉRIODIQUE de la fenêtre. Identique, mais
+// ne prolonge pas la session (le jeton est lu sans glissement d'inactivité) — ainsi l'auto-verrouillage
+// tombe même si l'on reste sur une vue connectée sans interagir.
+func (a *App) WhoamiProbe(instance string) (*forgejo.User, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	return a.svc.WhoamiProbe(instance)
+}
+
 // Dashboard renvoie la vue unifiée distant+local (objet central de SituLab).
 func (a *App) Dashboard(instance string) (*core.DashboardData, error) {
 	if err := a.ready(); err != nil {

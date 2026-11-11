@@ -348,27 +348,34 @@ async function aiHelloModal(kind) {
   try { exe = (await App().ExePath()) || "situlab"; } catch (e) {}
   let docPath = "";
   try { if (await App().AgentsDocExists()) docPath = await App().AgentsDocPath(); } catch (e) {}
-  // Cibles ouvrables = KERNEL + spokes AYANT un fichier d'ouverture (run_file). Sans run_file, pas
-  // d'ouverture possible → on ne les propose pas (ils restent joignables par le prompt global).
+  // Cibles = TOUS les KERNEL + spokes rattachés. Ceux SANS fichier d'ouverture (run_file) sont affichés
+  // mais GRISÉS/désactivés (1.21.2) : on ne les masque plus (sinon un spoke bien rattaché « disparaît »
+  // sans explication — vécu sur spoke-vigidata). L'utilisateur voit qu'il existe et comprend qu'il lui
+  // manque un fichier d'ouverture, à définir dans KERNEL/SPOKES ▸ Modifier (geste fenêtre). Seules les
+  // cibles AVEC run_file sont sélectionnables/ouvrables.
   let targets = [];
   try {
     const ks = (await App().Kernels()) || [];
     const sp = (await App().Spokes()) || [];
-    ks.forEach((k) => { if (k && k.run_file) targets.push({ type: "kernel", name: k.name }); });
-    sp.forEach((s) => { if (s && s.run_file) targets.push({ type: "spoke", name: s.name }); });
+    ks.forEach((k) => { if (k && k.name) targets.push({ type: "kernel", name: k.name, hasRun: !!k.run_file }); });
+    sp.forEach((s) => { if (s && s.name) targets.push({ type: "spoke", name: s.name, hasRun: !!s.run_file }); });
   } catch (e) {}
 
-  const hasTargets = targets.length > 0;
+  const hasTargets = targets.some((t) => t.hasRun); // au moins une cible ouvrable (avec run_file)
+  const hasDisabled = targets.some((t) => !t.hasRun);
   // Grille de PUCES sélectionnables (1.21.1) — pas de <label>/<input> nus (la règle globale
   // `label{flex-direction:column}` cassait l'alignement) : des boutons qui portent leur propre état
   // `.on`, teintés par domaine (KERNEL / spoke), avec halo de sélection. Toute la puce est cliquable.
-  const chips = targets.map((t, i) =>
-    `<button type="button" class="hello-chip" data-i="${i}" data-kind="${t.type}" aria-pressed="false">
+  const chips = targets.map((t, i) => {
+    const kindLbl = t.type === "kernel" ? "KERNEL" : "SPOKE";
+    const hint = `Aucun fichier d'ouverture — à définir dans ${t.type === "kernel" ? "KERNEL" : "SPOKES"} ▸ Modifier`;
+    return `<button type="button" class="hello-chip${t.hasRun ? "" : " off"}" data-i="${i}" data-kind="${t.type}" aria-pressed="false"${t.hasRun ? "" : ` disabled title="${esc(hint)}"`}>
        <span class="hc-check" aria-hidden="true">${ico("check", 13)}</span>
        <span class="hc-ic" aria-hidden="true">${t.type === "kernel" ? NAV_ICO.kernel : NAV_ICO.spokes}</span>
        <span class="hc-n">${esc(t.name)}</span>
-       <span class="hc-k">${t.type === "kernel" ? "KERNEL" : "SPOKE"}</span>
-     </button>`).join("");
+       <span class="hc-k">${t.hasRun ? kindLbl : "sans ouverture"}</span>
+     </button>`;
+  }).join("");
 
   const modeCard = (mode, icoName, title, sub, on, off) =>
     `<button type="button" class="hello-mode${on ? " on" : ""}${off ? " off" : ""}" data-mode="${mode}" aria-pressed="${on ? "true" : "false"}"${off ? " disabled" : ""}>
@@ -387,6 +394,7 @@ async function aiHelloModal(kind) {
     <div id="hello-tgts" class="hello-tgts" hidden>
       <div class="hello-tgts-h"><span>Cibles à ouvrir</span><span class="hello-count" id="hello-count">0 sélectionnée</span></div>
       <div class="hello-grid">${chips}</div>
+      ${hasDisabled ? `<p class="hello-hint">Les cibles grisées n'ont pas de fichier d'ouverture — à définir dans KERNEL/SPOKES ▸ Modifier.</p>` : ""}
     </div>
   </div>`;
 
@@ -423,6 +431,7 @@ async function aiHelloModal(kind) {
   // Sélection d'une cible : toute la puce bascule son état.
   document.querySelectorAll(".hello-chip").forEach((c) => {
     c.onclick = () => {
+      if (c.disabled || c.classList.contains("off")) return; // cible sans fichier d'ouverture : non sélectionnable
       const on = c.classList.toggle("on"); c.setAttribute("aria-pressed", on ? "true" : "false"); refreshCount();
     };
   });

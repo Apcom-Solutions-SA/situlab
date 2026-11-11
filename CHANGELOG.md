@@ -2,6 +2,30 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : [SemVer](https://semver.org/lang/fr/).
 
+## [1.21.2] — 2026-11-11
+
+Version de correction : fiabilité du verrouillage automatique, lisibilité de la mise en route de l'agent
+et de la mémoire situative.
+
+### Corrigé
+
+- **Le verrouillage automatique se déclenche à nouveau.** Les sondes d'arrière-plan de la fenêtre
+  (récupération périodique des nouveautés en ligne, sonde « en ligne ») prolongeaient la session à chaque
+  passage : avec un délai de verrouillage supérieur à leur intervalle (par exemple « après 10 minutes »),
+  la session ne se verrouillait jamais tant que la fenêtre restait ouverte. Ces sondes automatiques ne
+  repoussent plus l'échéance d'inactivité ; seul un vrai travail (humain ou agent) la prolonge. La session
+  se verrouille donc bien après le délai réglé, y compris en restant sur une vue connectée.
+- **Un spoke sans fichier d'ouverture n'est plus invisible dans « Dire bonjour ».** Les KERNEL et spokes
+  rattachés s'affichent tous dans les cibles à ouvrir ; ceux sans fichier d'ouverture apparaissent grisés,
+  avec l'indication qu'il reste à en définir un (KERNEL/SPOKES ▸ Modifier), au lieu de disparaître sans
+  explication.
+
+### Modifié
+
+- **Mémoire situative : chemin racine des dossiers reliés.** Dans « CORPUS relié », chaque dossier affiche
+  désormais, en petit sous son nom, son emplacement dans le cloud — pour situer d'où il vient sans avoir
+  à l'ouvrir.
+
 ## [1.21.1] — 2026-11-05
 
 Version de maintenance centrée sur la mise en route de l'agent IA et le suivi des versions.

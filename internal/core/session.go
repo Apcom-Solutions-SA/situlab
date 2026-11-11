@@ -213,6 +213,42 @@ func (s *Service) tokenFor(instance string) (string, error) {
 	return kr.GetToken(dek, instance)
 }
 
+// sessionDEKPeek renvoie une COPIE de la DEK si la session est déverrouillée, SANS faire glisser le
+// timeout d'inactivité (contrairement à sessionDEK). Réservé aux SONDES D'ARRIÈRE-PLAN automatiques de
+// la fenêtre (auto-fetch des refs, sonde « en ligne » périodique) : elles lisent un jeton sans être une
+// activité de l'utilisateur ni de l'agent, donc elles ne doivent PAS repousser l'échéance de
+// verrouillage — sinon l'auto-verrouillage ne tomberait jamais tant que la fenêtre tourne (la sonde se
+// réveillant avant chaque expiration). À l'expiration, la DEK est effacée sur-le-champ, comme sessionDEK.
+func (s *Service) sessionDEKPeek() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessDEK) == 0 {
+		return nil, ErrLocked
+	}
+	if !s.sessUntil.After(time.Now()) {
+		s.clearSessionLocked() // expirée : on zéroise immédiatement
+		return nil, ErrLocked
+	}
+	cp := make([]byte, len(s.sessDEK))
+	copy(cp, s.sessDEK)
+	return cp, nil // PAS de glissement de sessUntil : une sonde de fond ne prolonge pas la session
+}
+
+// tokenForPeek renvoie le token déchiffré d'une instance SANS faire glisser l'inactivité (sondes
+// d'arrière-plan automatiques). Voir sessionDEKPeek.
+func (s *Service) tokenForPeek(instance string) (string, error) {
+	dek, err := s.sessionDEKPeek()
+	if err != nil {
+		return "", err
+	}
+	defer zero(dek)
+	kr, err := keyring.Load()
+	if err != nil {
+		return "", err
+	}
+	return kr.GetToken(dek, instance)
+}
+
 // MigrateFromVault importe, une fois, les tokens de l'ancien coffre OS (≤ v1.0) vers le
 // trousseau chiffré, puis les retire du coffre. Nécessite une session déverrouillée
 // (donc un PIN déjà défini). Renvoie le nombre de tokens migrés. Idempotent : les

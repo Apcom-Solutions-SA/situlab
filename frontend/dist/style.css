@@ -806,6 +806,12 @@ ul.cmts code { color: var(--accent); margin-right: 6px; font-family: var(--font-
 .pcx-magic { border: 1px solid var(--border); border-radius: var(--r-lg); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, var(--bg-raised)), var(--bg-raised)); padding: 12px 14px; margin-bottom: 10px; }
 .pcx-magic .pcx-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: 8px; }
 .pcx-flow { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.pcx-flowwrap { padding: 2px 0; }
+.pcx-flowwrap .pcx-flow { padding: 2px 0; }
+/* Chemin racine du dossier relié (1.21.2) : petit, discret, sous la ligne — situe d'où vient le dossier. */
+.pcx-src-path { display: flex; align-items: center; gap: 5px; margin: 1px 0 4px 2px; font-family: ui-monospace, Consolas, monospace; font-size: var(--fs-xs); color: var(--text-faint); }
+.pcx-src-path svg { flex: 0 0 auto; opacity: .7; }
+.pcx-src-path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pcx-node { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: var(--r-full); font-size: var(--fs-sm); font-weight: 600; border: 1px solid var(--border-strong); background: var(--bg-surface); color: var(--text); max-width: 42%; }
 .pcx-node .pcx-nname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pcx-ainode { border-color: color-mix(in srgb, var(--violet-500) 45%, transparent); color: var(--violet-500); background: color-mix(in srgb, var(--violet-500) 8%, var(--bg-surface)); }
@@ -2931,6 +2937,12 @@ button.cst-core.cst-nav:hover { filter: brightness(1.08); box-shadow: 0 0 0 2px 
 .hello-chip .hc-check { flex: 0 0 auto; width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid var(--border-strong); color: transparent; background: transparent; transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast); }
 .hello-chip .hc-check .ico { width: 11px; height: 11px; stroke-width: 3; }
 .hello-chip.on .hc-check { border-color: var(--hue); background: var(--hue); color: #fff; }
+/* Cible sans fichier d'ouverture (1.21.2) : visible mais grisée et non sélectionnable. */
+.hello-chip.off, .hello-chip:disabled { opacity: .45; cursor: not-allowed; }
+.hello-chip.off:hover { border-color: var(--border); transform: none; }
+.hello-chip.off .hc-k { color: var(--text-faint); background: transparent; letter-spacing: .04em; text-transform: none; font-family: inherit; }
+.hello-chip.off .hc-check { display: none; }
+.hello-hint { margin: 2px 2px 0; font-size: var(--fs-xs); color: var(--text-faint); line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) {
   .hello-mode, .hello-chip, .hello-mode::before, .hello-chip .hc-check { transition: none; }
   .hello-tgts { animation: none; }
