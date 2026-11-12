@@ -28,6 +28,11 @@ Version de correction : lisibilité et découvrabilité de la liste des cibles d
   publiée sur l'atelier » reste en place. Un clone partagé qui porte des modifications non enregistrées
   (par exemple un chantier parallèle) n'empêche donc plus de promouvoir une version prête.
 
+### Sécurité
+
+- **Toolchain Go 1.27.3 → 1.27.4.** Solde `GO-2026-6859` (plantage d'un serveur HTTP/1 par une course sur
+  l'en-tête `MaxBytesReader` dans `net/http`), signalé par la porte govulncheck de l'intégration continue.
+
 ## [1.21.2] — 2026-11-11
 
 Version de correction : fiabilité du verrouillage automatique, lisibilité de la mise en route de l'agent

@@ -17,7 +17,7 @@
 #   - macOS : `wails build` produit le .app (pas de souci de console sur mac) → on en fait un .dmg.
 #   - LINUX : `wails build` produit le binaire natif (cgo + WebKit2GTK) → archive tar.gz.
 #
-# Toolchain commune : Go 1.27.3 (plancher directive go.mod, corrige GO-2026-6809), Wails CLI v2.16.0.
+# Toolchain commune : Go 1.27.4 (plancher directive go.mod, corrige GO-2026-6809 et GO-2026-6859), Wails CLI v2.16.0.
 # ─────────────────────────────────────────────────────────────────────────────
 name: build-installers
 
@@ -30,7 +30,7 @@ permissions:
   contents: write # nécessaire pour créer la Release et y attacher les artefacts
 
 env:
-  GO_VERSION: "1.27.3" # plancher = directive go.mod (go 1.27.3) — inclut le correctif GO-2026-6809 (crypto/x509)
+  GO_VERSION: "1.27.4" # plancher = directive go.mod (go 1.27.4) : correctifs GO-2026-6809 (crypto/x509) et GO-2026-6859 (net/http)
   WAILS_VERSION: "v2.16.0"
 
 jobs:

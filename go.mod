@@ -1,6 +1,6 @@
 module situlab
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/spf13/cobra v1.8.1
