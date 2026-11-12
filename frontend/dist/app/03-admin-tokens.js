@@ -357,8 +357,8 @@ async function aiHelloModal(kind) {
   try {
     const ks = (await App().Kernels()) || [];
     const sp = (await App().Spokes()) || [];
-    ks.forEach((k) => { if (k && k.name) targets.push({ type: "kernel", name: k.name, hasRun: !!k.run_file }); });
-    sp.forEach((s) => { if (s && s.name) targets.push({ type: "spoke", name: s.name, hasRun: !!s.run_file }); });
+    ks.forEach((k) => { if (k && k.name) targets.push({ type: "kernel", name: k.name, hasRun: !!k.run_file, path: k.local_path || "" }); });
+    sp.forEach((s) => { if (s && s.name) targets.push({ type: "spoke", name: s.name, hasRun: !!s.run_file, path: s.local_path || "" }); });
   } catch (e) {}
 
   const hasTargets = targets.some((t) => t.hasRun); // au moins une cible ouvrable (avec run_file)
@@ -368,13 +368,26 @@ async function aiHelloModal(kind) {
   // `.on`, teintés par domaine (KERNEL / spoke), avec halo de sélection. Toute la puce est cliquable.
   const chips = targets.map((t, i) => {
     const kindLbl = t.type === "kernel" ? "KERNEL" : "SPOKE";
-    const hint = `Aucun fichier d'ouverture — à définir dans ${t.type === "kernel" ? "KERNEL" : "SPOKES"} ▸ Modifier`;
-    return `<button type="button" class="hello-chip${t.hasRun ? "" : " off"}" data-i="${i}" data-kind="${t.type}" aria-pressed="false"${t.hasRun ? "" : ` disabled title="${esc(hint)}"`}>
-       <span class="hc-check" aria-hidden="true">${ico("check", 13)}</span>
-       <span class="hc-ic" aria-hidden="true">${t.type === "kernel" ? NAV_ICO.kernel : NAV_ICO.spokes}</span>
-       <span class="hc-n">${esc(t.name)}</span>
-       <span class="hc-k">${t.hasRun ? kindLbl : "sans ouverture"}</span>
-     </button>`;
+    const ic = t.type === "kernel" ? NAV_ICO.kernel : NAV_ICO.spokes;
+    if (t.hasRun) {
+      // Cible ouvrable : puce sélectionnable.
+      return `<button type="button" class="hello-chip" data-i="${i}" data-kind="${t.type}" aria-pressed="false">
+         <span class="hc-check" aria-hidden="true">${ico("check", 13)}</span>
+         <span class="hc-ic" aria-hidden="true">${ic}</span>
+         <span class="hc-n">${esc(t.name)}</span>
+         <span class="hc-k">${kindLbl}</span>
+       </button>`;
+    }
+    // Cible SANS fichier de lancement : non sélectionnable, mais on DIT pourquoi et on invite à en lier
+    // un directement, ici même (1.21.3). Un <div> (pas un <button>) car il porte un bouton d'action imbriqué.
+    return `<div class="hello-chip off" data-kind="${t.type}">
+       <span class="hc-ic" aria-hidden="true">${ic}</span>
+       <span class="hc-nn">
+         <span class="hc-n">${esc(t.name)}</span>
+         <span class="hc-why">Aucun fichier de lancement — <button type="button" class="hc-link" data-link="${i}">en lier un</button></span>
+       </span>
+       <span class="hc-k">${kindLbl}</span>
+     </div>`;
   }).join("");
 
   const modeCard = (mode, icoName, title, sub, on, off) =>
@@ -392,9 +405,9 @@ async function aiHelloModal(kind) {
       ${modeCard("open", "rocket", "Lancer une ou des ouvertures", hasTargets ? "Un prompt qui ouvre directement les cibles choisies." : "Aucune cible avec fichier de lancement.", false, !hasTargets)}
     </div>
     <div id="hello-tgts" class="hello-tgts" hidden>
-      <div class="hello-tgts-h"><span>Cibles à ouvrir</span><span class="hello-count" id="hello-count">0 sélectionnée</span></div>
-      <div class="hello-grid">${chips}</div>
-      ${hasDisabled ? `<p class="hello-hint">Les cibles grisées n'ont pas de fichier d'ouverture — à définir dans KERNEL/SPOKES ▸ Modifier.</p>` : ""}
+      <div class="hello-tgts-h"><span>Cibles à ouvrir · ${targets.length}</span><span class="hello-count" id="hello-count">0 sélectionnée</span></div>
+      <div class="hello-gridwrap"><div class="hello-grid">${chips}</div></div>
+      ${hasDisabled ? `<p class="hello-hint">Une cible sans fichier de lancement n'est pas ouvrable — liez-en un depuis la cible, ou dans KERNEL/SPOKES ▸ Modifier.</p>` : ""}
     </div>
   </div>`;
 
@@ -417,6 +430,17 @@ async function aiHelloModal(kind) {
     const n = document.querySelectorAll(".hello-chip.on").length;
     if (countBox) countBox.textContent = n === 0 ? "0 sélectionnée" : n + (n > 1 ? " sélectionnées" : " sélectionnée");
   };
+  // Affordance de défilement (1.21.3) : la grille des cibles est plafonnée (max-height). Quand des cibles
+  // restent sous le pli (vécu avec KERNEL-AGRI, 11ᵉ cible masquée derrière une barre de défilement discrète),
+  // on révèle un dégradé en bas pour signaler qu'il y a une suite, retiré une fois tout en bas. Comme la
+  // grille est cachée tant qu'on n'est pas en mode « open », on recalcule à sa révélation (rAF ci-dessous).
+  const gw = document.querySelector(".hello-gridwrap");
+  const grid = gw ? gw.querySelector(".hello-grid") : null;
+  const refreshFade = () => {
+    if (!gw || !grid) return;
+    gw.classList.toggle("has-more", grid.scrollTop + grid.clientHeight < grid.scrollHeight - 1);
+  };
+  if (grid) grid.addEventListener("scroll", refreshFade);
   // Sélection d'un mode : bascule les cartes + dévoile la grille de cibles pour « open ».
   document.querySelectorAll(".hello-mode").forEach((b) => {
     b.onclick = () => {
@@ -426,14 +450,33 @@ async function aiHelloModal(kind) {
         const on = x === b; x.classList.toggle("on", on); x.setAttribute("aria-pressed", on ? "true" : "false");
       });
       if (el("hello-tgts")) el("hello-tgts").hidden = mode !== "open";
+      if (mode === "open") requestAnimationFrame(refreshFade);
     };
   });
   // Sélection d'une cible : toute la puce bascule son état.
   document.querySelectorAll(".hello-chip").forEach((c) => {
     c.onclick = () => {
-      if (c.disabled || c.classList.contains("off")) return; // cible sans fichier d'ouverture : non sélectionnable
+      if (c.classList.contains("off")) return; // cible sans fichier de lancement : non sélectionnable
       const on = c.classList.toggle("on"); c.setAttribute("aria-pressed", on ? "true" : "false"); refreshCount();
     };
+  });
+  // Invite « en lier un » sur une cible sans fichier de lancement : ouvre le sélecteur d'arbre pour CE
+  // dépôt, puis revient sur « Dire bonjour » — la cible fraîchement liée y devient alors ouvrable.
+  const linkRunFile = (t) => {
+    if (!t || !t.path) { toast("Chemin local de la cible inconnu", "err"); return; }
+    runFileModal(t.path, "", async (f) => {
+      if (f) {
+        try {
+          if (t.type === "kernel") await App().SetKernelRunFile(t.path, f);
+          else await App().SetSpokeRunFile(t.path, f);
+          toast("Fichier de lancement défini", "ok");
+        } catch (e) { if (isLocked(e)) return handleLock(); toast(cleanErr(e), "err"); }
+      }
+      aiHelloModal(kind); // réaffiche « Dire bonjour » avec la cible désormais ouvrable
+    }, `Fichier de lancement — ${t.name}`);
+  };
+  document.querySelectorAll(".hc-link").forEach((b) => {
+    b.onclick = (ev) => { ev.stopPropagation(); linkRunFile(targets[+b.dataset.link]); };
   });
 }
 

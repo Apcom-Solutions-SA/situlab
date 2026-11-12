@@ -2,6 +2,32 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/). Versions : [SemVer](https://semver.org/lang/fr/).
 
+## [1.21.3] — 2026-11-12
+
+Version de correction : lisibilité et découvrabilité de la liste des cibles dans « Dire bonjour à mon agent ».
+
+### Ajouté
+
+- **Lier un fichier de lancement directement depuis « Dire bonjour ».** Une cible sans fichier de
+  lancement reste non sélectionnable, mais au lieu d'être simplement grisée elle indique pourquoi
+  (« Aucun fichier de lancement ») et propose « en lier un » : un clic ouvre le sélecteur de fichier
+  pour ce dépôt, et une fois lié la cible devient ouvrable, sans passer par KERNEL/SPOKES ▸ Modifier.
+
+### Corrigé
+
+- **Les dernières cibles ne sont plus masquées sous le pli dans « Dire bonjour ».** Quand on a beaucoup
+  de KERNEL et de spokes, la grille des cibles à ouvrir était plafonnée et le dernier élément pouvait
+  rester caché derrière une barre de défilement peu visible : un spoke bien présent semblait alors
+  absent. La liste indique désormais son nombre total de cibles, un dégradé apparaît en bas tant qu'il
+  reste des cibles plus bas, et la zone affiche davantage de lignes avant de devoir défiler.
+- **Noms de dépôts entièrement lisibles dans « Dire bonjour ».** Les cibles sont présentées une par
+  ligne sur toute la largeur, au lieu de deux colonnes étroites qui tronquaient les noms
+  (« spoke-lab… », « KERNEL-… »).
+- **La promotion n'est plus bloquée par un travail en cours sans rapport.** Promouvoir publie l'arbre
+  d'une version taguée, indépendant de l'état du clone local ; la vérification « cette version est bien
+  publiée sur l'atelier » reste en place. Un clone partagé qui porte des modifications non enregistrées
+  (par exemple un chantier parallèle) n'empêche donc plus de promouvoir une version prête.
+
 ## [1.21.2] — 2026-11-11
 
 Version de correction : fiabilité du verrouillage automatique, lisibilité de la mise en route de l'agent

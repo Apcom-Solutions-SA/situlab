@@ -2920,7 +2920,11 @@ button.cst-core.cst-nav:hover { filter: brightness(1.08); box-shadow: 0 0 0 2px 
 @keyframes helloReveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .hello-tgts-h { display: flex; align-items: baseline; justify-content: space-between; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }
 .hello-count { font-family: ui-monospace, Consolas, monospace; letter-spacing: 0; text-transform: none; color: var(--accent); }
-.hello-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 232px; overflow: auto; padding: 2px; }
+.hello-gridwrap { position: relative; }
+/* Dégradé de défilement (1.21.3) : révélé quand des cibles restent sous le pli de la grille plafonnée. */
+.hello-gridwrap::after { content: ""; position: absolute; left: 2px; right: 2px; bottom: 0; height: 30px; border-radius: 0 0 var(--r-md) var(--r-md); background: linear-gradient(to bottom, transparent, var(--bg-surface)); pointer-events: none; opacity: 0; transition: opacity var(--t-fast); }
+.hello-gridwrap.has-more::after { opacity: 1; }
+.hello-grid { display: grid; grid-template-columns: 1fr; gap: 8px; max-height: 360px; overflow: auto; padding: 2px; }
 .hello-chip {
   position: relative; display: flex; align-items: center; gap: 9px; text-align: left; width: 100%;
   padding: 10px 11px; border: 1px solid var(--border); border-radius: var(--r-md);
@@ -2938,10 +2942,17 @@ button.cst-core.cst-nav:hover { filter: brightness(1.08); box-shadow: 0 0 0 2px 
 .hello-chip .hc-check .ico { width: 11px; height: 11px; stroke-width: 3; }
 .hello-chip.on .hc-check { border-color: var(--hue); background: var(--hue); color: #fff; }
 /* Cible sans fichier d'ouverture (1.21.2) : visible mais grisée et non sélectionnable. */
-.hello-chip.off, .hello-chip:disabled { opacity: .45; cursor: not-allowed; }
+/* Cible sans fichier de lancement (1.21.3) : non sélectionnable, mais lisible et ACTIONNABLE — on ne
+   grise pas toute la puce (l'invite « en lier un » doit rester bien visible), on atténue seulement l'identité. */
+.hello-chip.off { cursor: default; }
 .hello-chip.off:hover { border-color: var(--border); transform: none; }
-.hello-chip.off .hc-k { color: var(--text-faint); background: transparent; letter-spacing: .04em; text-transform: none; font-family: inherit; }
-.hello-chip.off .hc-check { display: none; }
+.hello-chip.off .hc-ic, .hello-chip.off .hc-n { opacity: .55; }
+.hello-chip.off .hc-k { opacity: .8; }
+.hc-nn { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 1px; }
+.hc-nn .hc-n { flex: 0 0 auto; }
+.hc-why { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hc-link { font: inherit; font-size: var(--fs-xs); color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.hc-link:hover { text-decoration: none; }
 .hello-hint { margin: 2px 2px 0; font-size: var(--fs-xs); color: var(--text-faint); line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) {
   .hello-mode, .hello-chip, .hello-mode::before, .hello-chip .hc-check { transition: none; }

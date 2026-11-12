@@ -119,19 +119,12 @@ func (s *Service) ProjectPromote(projectName string, prodIndex int, opts Promote
 	// en retard sur son serveur (le contenu promu ne correspondrait pas à la version nommée).
 	atToken, atGitHub, atBase := s.instanceToken(proj.Atelier.Instance), s.isGitHub(proj.Atelier.Instance), s.instanceBaseURL(proj.Atelier.Instance)
 	_, _ = gitx.Fetch(path, atToken, atGitHub, atBase)
-	st, err := gitx.StatusOf(path)
-	if err != nil {
-		return nil, err
-	}
-	if !st.Clean {
-		return nil, fmt.Errorf("l'atelier a des modifications non enregistrées, enregistrez (ou mettez de côté) avant de promouvoir")
-	}
-	// Invariant de flux : on ne promeut JAMAIS depuis le local directement. La vitrine se nourrit de
-	// l'ATELIER, pas du poste. Si le clone a des commits non encore publiés sur l'atelier, on refuse :
-	// publiez d'abord l'atelier (local → atelier), puis promouvez (atelier → vitrine).
-	if st.Ahead > 0 {
-		return nil, fmt.Errorf("votre clone local a %d commit(s) non publiés sur l'atelier, publiez d'abord l'atelier (local → atelier), puis promouvez (atelier → vitrine)", st.Ahead)
-	}
+	// La promotion publie l'arbre d'un TAG immuable (plus bas : commit-tree sur srcRef^{tree}), jamais
+	// l'arbre de travail ni la branche courante du clone. On ne juge donc PAS la promotion sur l'état du
+	// clone : des modifications non enregistrées, ou une branche en avance, ne la concernent pas — ce
+	// clone est souvent partagé par un chantier parallèle qui y laisse du travail en cours. La seule
+	// intégrité qui compte — ne promouvoir que du contenu réellement publié sur l'atelier — est garantie
+	// par TagPublished ci-dessous (la version/tag doit exister sur la branche distante de l'atelier).
 
 	// 2) Source & version. On publie une version TAGUÉE de l'atelier (le tag est obligatoire : il
 	//    accompagnera la vitrine). La version demandée, ou le dernier tag de la branche d'atelier.
